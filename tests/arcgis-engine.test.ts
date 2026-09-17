@@ -1135,3 +1135,37 @@ it("commits native visibility before an unrelated store sync can overwrite the t
   assert.deepEqual(changes, [false]);
   engine.destroy();
 });
+
+it("refreshes Zarr time slices without replacing the native layer", () => {
+  const { engine, sdk, created } = makeEngine();
+  let refreshes = 0;
+  sdk.layers.BaseTileLayer = {
+    createSubclass(definition: Record<string, unknown>) {
+      class Native extends sdk.layers.WebTileLayer {
+        refresh() {
+          refreshes++;
+        }
+      }
+      Object.assign(Native.prototype, definition);
+      return Native;
+    },
+  } as unknown as ArcgisSdk["layers"]["BaseTileLayer"];
+  const layer = geojsonLayer({
+    type: "zarr",
+    geojson: undefined,
+    source: { url: "https://example.test/data.zarr", variable: "air", selector: { time: 0 } },
+  });
+  engine.syncLayers([layer]);
+  const native = created.at(-1)!;
+  assert.equal(refreshes, 0);
+  const next = { ...layer, source: { ...layer.source, selector: { time: 1 } } };
+  engine.syncLayers([next]);
+  assert.equal(created.at(-1), native);
+  assert.equal(native.destroyed, false);
+  assert.equal(refreshes, 1);
+  engine.syncLayers([next]);
+  assert.equal(refreshes, 1, "unchanged selectors do not refresh");
+  engine.syncLayers([{ ...next, source: { ...next.source, variable: "other" } }]);
+  assert.equal(native.destroyed, true, "changing the variable rebuilds the grid");
+  engine.destroy();
+});

@@ -1196,7 +1196,9 @@ export function compileArcgisLayer(
   if (layer.type === "zarr") {
     if (!layer.source.url || !layer.source.variable)
       throw new Error("Zarr requires a source and variable");
-    return { ...base, kind: "zarr", source: layer, renderSignature: JSON.stringify(layer.source) };
+    // Time slices refresh native tiles in place, retaining metadata and byte caches.
+    const { selector: _selector, ...gridSource } = layer.source;
+    return { ...base, kind: "zarr", source: layer, renderSignature: JSON.stringify(gridSource) };
   }
   if (layer.type === "cog") {
     if (!cogSourceUrl(layer)) throw new Error("The COG layer has no readable source");

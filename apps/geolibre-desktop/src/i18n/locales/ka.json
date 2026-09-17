@@ -970,6 +970,10 @@
     "pmtiles": {
       "errorUrl": "შეიყვანეთ PMTiles-ის სწორი HTTP ან HTTPS URL.",
       "errorMlt": "ArcGIS საჭიროებს MVT ვექტორულ ფილებს და არა MLT-ს."
+    },
+    "zarr": {
+      "errorUrl": "შეიყვანეთ Zarr-ის სწორი HTTP ან HTTPS URL.",
+      "errorColorLimits": "ფერის მაქსიმალური ზღვარი მინიმალურზე მეტი უნდა იყოს."
     }
   },
   "offline": {

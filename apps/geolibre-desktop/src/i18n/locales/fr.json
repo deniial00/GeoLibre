@@ -970,6 +970,10 @@
     "pmtiles": {
       "errorUrl": "Saisissez une URL HTTP ou HTTPS valide de PMTiles.",
       "errorMlt": "ArcGIS nécessite des tuiles vectorielles MVT, et non MLT."
+    },
+    "zarr": {
+      "errorUrl": "Saisissez une URL HTTP ou HTTPS valide de Zarr.",
+      "errorColorLimits": "La limite maximale de couleur doit être supérieure à la limite minimale."
     }
   },
   "offline": {

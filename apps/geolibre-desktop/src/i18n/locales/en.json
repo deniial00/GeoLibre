@@ -973,6 +973,10 @@
     "pmtiles": {
       "errorUrl": "Enter a valid HTTP or HTTPS PMTiles URL.",
       "errorMlt": "ArcGIS requires MVT vector tiles, not MLT."
+    },
+    "zarr": {
+      "errorUrl": "Enter a valid HTTP or HTTPS Zarr URL.",
+      "errorColorLimits": "The maximum color limit must be greater than the minimum."
     }
   },
   "offline": {
