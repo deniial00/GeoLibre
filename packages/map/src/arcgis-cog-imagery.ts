@@ -1,6 +1,10 @@
 import type { GeoLibreLayer } from "@geolibre/core";
 import { cogRenderOptions, cogSourceUrl, rasterState, type CogTilerModule } from "./cog-imagery";
 import type { ArcgisLayer, ArcgisSdk } from "./arcgis-sdk";
+import type { CogSource } from "cog-tiler-wasm";
+
+// A style rebuild reuses the source; weak keys release statistics when its reader is forgotten.
+const sourceStatistics = new WeakMap<CogSource, ReturnType<CogSource["statistics"]>>();
 
 export interface ArcgisRasterLayer extends ArcgisLayer {
   addResolvingPromise(promise: Promise<unknown>): void;
@@ -39,9 +43,16 @@ export function createArcgisCogLayer(
   const prepare = () =>
     (ready ??= (async () => {
       const source = await (await loadTiler()).openCog(url);
-      const statistics = rasterState(layer).rescale
-        ? null
-        : await source.statistics().catch(() => null);
+      let statistics = null;
+      if (!rasterState(layer).rescale) {
+        let pending = sourceStatistics.get(source);
+        if (!pending) {
+          pending = source.statistics();
+          sourceStatistics.set(source, pending);
+          void pending.catch(() => sourceStatistics.delete(source));
+        }
+        statistics = await pending.catch(() => null);
+      }
       return { source, render: cogRenderOptions(layer, statistics) };
     })());
   const CustomLayer = sdk.layers.BaseTileLayer.createSubclass({
