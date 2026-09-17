@@ -105,7 +105,8 @@ override is set aside and the shared basemap is translated instead.
   and the scale bar (metric or imperial, 2D only), plus a globe/Mercator
   toggle and terrain (see [2D and 3D](#2d-and-3d)). Attribution is drawn by the view
   itself (`attributionVisible`); Esri requires it and it cannot be hidden.
-- **Plugins → Layer Control** opens the native ArcGIS layer list. Its visibility
+- **Plugins → Layer Control** toggles the native ArcGIS layer list, enabled by
+  default on the primary map like the shared plugin. Its visibility
   toggles update the project and the sidebar, and sidebar changes update the
   list. Mixed-geometry GeoJSON records have one entry for all their parts.
   Temporary search and selection highlights are omitted. Split panes keep the

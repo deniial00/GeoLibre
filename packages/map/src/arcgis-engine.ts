@@ -887,6 +887,8 @@ export class ArcgisEngine implements MapEngine {
                 if (current?.layers[0] !== first || first.visible === current.plan.visible) return;
                 this.options.onLayerVisibilityChange?.(layer.id, first.visible);
               },
+              // Commit native toggles before another store sync can overwrite them.
+              { sync: true },
             );
           }
         }
