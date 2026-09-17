@@ -190,11 +190,16 @@ if services_file:
         fields = entry.get("fields")
         if not isinstance(fields, dict) or not fields or any(
             not isinstance(value, (str, int, float, bool))
+            or (
+                isinstance(value, int)
+                and not isinstance(value, bool)
+                and abs(value) > 2**53 - 1
+            )
             or (isinstance(value, float) and not math.isfinite(value))
             for value in fields.values()
         ):
             raise SystemExit(
-                prefix + " fields must be a nonempty object of strings, finite numbers, or booleans."
+                prefix + " fields must be a nonempty object of strings, finite numbers within the safe integer range, or booleans."
             )
         service_ids.add(service_id)
         service = {

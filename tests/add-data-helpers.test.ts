@@ -493,16 +493,20 @@ describe("isServiceFormUrl", () => {
   it("accepts same-origin references for reverse-proxied deployments", () => {
     assert.equal(isServiceFormUrl("/geoserver/wms"), true);
     assert.equal(isServiceFormUrl("geoserver/wfs"), true);
-    assert.equal(isServiceFormUrl("//example.com/geoserver/wms"), true);
   });
 
-  it("refuses non-HTTP schemes and blank or malformed values", () => {
+  it("refuses non-HTTP schemes, protocol-relative URLs, and blank values", () => {
     assert.equal(isServiceFormUrl(""), false);
     assert.equal(isServiceFormUrl("   "), false);
     assert.equal(isServiceFormUrl("javascript:alert(1)"), false);
     assert.equal(isServiceFormUrl("data:text/plain,x"), false);
     assert.equal(isServiceFormUrl("ftp://x.test/wms"), false);
     assert.equal(isServiceFormUrl("/geoserver/wms has space"), false);
+    // Protocol-relative URLs share only the scheme, not the origin; the app
+    // must never treat a foreign host as same-origin (and the dev CORS proxy
+    // would skip them too).
+    assert.equal(isServiceFormUrl("//example.com/geoserver/wms"), false);
+    assert.equal(isServiceFormUrl("//attacker.example/wms"), false);
   });
 });
 

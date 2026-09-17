@@ -8,9 +8,11 @@ import { openAddData } from "../open-add-data";
 import { ServiceLibrarySection } from "../ServiceLibrarySection";
 import { serviceFieldString, type ServiceLibraryEntry } from "../service-library";
 import { AddDataError, SampleDataSelect, useAddDataSource } from "../shared";
+import { isTauri } from "../../../../lib/tauri-io";
 import {
   fetchCswGeoJson,
   isCswFeatureCollection,
+  isHttpCswEndpoint,
   searchCsw,
   type CswRecord,
   type CswResource,
@@ -87,7 +89,9 @@ export function CswSource({
     abortSearch();
     setRecords([]);
     setRecordsEndpoint("");
-    if (!isServiceFormUrl(target)) {
+    // Relative endpoints are a web-origin deployment feature: in the desktop
+    // app the native fetch needs an absolute URL, so require http(s) there.
+    if (!isServiceFormUrl(target) || (isTauri() && !isHttpCswEndpoint(target))) {
       source.setError(t("addData.csw.errorUrl"));
       return;
     }

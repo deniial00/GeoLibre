@@ -454,15 +454,17 @@ function charsetFromContentType(contentType: string | null): string | undefined 
 
 /**
  * Whether a service form value is a usable endpoint: an absolute HTTP(S) URL or
- * a same-origin reference (root-/route-relative path, protocol-relative URL).
+ * a same-origin reference (root-relative `/wms` or route-relative `geoserver/wms`).
  * Relative endpoints are how reverse-proxied deployments (e.g. GeoServer behind
- * the app origin) express their services. Only scheme-bearing values that are
- * not HTTP(S) are refused — javascript:, data:, ftp: and friends are never
- * service endpoints.
+ * the app origin) express their services. Protocol-relative URLs (`//host/x`)
+ * are deliberately refused here — they are cross-origin, not same-origin — as
+ * are all scheme-bearing values that are not HTTP(S): javascript:, data:, ftp:
+ * and friends are never service endpoints.
  */
 export function isServiceFormUrl(value: string): boolean {
   const trimmed = value.trim();
   if (!trimmed || /\s/.test(trimmed)) return false;
+  if (trimmed.startsWith("//")) return false;
   if (/^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(trimmed)) {
     return /^https?:\/\//i.test(trimmed);
   }

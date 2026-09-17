@@ -688,7 +688,18 @@ references for the field shapes:
 ```
 
 Each entry is one of the built-in service kinds (`wms`, `wfs`, `wmts`, `xyz`,
-`arcgis`, `csw`) and has exactly the fields that kind's Add Data form saves.
+`arcgis`, `csw`). Startup validates only the structural conditions described
+here; a well-formed entry is published even when its kind-specific fields are
+incomplete, and the Add Data form validates those fields when a user actually
+connects. The fields each kind's form saves are:
+
+- `wms` — `endpoint`, `layers`, `styles`, `format`, `transparent`, `tileSize`, `version`
+- `wfs` — `endpoint`, `version`, `typeName`, `outputFormat`, `srsName`, `maxFeatures`
+- `wmts` — `url`, `tileSize`
+- `xyz` — `url`, `tileSize`, `shortUrl`
+- `arcgis` — `layerType`, `sourceType`, `url`, `itemId`, `portalUrl`, `pageSize`, `maxFeatures`, `sublayers`, `renderingRule`
+- `csw` — `endpoint`, `keyword`
+
 Configured services:
 
 - appear automatically in the Browser and in every Add Data service picker;
@@ -700,7 +711,8 @@ Configured services:
   entries.
 
 Invalid entries — a missing id, an unknown kind, duplicate ids, empty
-fields — **fail the container boot** with an error naming the offending entry,
+fields, or numbers outside JavaScript's safe integer range (2<sup>53</sup>−1)
+— **fail the container boot** with an error naming the offending entry,
 rather than publishing a half-configured library.
 
 !!! warning "Made for public data"

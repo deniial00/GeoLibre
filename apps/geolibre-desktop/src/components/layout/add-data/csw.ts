@@ -106,9 +106,10 @@ export function isHttpCswEndpoint(endpoint: string): boolean {
 
 export function createCswGetRecordsUrl(endpoint: string, keyword: string, maxRecords = 20): string {
   // Relative endpoints (deployment reverse-proxies) resolve against the app's
-  // own origin; outside a browser a fixed base keeps the builder pure so unit
-  // tests can assert the relative-to-origin resolution.
-  const base = typeof window === "undefined" ? "http://localhost/" : window.location.href;
+  // origin — scheme and host, not the current page path, so route-relative
+  // endpoints behave like root-relative ones. Outside a browser a fixed base
+  // keeps the builder pure so unit tests can assert the resolved shape.
+  const base = typeof window === "undefined" ? "http://localhost/" : window.location.origin;
   const url = new URL(endpoint, base);
   const operationKeys = new Set([
     "service",
