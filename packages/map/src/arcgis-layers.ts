@@ -884,31 +884,36 @@ function compileGeoJson(
     if (!feature.geometry) return;
     if (filter.test && !filter.test(feature, zoom)) return;
     const id = String(feature.id ?? index);
-    const symbol = resolver.resolve(feature, zoom);
+    let symbol: ReturnType<typeof resolver.resolve> | undefined;
     const text = label ? label.read(feature, zoom) : "";
     for (const geometry of explodePoints(feature.geometry)) {
       const kind = GEOMETRY_KIND[geometry.type];
       if (!kind) continue;
       const extruded = extrusion !== null && kind === "polygon";
-      const shape = extruded ? extrusion.symbol(feature, zoom) : symbolForKind(kind, symbol);
-      const json = kind === "point" ? pointMarkerSymbol(style, feature, symbol, shape) : shape;
-      const key = JSON.stringify(json);
       let part = parts.get(kind);
       if (!part) {
         part = { features: [], symbols: new Map() };
         parts.set(kind, part);
       }
-      let entry = part.symbols.get(key);
-      if (!entry) {
-        entry = { id: `s${part.symbols.size}`, symbol: json };
-        part.symbols.set(key, entry);
+      let symbolId = "heatmap";
+      if (!(kind === "point" && style.pointRenderer === "heatmap")) {
+        symbol ??= resolver.resolve(feature, zoom);
+        const shape = extruded ? extrusion.symbol(feature, zoom) : symbolForKind(kind, symbol);
+        const json = kind === "point" ? pointMarkerSymbol(style, feature, symbol, shape) : shape;
+        const key = JSON.stringify(json);
+        let entry = part.symbols.get(key);
+        if (!entry) {
+          entry = { id: `s${part.symbols.size}`, symbol: json };
+          part.symbols.set(key, entry);
+        }
+        symbolId = entry.id;
       }
       part.features.push({
         type: "Feature",
         geometry,
         properties: {
           [ARCGIS_ID_FIELD]: id,
-          [ARCGIS_SYMBOL_FIELD]: entry.id,
+          [ARCGIS_SYMBOL_FIELD]: symbolId,
           [ARCGIS_LABEL_FIELD]: text,
           ...(kind === "point" && style.pointRenderer === "heatmap"
             ? { [ARCGIS_WEIGHT_FIELD]: heatmapWeight(feature, style) }
@@ -979,6 +984,8 @@ function compileGeoJson(
                   clusterRadius: `${style.clusterRadius}px`,
                   clusterMinSize: "32px",
                   clusterMaxSize: "60px",
+                  // MapLibre clusters through the inclusive integer clusterMaxZoom;
+                  // the native scale cutoff is the start of the next zoom level.
                   maxScale: zoomToScale(style.clusterMaxZoom + 1),
                   labelingInfo: [
                     {
