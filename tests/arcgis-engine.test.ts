@@ -1043,3 +1043,52 @@ describe("ArcgisEngine 3D scenes", () => {
     }
   });
 });
+
+describe("ArcgisEngine native style plans", () => {
+  it("hands heatmaps, clusters and elevated selections to the SDK", () => {
+    const { engine, created, rawView } = makeEngine();
+    const base = geojsonLayer({
+      geojson: {
+        type: "FeatureCollection",
+        features: [
+          {
+            type: "Feature",
+            id: "high",
+            properties: {},
+            geometry: { type: "Point", coordinates: [10, 20, 100] },
+          },
+        ],
+      },
+    });
+    engine.syncLayers([{ ...base, style: { ...base.style, pointRenderer: "heatmap" } }]);
+    assert.equal((created.at(-1)!.props.renderer as { type: string }).type, "heatmap");
+    assert.ok(
+      (created.at(-1)!.props.fields as { name: string }[]).some(
+        (field) => field.name === "gl__weight",
+      ),
+    );
+    engine.syncLayers([{ ...base, style: { ...base.style, pointRenderer: "cluster" } }]);
+    assert.equal((created.at(-1)!.props.featureReduction as { type: string }).type, "cluster");
+    rawView.type = "3d";
+    const elevated = {
+      ...base,
+      style: {
+        ...base.style,
+        elevation3dEnabled: true,
+        elevation3dVerticalScale: 2,
+        elevation3dOffset: 30,
+      },
+    };
+    engine.syncLayers([elevated]);
+    assert.equal(created.at(-1)!.props.hasZ, true);
+    engine.highlightFeature(elevated, "high");
+    const highlight = created.at(-1)!;
+    assert.deepEqual(highlight.props.elevationInfo, { mode: "absolute-height" });
+    const graphic = (
+      highlight.props.graphics as { props?: unknown; geometry: { z: number; hasZ: boolean } }[]
+    )[0];
+    assert.equal(graphic.geometry.z, 230);
+    assert.equal(graphic.geometry.hasZ, true);
+    engine.destroy();
+  });
+});

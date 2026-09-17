@@ -788,3 +788,103 @@ describe("compileArcgisLayer extrusion", () => {
     assert.equal(part.features?.features[0].properties?.[ARCGIS_HEIGHT_FIELD], undefined);
   });
 });
+
+describe("ArcGIS native point styles and altitude", () => {
+  const points = geojsonLayer({
+    geojson: {
+      type: "FeatureCollection",
+      features: [
+        {
+          type: "Feature",
+          id: "a",
+          properties: { weight: "3" },
+          geometry: { type: "Point", coordinates: [10, 20, 100] },
+        },
+        {
+          type: "Feature",
+          id: "b",
+          properties: { weight: -2 },
+          geometry: { type: "Point", coordinates: [11, 21, 200] },
+        },
+      ],
+    },
+  });
+  it("bakes weighted heatmaps with the shared ramp, including zero intensity", () => {
+    const layer = {
+      ...points,
+      style: {
+        ...points.style,
+        pointRenderer: "heatmap" as const,
+        heatmapWeightProperty: "weight",
+        heatmapIntensity: 2,
+      },
+    };
+    const plan = compileArcgisLayer(layer, { scene: true });
+    assert.equal(plan.kind, "geojson");
+    if (plan.kind !== "geojson") return;
+    const part = plan.parts[0];
+    assert.equal(part.renderer.type, "heatmap");
+    assert.deepEqual(
+      part.features?.features.map((f) => f.properties?.gl__weight),
+      [6, 0],
+    );
+    assert.equal(part.markerStyle, undefined);
+    if (part.renderer.type !== "heatmap") return;
+    assert.equal(part.renderer.colorStops[0].color[3], 0);
+    assert.equal(part.renderer.colorStops.at(-1)?.ratio, 1);
+    const zero = compileArcgisLayer({ ...layer, style: { ...layer.style, heatmapIntensity: 0 } });
+    if (zero.kind === "geojson")
+      assert.ok(zero.parts[0].features?.features.every((f) => f.properties?.gl__weight === 0));
+  });
+  it("clusters in 2D and restores individual symbols in scenes", () => {
+    const layer = {
+      ...points,
+      style: {
+        ...points.style,
+        pointRenderer: "cluster" as const,
+        clusterRadius: 72,
+        clusterMaxZoom: 9,
+      },
+    };
+    const flat = compileArcgisLayer(layer);
+    const scene = compileArcgisLayer(layer, { scene: true });
+    if (flat.kind !== "geojson" || scene.kind !== "geojson") throw new Error("Expected GeoJSON");
+    assert.equal(flat.parts[0].featureReduction?.clusterRadius, "72px");
+    assert.equal(flat.parts[0].featureReduction?.maxScale, zoomToScale(10));
+    assert.equal(scene.parts[0].featureReduction, undefined);
+  });
+  it("applies absolute feature Z, scale and offset without changing source coordinates", () => {
+    const layer = {
+      ...points,
+      style: {
+        ...points.style,
+        elevation3dEnabled: true,
+        elevation3dVerticalScale: 2,
+        elevation3dOffset: 30,
+      },
+    };
+    const scene = compileArcgisLayer(layer, { scene: true });
+    const flat = compileArcgisLayer(layer);
+    if (scene.kind !== "geojson" || flat.kind !== "geojson") throw new Error("Expected GeoJSON");
+    assert.equal(scene.parts[0].hasZ, true);
+    assert.deepEqual(scene.parts[0].elevationInfo, { mode: "absolute-height", offset: 0 });
+    assert.deepEqual(scene.parts[0].features?.features[0].geometry, {
+      type: "Point",
+      coordinates: [10, 20, 230],
+    });
+    assert.deepEqual(points.geojson?.features[0].geometry, {
+      type: "Point",
+      coordinates: [10, 20, 100],
+    });
+    assert.equal(flat.parts[0].hasZ, undefined);
+  });
+  it("only bakes fill patterns for flat polygon parts", () => {
+    const layer = { ...mixed, style: { ...mixed.style, fillPattern: "hatch" as const } };
+    const flat = compileArcgisLayer(layer);
+    const scene = compileArcgisLayer(layer, { scene: true });
+    if (flat.kind !== "geojson" || scene.kind !== "geojson") throw new Error("Expected GeoJSON");
+    assert.equal(flat.parts[0].patternStyle?.fillPattern, "hatch");
+    assert.ok(flat.parts.slice(1).every((part) => !part.patternStyle));
+    assert.ok(scene.parts.every((part) => !part.patternStyle));
+  });
+});

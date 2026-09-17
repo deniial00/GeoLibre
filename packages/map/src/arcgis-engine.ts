@@ -1,4 +1,5 @@
 import { SEARCH_HIGHLIGHT_COLOR } from "./map-engine";
+import { renderFillPatternCanvas } from "./fill-patterns";
 import type * as maplibregl from "maplibre-gl";
 import type { FeatureCollection, Geometry, Point, Polygon, Position } from "geojson";
 import {
@@ -28,6 +29,7 @@ import {
   ARCGIS_ID_FIELD,
   ARCGIS_LABEL_FIELD,
   ARCGIS_SYMBOL_FIELD,
+  ARCGIS_WEIGHT_FIELD,
   compileArcgisLayer,
   featurePassesFilters,
   geometryContainsPoint,
@@ -173,6 +175,7 @@ const ARCGIS_GEOJSON_FIELDS = [
   { name: ARCGIS_SYMBOL_FIELD, type: "string", length: 32 },
   { name: ARCGIS_LABEL_FIELD, type: "string", length: 4000 },
   { name: ARCGIS_HEIGHT_FIELD, type: "double" },
+  { name: ARCGIS_WEIGHT_FIELD, type: "double" },
 ];
 
 /**
@@ -192,6 +195,7 @@ function mapRendererSymbols(
   renderer: ArcgisRendererJson,
   map: (symbol: ArcgisSymbolJson | unknown) => ArcgisSymbolJson,
 ): ArcgisRendererJson {
+  if (renderer.type === "heatmap") return renderer;
   const visualVariables = renderer.visualVariables
     ? { visualVariables: renderer.visualVariables }
     : {};
@@ -301,6 +305,7 @@ export function geojsonToArcgisGeometry(geometry: Geometry): ArcgisGeometryJson 
         type: "point",
         x: geometry.coordinates[0],
         y: geometry.coordinates[1],
+        ...(geometry.coordinates.length > 2 ? { z: geometry.coordinates[2] } : {}),
         spatialReference: sr,
       };
     case "MultiPoint":
@@ -971,11 +976,14 @@ export class ArcgisEngine implements MapEngine {
             fields: part.url ? undefined : ARCGIS_GEOJSON_FIELDS,
             ...(part.labelingInfo ? { labelingInfo: part.labelingInfo, labelsVisible: true } : {}),
             ...(part.elevationInfo ? { elevationInfo: part.elevationInfo } : {}),
+            ...(part.hasZ ? { hasZ: true } : {}),
+            ...(part.featureReduction ? { featureReduction: part.featureReduction } : {}),
             // The SDK's popup is not used; identify goes through hitTest.
             popupEnabled: false,
             legendEnabled: false,
           });
           if (part.markerStyle) void this.bakeMarkers(native, part);
+          if (part.patternStyle) void this.bakePattern(native, part);
           return native;
         });
       case "web-tile":
@@ -1399,13 +1407,50 @@ export class ArcgisEngine implements MapEngine {
     return metersPerPixel / (111320 * cos);
   }
   /**
-   * Replace a part's marker placeholders with picture symbols baked from the
-   * Style panel's marker (shape or custom SVG, tinted per class) once the
-   * sprites exist; until then the layer draws the circle fallback.
+   * Rasterize the shared pattern tile into native picture fills. Until the
+   * image resolves, the layer draws its ordinary solid polygon symbols.
    */
+  private async bakePattern(native: ArcgisLayer, part: ArcgisGeoJsonPart): Promise<void> {
+    if (!part.patternStyle || typeof document === "undefined") return;
+    try {
+      const tile = await renderFillPatternCanvas(part.patternStyle);
+      if (!tile || native.destroyed) return;
+      // PictureFillSymbol ignores its color property, including alpha. Bake
+      // each class's fill opacity into the image; keep its outline independent.
+      const urls = new Map<number, string>();
+      native.renderer = mapRendererSymbols(part.renderer, (symbol) => {
+        const fill = symbol as ArcgisSymbolJson;
+        if (fill.type !== "simple-fill") return fill;
+        const alpha = Array.isArray(fill.color) ? Number(fill.color[3] ?? 1) : 1;
+        let url = urls.get(alpha);
+        if (!url) {
+          const canvas = document.createElement("canvas");
+          canvas.width = tile.canvas.width;
+          canvas.height = tile.canvas.height;
+          const context = canvas.getContext("2d");
+          if (!context) return fill;
+          context.globalAlpha = Math.max(0, Math.min(1, alpha));
+          context.drawImage(tile.canvas, 0, 0);
+          url = canvas.toDataURL("image/png");
+          urls.set(alpha, url);
+        }
+        return {
+          type: "picture-fill",
+          url,
+          width: `${tile.canvas.width / tile.pixelRatio}px`,
+          height: `${tile.canvas.height / tile.pixelRatio}px`,
+          outline: fill.outline,
+        };
+      });
+    } catch {
+      // Invalid/unrenderable SVG retains the ordinary fill, as on the globe.
+    }
+  }
+
+  /** Replace marker placeholders with the shared shape/SVG sprites. */
   private async bakeMarkers(native: ArcgisLayer, part: ArcgisGeoJsonPart): Promise<void> {
     const style = part.markerStyle;
-    if (!style || typeof document === "undefined") return;
+    if (!style || part.renderer.type === "heatmap" || typeof document === "undefined") return;
     const symbols =
       part.renderer.type === "simple"
         ? [part.renderer.symbol]
@@ -1454,11 +1499,23 @@ export class ArcgisEngine implements MapEngine {
     const ids = new Set(Array.isArray(featureId) ? featureId : [featureId]);
     const selected = layer.geojson.features.filter((f, i) => ids.has(String(f.id ?? i)));
     if (!selected.length) return;
+    const plan = this.natives.get(layer.id)?.plan;
+    const elevated = plan?.kind === "geojson" && plan.parts.some((part) => part.hasZ);
+    const geometries =
+      elevated && plan.kind === "geojson"
+        ? plan.parts.flatMap(
+            (part) =>
+              part.features?.features
+                .filter((feature) => ids.has(String(feature.properties?.[ARCGIS_ID_FIELD])))
+                .map((feature) => feature.geometry) ?? [],
+          )
+        : selected.map((feature) => feature.geometry);
     const graphics: ArcgisGraphic[] = [];
-    for (const feature of selected) {
-      if (!feature.geometry) continue;
-      const geometry = geojsonToArcgisGeometry(feature.geometry);
+    for (const sourceGeometry of geometries) {
+      if (!sourceGeometry) continue;
+      const geometry = geojsonToArcgisGeometry(sourceGeometry);
       if (!geometry) continue;
+      if (elevated) geometry.hasZ = true;
       const isPoint = geometry.type === "point" || geometry.type === "multipoint";
       graphics.push(
         new this.sdk.Graphic({
@@ -1484,6 +1541,7 @@ export class ArcgisEngine implements MapEngine {
     this.highlight = new this.sdk.layers.GraphicsLayer({
       title: "Selection",
       listMode: "hide",
+      ...(elevated ? { elevationInfo: { mode: "absolute-height" } } : {}),
       graphics,
     });
     map.add(this.highlight);

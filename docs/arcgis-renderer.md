@@ -100,6 +100,12 @@ override is set aside and the shared basemap is translated instead.
 - **Search places** flies to places and coordinates with a temporary marker,
   and frames H3 cells with a filled outline. Clearing the search removes its
   highlight without removing a selection made elsewhere.
+- Point heatmaps use the shared color ramp, radius, intensity and optional
+  weight field in both 2D and 3D. Esri's density kernel differs from MapLibre's,
+  so the visual density can differ; SceneView caps the radius at 112 points.
+  Clustering uses native count labels and the configured radius and maximum
+  zoom in 2D. Built-in and custom SVG fill patterns also render in 2D, with
+  per-feature fill opacity and independent outlines.
 - The built-in controls the **Controls** menu governs, as the SDK's own widgets:
   fullscreen, compass (resets rotation), zoom (navigation), locate (geolocate)
   and the scale bar (metric or imperial, 2D only), plus a globe/Mercator
@@ -157,6 +163,9 @@ In a scene:
   the Controls menu cannot show it in a scene. The project's minimum and
   maximum zoom still clamp camera moves the app makes, but not the user's own
   navigation.
+- **3D (Z values)** places vector coordinates at their absolute altitude, with
+  the configured vertical scale and offset. Selection highlights use the same
+  transformed coordinates. Source data stays unchanged.
 
 ## Adding data
 
@@ -170,16 +179,17 @@ drop the file instead.
 ## Not supported yet
 
 - Custom terrain sources (a COG DEM chosen in **Controls → Terrain exaggeration**): terrain is
-  always Esri's World Elevation. Features with their own Z values
-  (the Style panel's **3D (Z values)** mode) are not placed at their altitude.
+  always Esri's World Elevation.
 - deck.gl overlays (Deck.gl Layers, 3D Models, DuckDB query layers, 3D Tiles,
   LiDAR), COGs, Zarr, NetCDF, PMTiles and MBTiles archives, Gaussian splats and
   Cesium-only sources. **Add Data** greys these out while ArcGIS is the primary
   renderer, and the layer panels badge such layers **No ArcGIS**.
 - Plugin controls that call MapLibre APIs cannot mount on ArcGIS.
   Layer Control is the exception: it delegates to ArcGIS's native layer list.
-- Video overlays, heatmap and cluster point renderers (points draw as circles)
-  and fill patterns. Markers (built-in shapes, custom SVG, KML icons) do draw,
+- Video overlays. The SDK does not support clustering or picture-fill patterns
+  in SceneView: scenes retain individual point symbols and solid polygon fills.
+  Heatmap labels are also unsupported in scenes.
+  Markers (built-in shapes, custom SVG, KML icons) do draw,
   as picture symbols baked from the same sprites MapLibre uses.
 
 ## Testing
