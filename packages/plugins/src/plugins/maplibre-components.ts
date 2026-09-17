@@ -12,6 +12,7 @@ import {
 } from "@geolibre/core";
 import {
   createPMTilesArchiveLayers,
+  readRemotePMTilesInfo,
   pmtilesIdsForSourceLayers,
   type PMTilesStoreLayerOptions,
 } from "@geolibre/map/pmtiles-layer";
@@ -1817,6 +1818,26 @@ export async function addPMTilesLayerFromUrl(
   url: string,
   options: { fit?: boolean } = {},
 ): Promise<boolean> {
+  if (app.getMapRenderer?.() === "arcgis") {
+    const info = await readRemotePMTilesInfo(url);
+    if (info.encoding === "mlt") throw new Error("ArcGIS requires MVT vector tiles, not MLT");
+    const name = decodeURIComponent(new URL(url).pathname.split("/").pop() || "PMTiles");
+    const layers = createPMTilesArchiveLayers({ id: crypto.randomUUID(), name, url, ...info }).map(
+      (layer) => ({
+        ...layer,
+        source: {
+          ...layer.source,
+          bounds: info.bounds,
+          minzoom: info.minZoom,
+          maxzoom: info.maxZoom,
+        },
+        metadata: { ...layer.metadata, bounds: info.bounds },
+      }),
+    );
+    addPMTilesArchive(layers, name);
+    if (options.fit !== false && info.bounds) app.fitBounds?.(info.bounds);
+    return true;
+  }
   const { PMTilesLayerControl: PMTilesLayerControlClass } = await getComponentsConstructors();
 
   pmtilesControl ??= createPMTilesControl(PMTilesLayerControlClass, app);

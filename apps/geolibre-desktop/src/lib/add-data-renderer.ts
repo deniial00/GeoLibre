@@ -15,10 +15,9 @@ const MAPBOX_UNSUPPORTED_SOURCES = new Set(["mbtiles", "splatting", "cesium-ion"
 // (see packages/map/src/arcgis-layers.ts for what it does draw). Ids are the
 // catalog's (`DATA_SOURCE_CATALOG` in ui-profile.ts).
 const ARCGIS_UNSUPPORTED_SOURCES = new Set([
-  ...MAPBOX_UNSUPPORTED_SOURCES,
+  ...[...MAPBOX_UNSUPPORTED_SOURCES].filter((id) => id !== "mbtiles"),
   "vector",
   "raster",
-  "pmtiles",
   "zarr",
   "netcdf",
   "lidar",

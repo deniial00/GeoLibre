@@ -97,8 +97,8 @@ describe("ArcGIS project and plugin boundaries", () => {
     assert.equal(MAPLIBRE_CAPABILITIES.domControls, true);
   });
   it("greys out the Add Data sources the engine has no adapter for", () => {
-    assert.equal(supportsAddDataRenderer("mbtiles", "arcgis"), false);
-    assert.equal(supportsAddDataRenderer("pmtiles", "arcgis"), false);
+    assert.equal(supportsAddDataRenderer("mbtiles", "arcgis"), true);
+    assert.equal(supportsAddDataRenderer("pmtiles", "arcgis"), true);
     assert.equal(supportsAddDataRenderer("deckgl-viz", "arcgis"), true);
     assert.equal(supportsAddDataRenderer("gltf-model", "arcgis"), true);
     // The Vector and Raster panels are MapLibre controls with nowhere to mount.

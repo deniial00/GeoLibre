@@ -16,6 +16,7 @@ export type AddDataKind =
   | "cad"
   | "gdb"
   | "photos"
+  | "pmtiles"
   | "mbtiles"
   | "polyline"
   | "arcgis"

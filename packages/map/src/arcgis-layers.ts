@@ -159,6 +159,15 @@ interface ArcgisPlanBase {
 
 export type ArcgisLayerPlan = ArcgisPlanBase &
   (
+    | {
+        kind: "archive";
+        format: "pmtiles" | "protocol";
+        url: string;
+        tileType: "vector" | "raster";
+        sourceId: string;
+        styleLayers: unknown[];
+        tileOptions: Record<string, unknown>;
+      }
     | { kind: "external-deck" }
     | { kind: "geojson"; parts: ArcgisGeoJsonPart[] }
     | { kind: "cog"; source: GeoLibreLayer; renderSignature: string }
@@ -1239,8 +1248,47 @@ export function compileArcgisLayer(
         : "map-image";
     return { ...base, kind, url: serviceUrl };
   }
-  if (layer.type === "pmtiles" || layer.type === "mbtiles")
-    throw new Error(`${layer.type} archives are not supported by the ArcGIS renderer`);
+  if (layer.type === "pmtiles" || layer.type === "mbtiles") {
+    const archiveUrl = layer.type === "pmtiles" ? url : tiles[0];
+    if (!archiveUrl) throw new Error("Tile archive has no readable source");
+    if (layer.source.encoding === "mlt")
+      throw new Error("ArcGIS requires MVT vector tiles, not MLT");
+    const tileType =
+      layer.source.type === "raster" || layer.source.tileType === "raster" ? "raster" : "vector";
+    let styleLayers: unknown[] = [];
+    let sourceId = layer.id;
+    const tileOptions = {
+      ...(typeof layer.source.minzoom === "number" ? { minzoom: layer.source.minzoom } : {}),
+      ...(typeof layer.source.maxzoom === "number" ? { maxzoom: layer.source.maxzoom } : {}),
+      ...(base.bounds ? { bounds: base.bounds } : {}),
+    };
+    if (tileType === "vector") {
+      const vector = compileMapboxLayer({
+        ...layer,
+        type: "vector-tiles",
+        opacity: 1,
+        visible: true,
+        source: {
+          ...layer.source,
+          type: "vector",
+          url: undefined,
+          tiles: ["https://geolibre.invalid/{z}/{x}/{y}.pbf"],
+        },
+      });
+      sourceId = vector.sourceId;
+      styleLayers = vector.layers.filter((spec) => spec.type !== "symbol");
+    }
+    return {
+      ...base,
+      kind: "archive",
+      format: layer.type === "pmtiles" ? "pmtiles" : "protocol",
+      url: archiveUrl,
+      tileType,
+      sourceId,
+      styleLayers,
+      tileOptions,
+    };
+  }
   if (layer.type === "wms" && tiles.length) {
     const [template] = proxyWmsTiles(layer.type, tiles);
     return { ...base, kind: "wms", ...wmsLayerFromTemplate(template) };

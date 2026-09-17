@@ -651,10 +651,10 @@ describe("ArcgisEngine layer sync", () => {
       name: "Archive",
       geojson: undefined,
       type: "pmtiles",
-      source: { url: "https://x/a.pmtiles" },
+      source: { url: "https://x/a.pmtiles", encoding: "mlt" },
     });
     engine.syncLayers([archive]);
-    assert.match(engine.getRenderStatus().errors.join(), /Archive: pmtiles archives/);
+    assert.match(engine.getRenderStatus().errors.join(), /Archive: ArcGIS requires MVT/);
     engine.syncLayers([{ ...archive, visible: false }]);
     assert.deepEqual(engine.getRenderStatus().errors, []);
   });

@@ -509,12 +509,16 @@ describe("ArcGIS raster, service and media compilation", () => {
       ]);
     }
   });
-  it("rejects archives, custom protocols and plugin-owned mirrors", () => {
+  it("rejects MLT archives, custom protocols and plugin-owned mirrors", () => {
     const base = geojsonLayer({ geojson: undefined });
     assert.throws(
       () =>
-        compileArcgisLayer({ ...base, type: "pmtiles", source: { url: "https://x/a.pmtiles" } }),
-      /not supported/,
+        compileArcgisLayer({
+          ...base,
+          type: "pmtiles",
+          source: { url: "https://x/a.pmtiles", encoding: "mlt" },
+        }),
+      /MVT/,
     );
     assert.throws(
       () =>

@@ -1410,7 +1410,10 @@ export function TopToolbar({
       else toggle(STAC_PLUGIN_ID, appApi);
     },
     flatGeobuf: () => openFlatGeobufAddVectorLayerPanel(appApi),
-    pmtiles: () => openPMTilesLayerPanel(appApi),
+    pmtiles: () =>
+      appApi.getMapRenderer?.() === "arcgis"
+        ? openAddDataKind("pmtiles")
+        : openPMTilesLayerPanel(appApi),
     zarr: () => openZarrLayerPanel(appApi),
     netcdf: () => setNetcdfDialogOpen(true),
     lidar: () => openLidarLayerPanel(appApi),

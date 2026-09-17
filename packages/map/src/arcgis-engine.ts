@@ -1,3 +1,4 @@
+import { createArcgisArchiveLayer } from "./arcgis-tile-archives";
 import { createArcgisCogLayer } from "./arcgis-cog-imagery";
 import { SEARCH_HIGHLIGHT_COLOR } from "./map-engine";
 import { renderFillPatternCanvas } from "./fill-patterns";
@@ -159,6 +160,7 @@ export function arcgisSceneMode(
 
 /** The SDK's layer instances a plan produced, plus the blob URLs backing them. */
 interface NativePlan {
+  disposers: (() => void)[];
   plan: ArcgisLayerPlan;
   /** Serialized plan without the features, for cheap change detection. */
   signature: string;
@@ -897,8 +899,9 @@ export class ArcgisEngine implements MapEngine {
           entry = undefined;
         }
         if (!entry) {
-          entry = { plan, signature, layers: [], urls: [], geojson: layer.geojson };
-          for (const native of this.instantiate(plan, entry.urls)) {
+          entry = { plan, signature, layers: [], urls: [], disposers: [], geojson: layer.geojson };
+          this.natives.set(layer.id, entry);
+          for (const native of this.instantiate(plan, entry.urls, entry.disposers)) {
             // A mixed-geometry GeoJSON record has several native layers but
             // one shared visibility toggle. Service sublayers stay managed by
             // their source record rather than exposing unsaved native changes.
@@ -906,7 +909,6 @@ export class ArcgisEngine implements MapEngine {
             entry.layers.push(native);
             map.add(native);
           }
-          this.natives.set(layer.id, entry);
           const first = entry.layers[0];
           if (first && this.options.onLayerVisibilityChange) {
             entry.visibilityHandle = this.sdk.reactiveUtils.watch(
@@ -950,7 +952,11 @@ export class ArcgisEngine implements MapEngine {
       map.layers.reorder(this.highlight, map.layers.length - 1);
   }
   /** Build the SDK layers for a plan, recording blob URLs to revoke on removal. */
-  private instantiate(plan: ArcgisLayerPlan, urls: string[]): ArcgisLayer[] {
+  private instantiate(
+    plan: ArcgisLayerPlan,
+    urls: string[],
+    disposers: (() => void)[],
+  ): ArcgisLayer[] {
     const { layers, media } = this.sdk;
     const common = {
       title: plan.title,
@@ -971,6 +977,11 @@ export class ArcgisEngine implements MapEngine {
         }
       : {};
     switch (plan.kind) {
+      case "archive": {
+        const bridge = createArcgisArchiveLayer(this.sdk, plan, common);
+        disposers.push(bridge.dispose);
+        return [bridge.layer];
+      }
       case "external-deck":
         return [];
       case "cog":
@@ -1113,6 +1124,7 @@ export class ArcgisEngine implements MapEngine {
         if (this.map?.layers.includes(native)) this.map.remove(native);
         native.destroy();
       }
+      for (const dispose of entry.disposers) dispose();
       for (const url of entry.urls) URL.revokeObjectURL(url);
     }
     this.natives.delete(id);

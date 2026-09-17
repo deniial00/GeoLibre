@@ -204,10 +204,24 @@ Global scenes and secondary panes do not host the overlay; the menus and layer
 badges reflect that restriction. Switch back to a flat map or local scene to
 restore the layers.
 
+## Tile archives
+
+**Add Data → PMTiles** loads remote vector (MVT) and raster archives directly
+through the shared PMTiles reader. Native vector tiles retain polygon, line and
+point styles; raster archives use native tiled imagery and resample their last
+native level when zooming in. Existing in-memory archives in the shared registry
+also work. **Add Data → MBTiles** uses the desktop file reader for both vector
+and raster tiles. MBTiles still requires the desktop app.
+
+The vector adapter owns a request interceptor per layer and removes it when the
+layer is replaced or removed. Tiles are read on demand, including cancellation;
+synthetic tile addresses never go to the network. MLT encoding and archive text
+labels are not supported. The adapter reads PMTiles zoom limits from the archive
+header, including for older projects that omit those limits.
+
 ## Not supported yet
 
-- DuckDB query layers, 3D Tiles, LiDAR, Zarr, NetCDF, PMTiles and MBTiles
-  archives, Gaussian splats and
+- DuckDB query layers, 3D Tiles, LiDAR, Zarr, NetCDF, Gaussian splats and
   Cesium-only sources. **Add Data** greys these out while ArcGIS is the primary
   renderer, and the layer panels badge such layers **No ArcGIS**.
 - Plugin controls that call MapLibre APIs cannot mount on ArcGIS.
