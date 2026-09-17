@@ -1,3 +1,4 @@
+import { createArcgisCogLayer } from "./arcgis-cog-imagery";
 import { SEARCH_HIGHLIGHT_COLOR } from "./map-engine";
 import { renderFillPatternCanvas } from "./fill-patterns";
 import { registerCogDemSource, type CogDemSourceRegistration } from "./cog-dem-source";
@@ -957,6 +958,8 @@ export class ArcgisEngine implements MapEngine {
         }
       : {};
     switch (plan.kind) {
+      case "cog":
+        return [createArcgisCogLayer(this.sdk, plan.source, common)];
       case "geojson":
         return plan.parts.map((part) => {
           let url = part.url;
@@ -2052,6 +2055,10 @@ function stripSyntheticFields(attributes: Record<string, unknown>): Record<strin
  */
 function planSignature(plan: ArcgisLayerPlan, layer: GeoLibreLayer): string {
   const { visible: _v, opacity: _o, minScale: _mn, maxScale: _mx, ...rest } = plan;
+  if (rest.kind === "cog") {
+    const { source: _source, ...signature } = rest;
+    return JSON.stringify(signature);
+  }
   if (rest.kind === "geojson") {
     return JSON.stringify({
       ...rest,

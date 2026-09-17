@@ -398,6 +398,11 @@ export interface ArcgisSdk {
   layers: {
     GeoJSONLayer: ArcgisClass<ArcgisLayer>;
     GraphicsLayer: ArcgisClass<ArcgisLayer>;
+    BaseTileLayer: ArcgisClass<import("./arcgis-cog-imagery").ArcgisRasterLayer> & {
+      createSubclass(
+        definition: Record<string, unknown>,
+      ): ArcgisClass<import("./arcgis-cog-imagery").ArcgisRasterLayer>;
+    };
     WebTileLayer: ArcgisClass<ArcgisLayer>;
     WMSLayer: ArcgisClass<ArcgisLayer>;
     WMTSLayer: ArcgisClass<ArcgisLayer>;
@@ -446,6 +451,7 @@ const SDK_MODULES = {
   Extent: "geometry/Extent",
   GeoJSONLayer: "layers/GeoJSONLayer",
   GraphicsLayer: "layers/GraphicsLayer",
+  BaseTileLayer: "layers/BaseTileLayer",
   WebTileLayer: "layers/WebTileLayer",
   WMSLayer: "layers/WMSLayer",
   WMTSLayer: "layers/WMTSLayer",
@@ -504,6 +510,7 @@ export function assembleArcgisSdk(modules: Record<ModuleKey, Record<string, unkn
     layers: {
       GeoJSONLayer: member("GeoJSONLayer"),
       GraphicsLayer: member("GraphicsLayer"),
+      BaseTileLayer: member("BaseTileLayer"),
       WebTileLayer: member("WebTileLayer"),
       WMSLayer: member("WMSLayer"),
       WMTSLayer: member("WMTSLayer"),

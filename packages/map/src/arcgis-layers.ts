@@ -1,3 +1,4 @@
+import { cogSourceUrl, cogRenderSignature } from "./cog-imagery";
 import {
   compileLayerFilters,
   DEFAULT_LAYER_STYLE,
@@ -159,6 +160,7 @@ interface ArcgisPlanBase {
 export type ArcgisLayerPlan = ArcgisPlanBase &
   (
     | { kind: "geojson"; parts: ArcgisGeoJsonPart[] }
+    | { kind: "cog"; source: GeoLibreLayer; renderSignature: string }
     | {
         kind: "web-tile";
         urlTemplate: string;
@@ -1106,7 +1108,7 @@ function bounds(layer: GeoLibreLayer): [number, number, number, number] | undefi
  */
 export function isArcgisPluginLayer(layer: GeoLibreLayer): boolean {
   if (layer.metadata.externalNativeLayer !== true) return false;
-  if (layer.geojson) return false;
+  if (layer.geojson || (layer.type === "cog" && cogSourceUrl(layer))) return false;
   const { url, urls, tiles, data } = layer.source as {
     url?: unknown;
     urls?: unknown;
@@ -1166,6 +1168,10 @@ export function compileArcgisLayer(
     ...(bounds(layer) ? { bounds: bounds(layer) } : {}),
     zoomDependent: false,
   };
+  if (layer.type === "cog") {
+    if (!cogSourceUrl(layer)) throw new Error("The COG layer has no readable source");
+    return { ...base, kind: "cog", source: layer, renderSignature: cogRenderSignature(layer) };
+  }
   // Vector tiles from an ArcGIS vector tile service carry a resolved style;
   // the SDK's VectorTileLayer accepts a Mapbox style document directly, so the
   // Mapbox compiler's plan (sources plus style layers) becomes its style.

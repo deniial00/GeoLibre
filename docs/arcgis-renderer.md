@@ -182,10 +182,17 @@ Layer / GeoParquet Layer / KML / KMZ / Delimited Text**, and the **XYZ**,
 `maplibre-gl-vector` and `maplibre-gl-raster` plugins) and do not mount here;
 drop the file instead.
 
+GeoTIFF/COG files and URLs render through the existing WebAssembly COG tiler
+and a native ArcGIS tile layer in 2D and 3D. Saved RGB bands, continuous color
+ramps, stretch, gamma, nodata and opacity are honored; edit them in the Style
+panel. Browser files last for the session; desktop local paths can be reopened
+on the same device. GPU-only classified/custom color ramps still require the
+MapLibre raster control.
+
 ## Not supported yet
 
 - deck.gl overlays (Deck.gl Layers, 3D Models, DuckDB query layers, 3D Tiles,
-  LiDAR), COGs, Zarr, NetCDF, PMTiles and MBTiles archives, Gaussian splats and
+  LiDAR), Zarr, NetCDF, PMTiles and MBTiles archives, Gaussian splats and
   Cesium-only sources. **Add Data** greys these out while ArcGIS is the primary
   renderer, and the layer panels badge such layers **No ArcGIS**.
 - Plugin controls that call MapLibre APIs cannot mount on ArcGIS.

@@ -3606,6 +3606,7 @@ export function LayerPanel({
                         kinds Cesium actually draws — a kind it cannot draw (e.g.
                         duckdb-query) keeps its message while the globe is primary. */}
                     {(!cesiumPrimary || !isCesiumSupportedLayerType(layer)) &&
+                      (!arcgisPrimary || !isArcgisSupportedLayer(layer)) &&
                       isPlaceholderLayer(layer) && (
                         <p className="mt-1 text-[10px] text-amber-600">
                           {placeholderMessage(layer)}
