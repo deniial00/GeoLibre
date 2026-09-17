@@ -921,4 +921,30 @@ describe("ArcGIS native point styles and altitude", () => {
     assert.ok(flat.parts.slice(1).every((part) => !part.patternStyle));
     assert.ok(scene.parts.every((part) => !part.patternStyle));
   });
+  it("applies an altitude offset to zero-Z coordinates", () => {
+    const plan = compileArcgisLayer(
+      {
+        ...points,
+        geojson: {
+          type: "FeatureCollection",
+          features: [
+            {
+              type: "Feature",
+              properties: {},
+              geometry: { type: "Point", coordinates: [10, 20, 0] },
+            },
+          ],
+        },
+        style: { ...points.style, elevation3dEnabled: true, elevation3dOffset: 30 },
+      },
+      { scene: true },
+    );
+    if (plan.kind !== "geojson") return assert.fail("expected GeoJSON");
+    assert.equal(plan.parts[0].hasZ, true);
+    assert.deepEqual(plan.parts[0].elevationInfo, { mode: "absolute-height", offset: 0 });
+    assert.deepEqual(plan.parts[0].features?.features[0].geometry, {
+      type: "Point",
+      coordinates: [10, 20, 30],
+    });
+  });
 });
