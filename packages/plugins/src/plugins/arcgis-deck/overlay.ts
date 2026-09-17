@@ -27,6 +27,8 @@ export class ArcgisDeckOverlay {
   private generation = 0;
   private disposed = false;
   private events: { remove(): void }[] = [];
+  private hoverFrame: number | null = null;
+  private pendingHover: (() => void) | null = null;
   private props: DeckProps;
   private sceneRenderer: SceneDeckRenderer | null = null;
 
@@ -42,6 +44,7 @@ export class ArcgisDeckOverlay {
   private mountPromise: Promise<void> | null = null;
   mount(): Promise<void> {
     return (this.mountPromise ??= this.attach().catch((error) => {
+      this.clearEvents();
       this.mountPromise = null;
       throw error;
     }));
@@ -56,10 +59,25 @@ export class ArcgisDeckOverlay {
       if (!this.view.on) continue;
       this.events.push(
         this.view.on(eventType, (event) => {
-          const info = this.getDeck()?.pickObject({ x: event.x, y: event.y });
-          if (!info) return;
-          const handled = info.layer?.props[callback]?.(info, event as never);
-          if (!handled) this.props[callback]?.(info, event as never);
+          const pick = () => {
+            const info = this.getDeck()?.pickObject({ x: event.x, y: event.y });
+            if (!info) return;
+            const handled = info.layer?.props[callback]?.(info, event as never);
+            if (!handled) this.props[callback]?.(info, event as never);
+          };
+          if (eventType === "click") {
+            pick();
+          } else {
+            this.pendingHover = pick;
+            if (this.hoverFrame === null) {
+              this.hoverFrame = requestAnimationFrame(() => {
+                this.hoverFrame = null;
+                const latest = this.pendingHover;
+                this.pendingHover = null;
+                if (!this.disposed) latest?.();
+              });
+            }
+          }
         }),
       );
     }
@@ -144,11 +162,18 @@ export class ArcgisDeckOverlay {
     return this.resources?.deck ?? this.sceneRenderer?.resources?.deck ?? null;
   }
 
+  private clearEvents(): void {
+    for (const event of this.events) event.remove();
+    this.events = [];
+    if (this.hoverFrame !== null) cancelAnimationFrame(this.hoverFrame);
+    this.hoverFrame = null;
+    this.pendingHover = null;
+  }
+
   finalize(): void {
     if (this.disposed) return;
     this.disposed = true;
-    for (const event of this.events) event.remove();
-    this.events = [];
+    this.clearEvents();
     this.generation++;
     this.sceneRenderer?.dispose();
     this.sceneRenderer = null;
