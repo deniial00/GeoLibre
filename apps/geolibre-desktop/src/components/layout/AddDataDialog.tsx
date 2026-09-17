@@ -17,6 +17,7 @@ import { GdbSource } from "./add-data/sources/GdbSource";
 import { GeoRssSource } from "./add-data/sources/GeoRssSource";
 import { GpxSource } from "./add-data/sources/GpxSource";
 import { IcebergSource } from "./add-data/sources/IcebergSource";
+import { ZarrSource } from "./add-data/sources/ZarrSource";
 import { PmtilesSource } from "./add-data/sources/PmtilesSource";
 import { MbtilesSource } from "./add-data/sources/MbtilesSource";
 import { OgcFeaturesSource } from "./add-data/sources/OgcFeaturesSource";
@@ -121,6 +122,8 @@ function renderSource(
       return <GdbSource />;
     case "photos":
       return <PhotosSource />;
+    case "zarr":
+      return <ZarrSource />;
     case "pmtiles":
       return <PmtilesSource />;
     case "mbtiles":
@@ -169,17 +172,19 @@ export function AddDataDialog({
   const nativeGlobe = useAppStore((s) => s.primaryRenderer === "cesium");
 
   const title =
-    kind === "pmtiles"
-      ? t("toolbar.item.pmtilesLayer")
-      : kind
-        ? t(`addData.kind.${KIND_I18N_KEY[kind]}.label`)
-        : t("addData.title");
+    kind === "zarr"
+      ? t("toolbar.item.zarrLayer")
+      : kind === "pmtiles"
+        ? t("toolbar.item.pmtilesLayer")
+        : kind
+          ? t(`addData.kind.${KIND_I18N_KEY[kind]}.label`)
+          : t("addData.title");
   // KML/KMZ is the one kind whose loader differs by renderer: native on the
   // globe, converted to map layers elsewhere.
   const description =
     kind === "kml" && !nativeGlobe
       ? t("addData.kml.mapDescription")
-      : kind && kind !== "pmtiles"
+      : kind && kind !== "pmtiles" && kind !== "zarr"
         ? t(`addData.kind.${KIND_I18N_KEY[kind]}.description`)
         : "";
 

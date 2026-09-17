@@ -23,6 +23,7 @@ import {
   REVERSE_GEOCODE_PLUGIN_ID,
   restoreEffects,
   restoreLidarLayers,
+  restoreArcgisZarrLayers,
   restorePlanetaryComputerLayers,
   reattachSun,
   reattachRouteAnimation,
@@ -1324,7 +1325,10 @@ export function DesktopShell({
     // has already deactivated it and this only detaches the engine.
     reattachRouteAnimation(appAPI);
     if (!engine.capabilities.nativeMapInstance) {
-      if (engine.kind === "arcgis") restoreRasterLayers(appAPI);
+      if (engine.kind === "arcgis") {
+        restoreRasterLayers(appAPI);
+        restoreArcgisZarrLayers();
+      }
       void restoreLocalFileLayers();
       return;
     }

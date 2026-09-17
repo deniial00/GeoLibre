@@ -170,7 +170,7 @@ export type ArcgisLayerPlan = ArcgisPlanBase &
       }
     | { kind: "external-deck" }
     | { kind: "geojson"; parts: ArcgisGeoJsonPart[] }
-    | { kind: "cog"; source: GeoLibreLayer; renderSignature: string }
+    | { kind: "cog" | "zarr"; source: GeoLibreLayer; renderSignature: string }
     | {
         kind: "web-tile";
         urlTemplate: string;
@@ -1185,6 +1185,11 @@ export function compileArcgisLayer(
     if (options.deckOverlay === false)
       throw new Error("deck.gl layers require a flat ArcGIS map or local scene");
     return { ...base, kind: "external-deck" };
+  }
+  if (layer.type === "zarr") {
+    if (!layer.source.url || !layer.source.variable)
+      throw new Error("Zarr requires a source and variable");
+    return { ...base, kind: "zarr", source: layer, renderSignature: JSON.stringify(layer.source) };
   }
   if (layer.type === "cog") {
     if (!cogSourceUrl(layer)) throw new Error("The COG layer has no readable source");

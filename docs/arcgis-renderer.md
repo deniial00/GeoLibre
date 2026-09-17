@@ -219,9 +219,26 @@ synthetic tile addresses never go to the network. MLT encoding and archive text
 labels are not supported. The adapter reads PMTiles zoom limits from the archive
 header, including for older projects that omit those limits.
 
+## Zarr and NetCDF grids
+
+**Add Data → Zarr** loads numeric Zarr v2/v3 variables through native tiled
+imagery. The reader supports regularly spaced, one-dimensional spatial axes,
+ascending or descending latitude, 0–360° longitude, CF scale/offset and fill
+values, and integer selectors for other dimensions. The Time Slider uses the
+same selector path. Projected grids require a CRS or proj4 definition through
+the import API. Curvilinear coordinates and automatic multiscale selection are
+not supported; a pyramid level can be selected by its variable path.
+
+**Add Data → NetCDF** uses the existing file dialog. Image slices render as
+native image overlays; kerchunk-backed grids share the tiled Zarr reader.
+Reference manifests are preserved in the layer source for project restoration.
+Registered local Zarr stores remain session-local. Reads return bounded windows
+and retain at most 32 MiB of compressed data per layer; coarse views of large
+untiled arrays can still require many chunk requests.
+
 ## Not supported yet
 
-- DuckDB query layers, 3D Tiles, LiDAR, Zarr, NetCDF, Gaussian splats and
+- DuckDB query layers, 3D Tiles, LiDAR, Gaussian splats and
   Cesium-only sources. **Add Data** greys these out while ArcGIS is the primary
   renderer, and the layer panels badge such layers **No ArcGIS**.
 - Plugin controls that call MapLibre APIs cannot mount on ArcGIS.

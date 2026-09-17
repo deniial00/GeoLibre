@@ -1,3 +1,4 @@
+import { createArcgisZarrLayer } from "./arcgis-zarr";
 import { createArcgisArchiveLayer } from "./arcgis-tile-archives";
 import { createArcgisCogLayer } from "./arcgis-cog-imagery";
 import { SEARCH_HIGHLIGHT_COLOR } from "./map-engine";
@@ -977,6 +978,11 @@ export class ArcgisEngine implements MapEngine {
         }
       : {};
     switch (plan.kind) {
+      case "zarr": {
+        const bridge = createArcgisZarrLayer(this.sdk, plan.source, common);
+        disposers.push(bridge.dispose);
+        return [bridge.layer];
+      }
       case "archive": {
         const bridge = createArcgisArchiveLayer(this.sdk, plan, common);
         disposers.push(bridge.dispose);
@@ -2082,7 +2088,7 @@ function stripSyntheticFields(attributes: Record<string, unknown>): Record<strin
  */
 function planSignature(plan: ArcgisLayerPlan, layer: GeoLibreLayer): string {
   const { visible: _v, opacity: _o, minScale: _mn, maxScale: _mx, ...rest } = plan;
-  if (rest.kind === "cog") {
+  if (rest.kind === "cog" || rest.kind === "zarr") {
     const { source: _source, ...signature } = rest;
     return JSON.stringify(signature);
   }

@@ -18,8 +18,6 @@ const ARCGIS_UNSUPPORTED_SOURCES = new Set([
   ...[...MAPBOX_UNSUPPORTED_SOURCES].filter((id) => id !== "mbtiles"),
   "vector",
   "raster",
-  "zarr",
-  "netcdf",
   "lidar",
   "3d-tiles",
   "duckdb",

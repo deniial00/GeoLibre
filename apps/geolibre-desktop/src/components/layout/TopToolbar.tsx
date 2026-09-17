@@ -1414,7 +1414,8 @@ export function TopToolbar({
       appApi.getMapRenderer?.() === "arcgis"
         ? openAddDataKind("pmtiles")
         : openPMTilesLayerPanel(appApi),
-    zarr: () => openZarrLayerPanel(appApi),
+    zarr: () =>
+      appApi.getMapRenderer?.() === "arcgis" ? openAddDataKind("zarr") : openZarrLayerPanel(appApi),
     netcdf: () => setNetcdfDialogOpen(true),
     lidar: () => openLidarLayerPanel(appApi),
     splatting: () => openSplattingLayerPanel(appApi),
