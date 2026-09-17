@@ -64,6 +64,32 @@ test("ArcGIS renderer draws the project basemap, a dropped GeoJSON layer and ide
   );
   await expect(page.locator(".esri-ui .esri-scale-bar")).toBeVisible({ timeout: 60_000 });
 
+  // Esri choices persist separately from the shared basemap, with exactly one
+  // selected choice; choosing a shared style clears the native override.
+  await page.getByRole("button", { name: "Change background", exact: true }).click();
+  await expect(page.getByRole("button", { name: "ArcGIS Streets", exact: true })).toHaveAttribute(
+    "aria-pressed",
+    "true",
+  );
+  await page.getByRole("button", { name: "ArcGIS Imagery", exact: true }).click();
+  await page.getByRole("button", { name: "Change background", exact: true }).click();
+  await expect(page.getByRole("button", { name: "ArcGIS Imagery", exact: true })).toHaveAttribute(
+    "aria-pressed",
+    "true",
+  );
+  await expect(page.getByRole("dialog").locator('button[aria-pressed="true"]')).toHaveCount(1);
+  await page.getByRole("button", { name: "Liberty", exact: true }).click();
+  await page.getByRole("button", { name: "Change background", exact: true }).click();
+  await expect(page.getByRole("button", { name: "Liberty", exact: true })).toHaveAttribute(
+    "aria-pressed",
+    "true",
+  );
+  await expect(page.getByRole("button", { name: "ArcGIS Imagery", exact: true })).toHaveAttribute(
+    "aria-pressed",
+    "false",
+  );
+  await page.getByRole("button", { name: "ArcGIS Streets", exact: true }).click();
+
   // Sources without an SDK adapter are greyed out while ArcGIS is primary.
   await page.getByRole("button", { name: "Add Data", exact: true }).click();
   for (const name of ["PMTiles Layer", "Deck.gl Layer", "MBTiles Layer"]) {
@@ -87,6 +113,16 @@ test("ArcGIS renderer draws the project basemap, a dropped GeoJSON layer and ide
   }, geojson);
   await expect(layerRow(page, "smoke")).toBeVisible({ timeout: 30_000 });
   await expect(layerRow(page, "smoke")).not.toContainText("No ArcGIS");
+  await page
+    .getByTestId("arcgis-canvas")
+    .getByRole("button", { name: "Expand", exact: true })
+    .click();
+  await page.getByRole("button", { name: "Hide smoke", exact: true }).click();
+  await expect(
+    layerRow(page, "smoke").getByRole("button", { name: "Show layer", exact: true }),
+  ).toBeVisible();
+  await layerRow(page, "smoke").getByRole("button", { name: "Show layer", exact: true }).click();
+  await expect(page.getByRole("button", { name: "Hide smoke", exact: true })).toBeVisible();
   await expect(page.locator("[data-testid=arcgis-canvas] [role=alert]")).toHaveCount(0);
 });
 

@@ -140,6 +140,12 @@ export function ArcgisCanvas({
             });
         engine = new ArcgisEngine(sdk, map, mapView, {
           hasApiKey: Boolean(apiKey?.trim()),
+          onLayerVisibilityChange: (id, visible) => {
+            if (cancelled) return;
+            const store = useAppStore.getState();
+            if (viewId) store.setSecondaryLayerVisibility(viewId, id, visible);
+            else store.setLayerVisibility(id, visible);
+          },
           controlVisibility: viewId ? { "layer-control": false } : undefined,
           ...(scene ? { scene } : {}),
           onProjectionToggle: (next) => {

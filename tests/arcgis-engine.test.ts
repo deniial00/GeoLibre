@@ -292,6 +292,8 @@ function makeSdk() {
       ScaleBar: widgetClass("ScaleBar"),
       Fullscreen: widgetClass("Fullscreen"),
       Locate: widgetClass("Locate"),
+      LayerList: widgetClass("LayerList"),
+      Expand: widgetClass("Expand"),
     },
     reactiveUtils: {
       watch: (_get: unknown, cb: () => void) => {
@@ -500,6 +502,49 @@ describe("ArcgisEngine camera conventions", () => {
 });
 
 describe("ArcgisEngine controls", () => {
+  it("bridges native layer toggles to the store without feeding store updates back", () => {
+    const changes: [string, boolean][] = [];
+    const { engine, created, fireWatchers, widgets } = makeEngine({
+      onLayerVisibilityChange: (id, visible) => changes.push([id, visible]),
+    });
+    const layer = geojsonLayer({
+      geojson: {
+        type: "FeatureCollection",
+        features: [
+          { type: "Feature", properties: {}, geometry: { type: "Point", coordinates: [0, 0] } },
+          {
+            type: "Feature",
+            properties: {},
+            geometry: {
+              type: "LineString",
+              coordinates: [
+                [0, 0],
+                [1, 1],
+              ],
+            },
+          },
+        ],
+      },
+    });
+    engine.syncLayers([layer]);
+    const native = created.find((item) => item.kind === "geojson")!;
+    assert.equal(native.listMode, "hide-children");
+    assert.equal(created.filter((item) => item.kind === "geojson")[1].listMode, "hide");
+    assert.ok(widgets.some((widget) => widget.kind === "LayerList"));
+    native.visible = false;
+    fireWatchers();
+    assert.deepEqual(changes, [[layer.id, false]]);
+    engine.syncLayers([{ ...layer, visible: false }]);
+    fireWatchers();
+    assert.equal(changes.length, 1);
+    engine.syncLayers([]);
+    native.visible = true;
+    fireWatchers();
+    assert.equal(changes.length, 1);
+    engine.destroy();
+    assert.ok(widgets.every((widget) => widget.destroyed));
+  });
+
   it("replaces the SDK's default UI with the Controls menu's default set", () => {
     const { engine, widgets, uiAdds, rawView } = makeEngine();
     assert.deepEqual(rawView.ui.components, []);

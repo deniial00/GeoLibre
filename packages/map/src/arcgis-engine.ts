@@ -94,6 +94,7 @@ export const ARCGIS_CAPABILITIES: MapEngineCapabilities = Object.freeze({
  * which cannot be turned off.
  */
 const HOSTED_CONTROLS: ReadonlySet<BuiltInMapControl> = new Set<BuiltInMapControl>([
+  "layer-control",
   "navigation",
   "fullscreen",
   "compass",
@@ -106,6 +107,7 @@ const HOSTED_CONTROLS: ReadonlySet<BuiltInMapControl> = new Set<BuiltInMapContro
 
 /** Mount order within a corner, matching `MapController.init`. */
 const HOSTED_CONTROL_ORDER: readonly BuiltInMapControl[] = [
+  "layer-control",
   "fullscreen",
   "compass",
   "navigation",
@@ -154,6 +156,7 @@ interface NativePlan {
   urls: string[];
   /** The store record's GeoJSON the features were baked from, by identity. */
   geojson: FeatureCollection | undefined;
+  visibilityHandle?: ArcgisHandle;
 }
 
 const HIGHLIGHT_COLOR = [250, 204, 21, 1];
@@ -411,10 +414,12 @@ export class ArcgisEngine implements MapEngine {
        * can rebuild the view in the other projection.
        */
       onProjectionToggle?: (projection: MapProjection) => void;
+      /** Write LayerList changes through the owning pane's store state. */
+      onLayerVisibilityChange?: (id: string, visible: boolean) => void;
       /**
        * Override built-in control visibility before the controls are added.
        * Split/grid panes pass `{ "layer-control": false }` like the other
-       * engines; the layer control is not hosted here yet either way.
+       * engines.
        */
       controlVisibility?: Partial<Record<BuiltInMapControl, boolean>>;
     } = {},
@@ -865,10 +870,25 @@ export class ArcgisEngine implements MapEngine {
         if (!entry) {
           entry = { plan, signature, layers: [], urls: [], geojson: layer.geojson };
           for (const native of this.instantiate(plan, entry.urls)) {
+            // A mixed-geometry GeoJSON record has several native layers but
+            // one shared visibility toggle. Service sublayers stay managed by
+            // their source record rather than exposing unsaved native changes.
+            native.listMode = entry.layers.length ? "hide" : "hide-children";
             entry.layers.push(native);
             map.add(native);
           }
           this.natives.set(layer.id, entry);
+          const first = entry.layers[0];
+          if (first && this.options.onLayerVisibilityChange) {
+            entry.visibilityHandle = this.sdk.reactiveUtils.watch(
+              () => first.visible,
+              () => {
+                const current = this.natives.get(layer.id);
+                if (current?.layers[0] !== first || first.visible === current.plan.visible) return;
+                this.options.onLayerVisibilityChange?.(layer.id, first.visible);
+              },
+            );
+          }
         }
         entry.plan = plan;
         if (plan.kind === "feature-service" && plan.filterUnsupported)
@@ -1052,6 +1072,7 @@ export class ArcgisEngine implements MapEngine {
   private removeLayer(id: string): void {
     const entry = this.natives.get(id);
     if (entry) {
+      entry.visibilityHandle?.remove();
       for (const native of entry.layers) {
         if (this.map?.layers.includes(native)) this.map.remove(native);
         native.destroy();
@@ -1740,6 +1761,18 @@ export class ArcgisEngine implements MapEngine {
     if (!view) return null;
     const { widgets } = this.sdk;
     switch (id) {
+      case "layer-control": {
+        if (!this.options.onLayerVisibilityChange) return null;
+        const list = new widgets.LayerList({ view });
+        const expand = new widgets.Expand({ view, content: list });
+        return {
+          uiComponent: expand,
+          destroy: () => {
+            expand.destroy();
+            list.destroy();
+          },
+        };
+      }
       case "navigation":
         return new widgets.Zoom({ view });
       case "fullscreen":
@@ -1800,6 +1833,7 @@ export class ArcgisEngine implements MapEngine {
       return true;
     }
     if (id === "globe" && !this.options.onProjectionToggle) return false;
+    if (id === "layer-control" && !this.options.onLayerVisibilityChange) return false;
     if (id === "scale" && this.view.type === "3d") return false;
     this.controlVisibility[id] = visible;
     if (visible) this.mountBuiltInControl(id);

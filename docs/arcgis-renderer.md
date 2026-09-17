@@ -55,6 +55,9 @@ account and subject to Esri's terms; basemap requests have a generous free
 allotment.
 
 With a key, new projects use **ArcGIS Streets** for the ArcGIS renderer. The
+**Change background** picker offers Esri's Streets, Navigation, Topographic,
+gray, Imagery, Oceans, Outdoor and OpenStreetMap styles when ArcGIS is active
+and a key is configured. Selecting one preserves the camera. The
 choice is saved as `preferences.map.arcgisBasemap` (an Esri basemap style id
 such as `arcgis/streets`, `arcgis/imagery` or `osm/standard`); selecting a
 basemap from the shared **Basemaps** panel while ArcGIS is active clears it,
@@ -102,6 +105,11 @@ override is set aside and the shared basemap is translated instead.
   and the scale bar (metric or imperial, 2D only), plus a globe/Mercator
   toggle and terrain (see [2D and 3D](#2d-and-3d)). Attribution is drawn by the view
   itself (`attributionVisible`); Esri requires it and it cannot be hidden.
+- **Plugins → Layer Control** opens the native ArcGIS layer list. Its visibility
+  toggles update the project and the sidebar, and sidebar changes update the
+  list. Mixed-geometry GeoJSON records have one entry for all their parts.
+  Temporary search and selection highlights are omitted. Split panes keep the
+  control hidden by default and retain their independent layer visibility.
 
 ## 2D and 3D
 
@@ -168,9 +176,8 @@ drop the file instead.
   LiDAR), COGs, Zarr, NetCDF, PMTiles and MBTiles archives, Gaussian splats and
   Cesium-only sources. **Add Data** greys these out while ArcGIS is the primary
   renderer, and the layer panels badge such layers **No ArcGIS**.
-- Plugin controls. The engine has no MapLibre map for a `maplibre-gl` control
-  to call into, so no bundled plugin declares `engines: ["arcgis"]`, and the
-  on-map layer control is not mounted.
+- Plugin controls that call MapLibre APIs cannot mount on ArcGIS.
+  Layer Control is the exception: it delegates to ArcGIS's native layer list.
 - Video overlays, heatmap and cluster point renderers (points draw as circles)
   and fill patterns. Markers (built-in shapes, custom SVG, KML icons) do draw,
   as picture symbols baked from the same sprites MapLibre uses.

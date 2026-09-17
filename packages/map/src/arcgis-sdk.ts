@@ -115,6 +115,7 @@ export interface ArcgisLayer {
   type: string;
   opacity: number;
   visible: boolean;
+  listMode?: "show" | "hide" | "hide-children";
   minScale: number;
   maxScale: number;
   loaded: boolean;
@@ -419,6 +420,8 @@ export interface ArcgisSdk {
     ScaleBar: ArcgisClass<ArcgisWidget>;
     Fullscreen: ArcgisClass<ArcgisWidget>;
     Locate: ArcgisClass<ArcgisWidget>;
+    LayerList: ArcgisClass<ArcgisWidget>;
+    Expand: ArcgisClass<ArcgisWidget>;
   };
   reactiveUtils: ArcgisReactiveUtils;
   webMercatorUtils: ArcgisWebMercatorUtils;
@@ -461,6 +464,8 @@ const SDK_MODULES = {
   ScaleBar: "widgets/ScaleBar",
   Fullscreen: "widgets/Fullscreen",
   Locate: "widgets/Locate",
+  LayerList: "widgets/LayerList",
+  Expand: "widgets/Expand",
   reactiveUtils: "core/reactiveUtils",
   webMercatorUtils: "geometry/support/webMercatorUtils",
 } as const;
@@ -521,6 +526,8 @@ export function assembleArcgisSdk(modules: Record<ModuleKey, Record<string, unkn
       ScaleBar: member("ScaleBar"),
       Fullscreen: member("Fullscreen"),
       Locate: member("Locate"),
+      LayerList: member("LayerList"),
+      Expand: member("Expand"),
     },
     reactiveUtils: member("reactiveUtils"),
     webMercatorUtils: member("webMercatorUtils"),
