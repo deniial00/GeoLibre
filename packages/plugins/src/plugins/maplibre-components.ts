@@ -2345,13 +2345,13 @@ export async function addCloudNetcdfLayer(
   if (app.getMapRenderer?.() === "arcgis") {
     const refs =
       options.refs ?? (await loadKerchunkReference(options.url, { headers: options.headers }));
-    const id = await addNativeArcgisZarrLayer({
-      ...options,
-      store: new KerchunkReferenceStore(refs, { headers: options.headers }),
-    });
-    const layer = useAppStore.getState().layers.find((layer) => layer.id === id)!;
-    useAppStore.getState().updateLayer(id, { source: { ...layer.source, kerchunkRefs: refs } });
-    registerZarrTemporalAdapter(id, options.url, { refs, headers: options.headers });
+    await addNativeArcgisZarrLayer(
+      {
+        ...options,
+        store: new KerchunkReferenceStore(refs, { headers: options.headers }),
+      },
+      refs,
+    );
     return;
   }
   const { ZarrLayerControl: ZarrLayerControlClass } = await getComponentsConstructors();
@@ -2559,7 +2559,10 @@ export async function addZarrRasterLayer(
   return queueZarrAdd(() => addZarrLayerExclusively(app, options, url, variable));
 }
 
-async function addNativeArcgisZarrLayer(options: ZarrRasterLayerOptions): Promise<string> {
+async function addNativeArcgisZarrLayer(
+  options: ZarrRasterLayerOptions,
+  refs?: KerchunkRefs,
+): Promise<string> {
   const id = crypto.randomUUID();
   const layer = createZarrStoreLayer(id, {
     id,
@@ -2576,6 +2579,7 @@ async function addNativeArcgisZarrLayer(options: ZarrRasterLayerOptions): Promis
   });
   layer.source = {
     ...layer.source,
+    ...(refs ? { kerchunkRefs: refs } : {}),
     headers: options.headers,
     spatialDimensions: options.spatialDimensions,
   };
@@ -2590,6 +2594,7 @@ async function addNativeArcgisZarrLayer(options: ZarrRasterLayerOptions): Promis
   }
   useAppStore.getState().addLayer(layer, options.beforeLayerId);
   registerZarrTemporalAdapter(id, options.url, {
+    refs,
     headers: options.headers,
     ...(options.readTimeAttributes ? { readAttributes: options.readTimeAttributes } : {}),
   });

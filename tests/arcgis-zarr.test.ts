@@ -1,8 +1,31 @@
 import assert from "node:assert/strict";
 import { it } from "node:test";
 import { openArcgisZarrGrid } from "../packages/map/src/arcgis-zarr";
+import { compileArcgisLayer } from "../packages/map/src/arcgis-layers";
 import { registerZarrStore, readNativeZarrDimensions } from "../packages/map/src/zarr-source";
 import { geojsonLayer } from "./helpers/layer-fixtures";
+
+it("compares kerchunk manifests by identity without serializing their contents", () => {
+  const refs = {
+    toJSON() {
+      throw new Error("manifest must not be serialized");
+    },
+  };
+  const layer = geojsonLayer({
+    type: "zarr",
+    source: { url: "https://example.test/data.json", variable: "air", kerchunkRefs: refs },
+  });
+  const signature = (source: typeof layer.source) => {
+    const plan = compileArcgisLayer({ ...layer, source });
+    if (plan.kind !== "zarr") throw new Error("Expected Zarr");
+    return plan.renderSignature;
+  };
+  assert.equal(signature(layer.source), signature({ ...layer.source, selector: { time: 1 } }));
+  assert.notEqual(
+    signature(layer.source),
+    signature({ ...layer.source, kerchunkRefs: { ...refs } }),
+  );
+});
 
 it("renders the selected CF slice with north-up orientation, packing and fill masking", async () => {
   const bytes = new Map<string, Uint8Array>();
