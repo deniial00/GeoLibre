@@ -859,7 +859,7 @@ function compileGeoJson(
   if (probe) return { parts: [], zoomDependent: false };
   const extrusion = scene && style.extrusionEnabled ? compileExtrusion(style) : null;
   const elevated =
-    scene && !extrusion && style.elevation3dEnabled && geojsonHasZCoordinates(geojson);
+    scene && !extrusion && style.elevation3dEnabled && geojsonHasZCoordinates(geojson, true);
   const data = elevated
     ? transformGeojsonElevation(
         geojson,

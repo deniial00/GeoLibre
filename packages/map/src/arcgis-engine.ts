@@ -1556,7 +1556,8 @@ export class ArcgisEngine implements MapEngine {
     this.highlight = new this.sdk.layers.GraphicsLayer({
       title: "Selection",
       listMode: "hide",
-      ...(elevated ? { elevationInfo: { mode: "absolute-height" } } : {}),
+      // Raw GeoJSON can carry Z even when its elevation style is disabled.
+      elevationInfo: { mode: elevated ? "absolute-height" : "on-the-ground" },
       graphics,
     });
     map.add(this.highlight);
