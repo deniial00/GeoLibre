@@ -189,10 +189,25 @@ panel. Browser files last for the session; desktop local paths can be reopened
 on the same device. GPU-only classified/custom color ramps still require the
 MapLibre raster control.
 
+## deck.gl layers
+
+**Add Data → Deck.gl Layer / 3D Model** works on the primary flat map and
+local 3D scene. The shared overlay renders saved visualizations and models,
+follows visibility, opacity and ordering, and releases its GPU resources on a
+renderer switch. Native feature Z rendering stays owned by ArcGIS.
+
+The adapter uses the MIT-licensed compositor from `@deck.gl/arcgis` 9.4.0
+with CDN-loaded SDK classes, avoiding a bundled `@arcgis/core` dependency.
+Local 3D rendering uses the upstream experimental camera approximation: it can
+drift at extreme camera angles and does not share the terrain depth buffer.
+Global scenes and secondary panes do not host the overlay; the menus and layer
+badges reflect that restriction. Switch back to a flat map or local scene to
+restore the layers.
+
 ## Not supported yet
 
-- deck.gl overlays (Deck.gl Layers, 3D Models, DuckDB query layers, 3D Tiles,
-  LiDAR), Zarr, NetCDF, PMTiles and MBTiles archives, Gaussian splats and
+- DuckDB query layers, 3D Tiles, LiDAR, Zarr, NetCDF, PMTiles and MBTiles
+  archives, Gaussian splats and
   Cesium-only sources. **Add Data** greys these out while ArcGIS is the primary
   renderer, and the layer panels badge such layers **No ArcGIS**.
 - Plugin controls that call MapLibre APIs cannot mount on ArcGIS.

@@ -888,3 +888,11 @@ describe("ArcGIS native point styles and altitude", () => {
     assert.ok(scene.parts.every((part) => !part.patternStyle));
   });
 });
+
+it("leaves deck visualizations to the overlay and badges views without a host", () => {
+  const layer = geojsonLayer({ type: "deckgl-viz", metadata: { sourceKind: "deckgl-viz" } });
+  assert.equal(compileArcgisLayer(layer, { scene: true, deckOverlay: true }).kind, "external-deck");
+  assert.throws(() => compileArcgisLayer(layer, { deckOverlay: false }), /local scene/);
+  assert.equal(isArcgisSupportedLayer(layer, true), true);
+  assert.equal(isArcgisSupportedLayer(layer, false), false);
+});

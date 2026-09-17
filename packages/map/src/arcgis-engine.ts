@@ -72,8 +72,8 @@ import { drawExtentOnCanvas } from "./extent-drawing";
  *
  * - `styleSpec` / `nativeMapInstance`: the SDK draws layers with renderers,
  *   not a Mapbox Style document, and there is no `maplibregl.Map` behind it.
- * - `customLayers` / `deckOverlay`: `@deck.gl/arcgis` exists but is not wired
- *   yet; the shared interleaved overlay binds to MapLibre and Mapbox only.
+ * - `customLayers`: MapLibre custom layers have no native SDK equivalent.
+ *   `deckOverlay` is enabled separately on primary 2D and local scene views.
  * - `terrain` is claimed: the pane renders a `SceneView` over Esri's world
  *   elevation while terrain is on (see {@link arcgisSceneMode}).
  * - `domControls`: the built-in controls are the SDK's own widgets, mounted
@@ -90,6 +90,11 @@ export const ARCGIS_CAPABILITIES: MapEngineCapabilities = Object.freeze({
   picking: true,
   onMapDrawing: true,
   domControls: false,
+});
+
+export const ARCGIS_DECK_CAPABILITIES: MapEngineCapabilities = Object.freeze({
+  ...ARCGIS_CAPABILITIES,
+  deckOverlay: true,
 });
 
 /**
@@ -372,7 +377,12 @@ export function rotationToBearing(rotation: number): number {
  */
 export class ArcgisEngine implements MapEngine {
   readonly kind = "arcgis" as const;
-  readonly capabilities = ARCGIS_CAPABILITIES;
+  get capabilities(): MapEngineCapabilities {
+    return this.options.deckOverlay !== false &&
+      (this.view?.type === "2d" || this.view?.viewingMode === "local")
+      ? ARCGIS_DECK_CAPABILITIES
+      : ARCGIS_CAPABILITIES;
+  }
   private view: ArcgisView | null;
   private map: ArcgisMap | null;
   private surface: MapRenderSurface | null;
@@ -412,6 +422,8 @@ export class ArcgisEngine implements MapEngine {
     map: ArcgisMap,
     view: ArcgisView,
     private options: {
+      /** Secondary panes do not own the primary shared deck overlay. */
+      deckOverlay?: boolean;
       /** Whether an API key is configured, so Esri basemap styles are usable. */
       hasApiKey?: boolean;
       /**
@@ -874,6 +886,7 @@ export class ArcgisEngine implements MapEngine {
         const plan = compileArcgisLayer(layer, {
           zoom: this.compiledZoom,
           scene: this.view?.type === "3d",
+          deckOverlay: this.capabilities.deckOverlay,
         });
         const signature = planSignature(plan, layer);
         let entry = this.natives.get(layer.id);
@@ -958,6 +971,8 @@ export class ArcgisEngine implements MapEngine {
         }
       : {};
     switch (plan.kind) {
+      case "external-deck":
+        return [];
       case "cog":
         return [createArcgisCogLayer(this.sdk, plan.source, common)];
       case "geojson":

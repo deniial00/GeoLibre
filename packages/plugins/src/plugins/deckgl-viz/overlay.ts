@@ -219,7 +219,7 @@ function renderDeckVizLayers(): void {
             currentTime,
           }),
         );
-      } else if (isElevation3dLayer(layer)) {
+      } else if (appRef.getMapRenderer?.() !== "arcgis" && isElevation3dLayer(layer)) {
         deckLayers.push(...buildElevation3dLayers(deckGL, layer));
       }
     } catch (error) {

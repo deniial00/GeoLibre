@@ -1,16 +1,6 @@
 import type { GeoLibreLayer } from "@geolibre/core";
 import { cogRenderOptions, cogSourceUrl, rasterState, type CogTilerModule } from "./cog-imagery";
-import type { ArcgisLayer, ArcgisSdk } from "./arcgis-sdk";
-
-export interface ArcgisRasterLayer extends ArcgisLayer {
-  addResolvingPromise(promise: Promise<unknown>): void;
-  fetchTile(
-    level: number,
-    row: number,
-    column: number,
-    options?: { signal?: AbortSignal },
-  ): Promise<HTMLCanvasElement>;
-}
+import type { ArcgisRasterLayer, ArcgisSdk } from "./arcgis-sdk";
 
 /** Open the existing COG tiler lazily, without importing the ArcGIS npm package. */
 export async function loadCogTiler(): Promise<CogTilerModule> {

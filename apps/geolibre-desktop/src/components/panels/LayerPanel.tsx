@@ -3589,7 +3589,7 @@ export function LayerPanel({
                         )}
                       {arcgisPrimary &&
                         !isCesiumOnlyLayer(layer) &&
-                        !isArcgisSupportedLayer(layer) && (
+                        !isArcgisSupportedLayer(layer, capabilities.deckOverlay) && (
                           <span
                             title={t("renderer.layerArcgisUnsupported")}
                             className="shrink-0 rounded-sm bg-muted px-1 text-[10px] uppercase text-muted-foreground"
@@ -3606,7 +3606,8 @@ export function LayerPanel({
                         kinds Cesium actually draws — a kind it cannot draw (e.g.
                         duckdb-query) keeps its message while the globe is primary. */}
                     {(!cesiumPrimary || !isCesiumSupportedLayerType(layer)) &&
-                      (!arcgisPrimary || !isArcgisSupportedLayer(layer)) &&
+                      (!arcgisPrimary ||
+                        !isArcgisSupportedLayer(layer, capabilities.deckOverlay)) &&
                       isPlaceholderLayer(layer) && (
                         <p className="mt-1 text-[10px] text-amber-600">
                           {placeholderMessage(layer)}

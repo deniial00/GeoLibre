@@ -382,6 +382,17 @@ export interface ArcgisWidget {
 /** Constructor of an autocasting SDK class: plain props in, an instance out. */
 export type ArcgisClass<T, P = Record<string, unknown>> = new (properties?: P) => T;
 
+/** Custom raster tile layer provided by the SDK. */
+export interface ArcgisRasterLayer extends ArcgisLayer {
+  addResolvingPromise(promise: Promise<unknown>): void;
+  fetchTile(
+    level: number,
+    row: number,
+    column: number,
+    options?: { signal?: AbortSignal },
+  ): Promise<HTMLCanvasElement>;
+}
+
 /**
  * The SDK surface the engine drives, loaded from the CDN by
  * {@link loadArcgisSdk}. Grouped the way Esri's module tree is so a reader can
@@ -398,10 +409,8 @@ export interface ArcgisSdk {
   layers: {
     GeoJSONLayer: ArcgisClass<ArcgisLayer>;
     GraphicsLayer: ArcgisClass<ArcgisLayer>;
-    BaseTileLayer: ArcgisClass<import("./arcgis-cog-imagery").ArcgisRasterLayer> & {
-      createSubclass(
-        definition: Record<string, unknown>,
-      ): ArcgisClass<import("./arcgis-cog-imagery").ArcgisRasterLayer>;
+    BaseTileLayer: ArcgisClass<ArcgisRasterLayer> & {
+      createSubclass(definition: Record<string, unknown>): ArcgisClass<ArcgisRasterLayer>;
     };
     WebTileLayer: ArcgisClass<ArcgisLayer>;
     WMSLayer: ArcgisClass<ArcgisLayer>;

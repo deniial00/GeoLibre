@@ -159,6 +159,7 @@ interface ArcgisPlanBase {
 
 export type ArcgisLayerPlan = ArcgisPlanBase &
   (
+    | { kind: "external-deck" }
     | { kind: "geojson"; parts: ArcgisGeoJsonPart[] }
     | { kind: "cog"; source: GeoLibreLayer; renderSignature: string }
     | {
@@ -198,6 +199,8 @@ export type ArcgisLayerPlan = ArcgisPlanBase &
   );
 
 export interface CompileArcgisLayerOptions {
+  /** Whether a primary flat map or local scene hosts the shared deck overlay. */
+  deckOverlay?: boolean;
   /** Zoom the per-feature expressions are evaluated at. */
   zoom?: number;
   /**
@@ -1130,7 +1133,8 @@ const supportedLayerCache = new WeakMap<GeoLibreLayer, boolean>();
  * Whether the ArcGIS engine can draw a layer. The layer panels badge the rest
  * before the engine's error banner would report them.
  */
-export function isArcgisSupportedLayer(layer: GeoLibreLayer): boolean {
+export function isArcgisSupportedLayer(layer: GeoLibreLayer, deckOverlay = true): boolean {
+  if (layer.type === "deckgl-viz" && layer.metadata.sourceKind === "deckgl-viz") return deckOverlay;
   const cached = supportedLayerCache.get(layer);
   if (cached !== undefined) return cached;
   let supported = true;
@@ -1168,6 +1172,11 @@ export function compileArcgisLayer(
     ...(bounds(layer) ? { bounds: bounds(layer) } : {}),
     zoomDependent: false,
   };
+  if (layer.type === "deckgl-viz" && layer.metadata.sourceKind === "deckgl-viz") {
+    if (options.deckOverlay === false)
+      throw new Error("deck.gl layers require a flat ArcGIS map or local scene");
+    return { ...base, kind: "external-deck" };
+  }
   if (layer.type === "cog") {
     if (!cogSourceUrl(layer)) throw new Error("The COG layer has no readable source");
     return { ...base, kind: "cog", source: layer, renderSignature: cogRenderSignature(layer) };

@@ -8,8 +8,8 @@ import type { MapRendererKind } from "@geolibre/core";
 // the host KML importer, the same path a dropped file takes on any renderer.
 const MAPBOX_UNSUPPORTED_SOURCES = new Set(["mbtiles", "splatting", "cesium-ion", "czml"]);
 
-// The ArcGIS renderer has no deck.gl overlay or custom-layer host yet, so on
-// top of the Mapbox list every source drawn through one of those is out, as are
+// The ArcGIS deck overlay hosts Deck.gl Layer and 3D Model in flat/local views.
+// The remaining plugin loaders still require a MapLibre control, as do
 // the archives and cloud rasters that need a MapLibre protocol, and the Vector
 // and Raster panels, which are MapLibre plugin controls with nowhere to mount
 // (see packages/map/src/arcgis-layers.ts for what it does draw). Ids are the
@@ -23,8 +23,6 @@ const ARCGIS_UNSUPPORTED_SOURCES = new Set([
   "netcdf",
   "lidar",
   "3d-tiles",
-  "deckgl-viz",
-  "gltf-model",
   "duckdb",
 ]);
 
