@@ -79,5 +79,18 @@ export function createArcgisCogLayer(
       return canvas;
     },
   });
-  return new CustomLayer(properties);
+  const bounds = layer.metadata.bounds;
+  const fullExtent =
+    Array.isArray(bounds) && bounds.length === 4 && bounds.every(Number.isFinite)
+      ? sdk.webMercatorUtils.geographicToWebMercator(
+          new sdk.Extent({
+            xmin: bounds[0],
+            ymin: bounds[1],
+            xmax: bounds[2],
+            ymax: bounds[3],
+            spatialReference: { wkid: 4326 },
+          }),
+        )
+      : undefined;
+  return new CustomLayer({ ...properties, ...(fullExtent ? { fullExtent } : {}) });
 }

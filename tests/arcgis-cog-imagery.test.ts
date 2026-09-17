@@ -50,6 +50,26 @@ function fakeSdk() {
 }
 
 describe("ArcGIS COG imagery", () => {
+  it("exposes a Web Mercator extent before opening the COG", () => {
+    let opened = false;
+    const raster = createArcgisCogLayer(
+      fakeSdk(),
+      { ...layer, metadata: { ...layer.metadata, bounds: [1, 2, 3, 4] } },
+      {},
+      async () => {
+        opened = true;
+        throw new Error("must remain lazy");
+      },
+    );
+    assert.equal(opened, false);
+    assert.deepEqual(raster.fullExtent, {
+      xmin: 1,
+      ymin: 2,
+      xmax: 3,
+      ymax: 4,
+      spatialReference: { wkid: 3857 },
+    });
+  });
   it("recognizes browser files and includes raster visualization changes in the plan", () => {
     const local = {
       ...layer,
