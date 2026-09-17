@@ -1,5 +1,6 @@
 import { createArcgisArchiveLayer } from "./arcgis-tile-archives";
-import { createArcgisCogLayer } from "./arcgis-cog-imagery";
+import { createArcgisCogLayer, loadCogTiler } from "./arcgis-cog-imagery";
+import { cachingCogTiler, cogSourceUrl } from "./cog-imagery";
 import { SEARCH_HIGHLIGHT_COLOR } from "./map-engine";
 import { renderFillPatternCanvas } from "./fill-patterns";
 import { registerCogDemSource, type CogDemSourceRegistration } from "./cog-dem-source";
@@ -417,6 +418,17 @@ export class ArcgisEngine implements MapEngine {
   private cogTerrain: CogDemSourceRegistration | null = null;
   private cogTerrainUrl: string | null = null;
   private cogTerrainRequest = 0;
+  private cogTiler: Promise<ReturnType<typeof cachingCogTiler>> | null = null;
+  private cogUrls = new Set<string>();
+
+  private loadCachedCogTiler(): Promise<ReturnType<typeof cachingCogTiler>> {
+    return (this.cogTiler ??= loadCogTiler()
+      .then(cachingCogTiler)
+      .catch((error) => {
+        this.cogTiler = null;
+        throw error;
+      }));
+  }
   private elevation: ArcgisElevationLayer | null = null;
 
   constructor(
@@ -593,6 +605,9 @@ export class ArcgisEngine implements MapEngine {
     this.removeElevation();
     this.cogTerrainRequest++;
     this.cogTerrain?.dispose();
+    void this.cogTiler?.then((tiler) => tiler.clear()).catch(() => {});
+    this.cogTiler = null;
+    this.cogUrls.clear();
     this.cogTerrain = null;
     for (const id of [...this.natives.keys()]) this.removeLayer(id);
     for (const widget of this.builtInControls.values()) widget.destroy();
@@ -872,6 +887,18 @@ export class ArcgisEngine implements MapEngine {
     const map = this.map;
     if (!map) return;
     const ids = new Set(layers.map((layer) => layer.id));
+    const previousCogUrls = this.cogUrls;
+    this.cogUrls = new Set(
+      layers
+        .filter((layer) => layer.type === "cog")
+        .map(cogSourceUrl)
+        .filter((url): url is string => !!url),
+    );
+    void this.cogTiler
+      ?.then((tiler) => {
+        for (const url of previousCogUrls) if (!this.cogUrls.has(url)) tiler.forget(url);
+      })
+      .catch(() => {});
     for (const id of [...this.natives.keys()]) if (!ids.has(id)) this.removeLayer(id);
     for (const key of [...this.errors.keys()])
       if (key.startsWith("layer:") && !ids.has(key.slice(6))) this.errors.delete(key);
@@ -987,7 +1014,9 @@ export class ArcgisEngine implements MapEngine {
       case "external-deck":
         return [];
       case "cog":
-        return [createArcgisCogLayer(this.sdk, plan.source, common)];
+        return [
+          createArcgisCogLayer(this.sdk, plan.source, common, () => this.loadCachedCogTiler()),
+        ];
       case "geojson":
         return plan.parts.map((part) => {
           let url = part.url;
@@ -1583,7 +1612,8 @@ export class ArcgisEngine implements MapEngine {
     this.highlight = new this.sdk.layers.GraphicsLayer({
       title: "Selection",
       listMode: "hide",
-      ...(elevated ? { elevationInfo: { mode: "absolute-height" } } : {}),
+      // Raw GeoJSON can carry Z even when its elevation style is disabled.
+      elevationInfo: { mode: elevated ? "absolute-height" : "on-the-ground" },
       graphics,
     });
     map.add(this.highlight);

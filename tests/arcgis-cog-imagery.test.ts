@@ -4,6 +4,7 @@ import { createArcgisCogLayer } from "../packages/map/src/arcgis-cog-imagery";
 import { compileArcgisLayer, isArcgisPluginLayer } from "../packages/map/src/arcgis-layers";
 import type { ArcgisSdk } from "../packages/map/src/arcgis-sdk";
 import type { CogTilerModule } from "../packages/map/src/cog-imagery";
+import { cachingCogTiler } from "../packages/map/src/cog-imagery";
 import { geojsonLayer } from "./helpers/layer-fixtures";
 
 const layer = geojsonLayer({
@@ -93,6 +94,7 @@ describe("ArcGIS COG imagery", () => {
 
   it("loads once, preserves XYZ order and style, and cancels before decoding", async () => {
     let opens = 0;
+    let statisticsReads = 0;
     let renders = 0;
     let call: unknown[] = [];
     const tiler = {
@@ -100,11 +102,14 @@ describe("ArcGIS COG imagery", () => {
         opens++;
         return {
           boundsLonLat: [-5, -4, 3, 2],
-          statistics: async () => ({
-            b4: { min: 4, max: 40 },
-            b3: { min: 3, max: 30 },
-            b2: { min: 2, max: 20 },
-          }),
+          statistics: async () => {
+            statisticsReads++;
+            return {
+              b4: { min: 4, max: 40 },
+              b3: { min: 3, max: 30 },
+              b2: { min: 2, max: 20 },
+            };
+          },
           renderTileRGBA: async (...args: unknown[]) => {
             renders++;
             call = args;
@@ -113,7 +118,8 @@ describe("ArcGIS COG imagery", () => {
         };
       },
     } as unknown as CogTilerModule;
-    const native = createArcgisCogLayer(fakeSdk(), layer, {}, async () => tiler);
+    const cached = cachingCogTiler(tiler);
+    const native = createArcgisCogLayer(fakeSdk(), layer, {}, async () => cached);
     const previous = globalThis.document;
     Object.assign(globalThis, {
       document: { createElement: () => ({ width: 0, height: 0 }) },
@@ -150,9 +156,22 @@ describe("ArcGIS COG imagery", () => {
         name: "AbortError",
       });
       assert.equal(renders, 2);
+      const restyled = createArcgisCogLayer(
+        fakeSdk(),
+        {
+          ...layer,
+          metadata: { ...layer.metadata, rasterState: { mode: "rgb", bands: [4, 3, 2], gamma: 2 } },
+        },
+        {},
+        async () => cached,
+      );
+      await restyled.fetchTile(5, 7, 9);
+      assert.equal(opens, 1, "restyling reuses the open source");
+      assert.equal(statisticsReads, 1, "restyling reuses source statistics");
+      assert.equal((call[3] as { gamma: number }).gamma, 2);
       Object.assign(native, { destroyed: true });
       await assert.rejects(native.fetchTile(5, 7, 9), { name: "AbortError" });
-      assert.equal(renders, 2);
+      assert.equal(renders, 3);
     } finally {
       Object.assign(globalThis, { document: previous });
     }

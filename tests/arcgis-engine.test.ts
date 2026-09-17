@@ -1112,6 +1112,10 @@ describe("ArcgisEngine native style plans", () => {
     )[0];
     assert.equal(graphic.geometry.z, 230);
     assert.equal(graphic.geometry.hasZ, true);
+    const flat = { ...base, style: { ...base.style, elevation3dEnabled: false } };
+    engine.syncLayers([flat]);
+    engine.highlightFeature(flat, "high");
+    assert.deepEqual(created.at(-1)!.props.elevationInfo, { mode: "on-the-ground" });
     engine.destroy();
   });
 });
