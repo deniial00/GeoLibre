@@ -836,6 +836,40 @@ describe("ArcGIS native point styles and altitude", () => {
     if (zero.kind === "geojson")
       assert.ok(zero.parts[0].features?.features.every((f) => f.properties?.gl__weight === 0));
   });
+  it("skips point symbol evaluation for heatmaps while preserving mixed geometry styles", () => {
+    let symbolReads = 0;
+    const plan = compileArcgisLayer({
+      ...mixed,
+      geojson: {
+        type: "FeatureCollection",
+        features: mixed.geojson!.features.map((feature) => ({
+          ...feature,
+          properties: {
+            ...feature.properties,
+            weight: 3,
+            get size() {
+              if (feature.geometry?.type === "Point") symbolReads++;
+              return 50;
+            },
+          },
+        })),
+      },
+      style: {
+        ...mixed.style,
+        pointRenderer: "heatmap",
+        heatmapWeightProperty: "weight",
+        proportionalSizeEnabled: true,
+        proportionalSizeProperty: "size",
+      },
+    });
+    if (plan.kind !== "geojson") return assert.fail("expected GeoJSON");
+    assert.equal(symbolReads, 0);
+    assert.deepEqual(
+      plan.parts.map((part) => part.renderer.type),
+      ["simple", "simple", "heatmap"],
+    );
+    assert.equal(plan.parts[2].features?.features[0].properties?.gl__weight, 3);
+  });
   it("clusters in 2D and restores individual symbols in scenes", () => {
     const layer = {
       ...points,
