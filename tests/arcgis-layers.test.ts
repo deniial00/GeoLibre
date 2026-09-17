@@ -900,3 +900,16 @@ it("leaves deck visualizations to the overlay and badges views without a host", 
   assert.equal(isArcgisSupportedLayer(layer, true), true);
   assert.equal(isArcgisSupportedLayer(layer, false), false);
 });
+
+it("accepts adapted plugin layers only when an ArcGIS deck overlay is available", () => {
+  for (const [type, sourceKind] of [
+    ["lidar", "lidar-url"],
+    ["duckdb-query", "duckdb-query"],
+    ["3d-tiles", "3d-tiles-url"],
+  ] as const) {
+    const layer = geojsonLayer({ type, metadata: { sourceKind } });
+    assert.equal(compileArcgisLayer(layer, { deckOverlay: true }).kind, "external-deck");
+    assert.equal(isArcgisSupportedLayer(layer, false), false);
+    assert.throws(() => compileArcgisLayer(layer, { deckOverlay: false }), /flat ArcGIS/);
+  }
+});

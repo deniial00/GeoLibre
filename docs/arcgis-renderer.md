@@ -178,9 +178,9 @@ In a scene:
 Files dropped onto the map, the host importers behind **Add Data → FlatGeobuf
 Layer / GeoParquet Layer / KML / KMZ / Delimited Text**, and the **XYZ**,
 **WMS**, **WMTS** and **ArcGIS Layer** dialogs all work on the ArcGIS map. The
-**Vector Layer** and **Raster Layer** panels are MapLibre controls (the
-`maplibre-gl-vector` and `maplibre-gl-raster` plugins) and do not mount here;
-drop the file instead.
+**Vector Layer** panel uses the shared store bridge for bounded vector imports;
+large streaming GeoParquet still requires MapLibre. **Raster Layer** opens a
+host dialog for a local GeoTIFF or HTTP(S) URL.
 
 GeoTIFF/COG files and URLs render through the existing WebAssembly COG tiler
 and a native ArcGIS tile layer in 2D and 3D. Saved RGB bands, continuous color
@@ -236,13 +236,26 @@ Registered local Zarr stores remain session-local. Reads return bounded windows
 and retain at most 32 MiB of compressed data per layer; coarse views of large
 untiled arrays can still require many chunk requests.
 
+## Adapted plugin panels
+
+**LiDAR**, **DuckDB** and ordinary **3D Tiles** render through deck.gl on the
+primary flat map or local scene. Google Photorealistic and I3S tiles still
+require another renderer. The global globe and secondary panes do not
+host these overlays. LiDAR keeps the existing COPC/EPT streaming and styling
+controls; its terrain toggle delegates to the host terrain setting. Saved URL
+LiDAR and 3D Tiles layers restore when the view is rebuilt. Browser-local point
+cloud files and cached DuckDB query results retain their existing session
+lifetime; reopen the source/query when necessary. Scene overlays have the same
+experimental alignment and depth limitations described above.
+
 ## Not supported yet
 
-- DuckDB query layers, 3D Tiles, LiDAR, Gaussian splats and
-  Cesium-only sources. **Add Data** greys these out while ArcGIS is the primary
+- Gaussian splats and Cesium-only sources. **Add Data** greys these out while ArcGIS is the primary
   renderer, and the layer panels badge such layers **No ArcGIS**.
-- Plugin controls that call MapLibre APIs cannot mount on ArcGIS.
-  Layer Control is the exception: it delegates to ArcGIS's native layer list.
+- Arbitrary MapLibre custom layers and rendering APIs still require adapters.
+  The primary view hosts DOM controls with navigation methods; Vector, LiDAR,
+  DuckDB and 3D Tiles have explicit rendering bridges. Layer Control delegates
+  to ArcGIS's native layer list.
 - Video overlays. The SDK does not support clustering or picture-fill patterns
   in SceneView: scenes retain individual point symbols and solid polygon fills.
   Heatmap labels are also unsupported in scenes.

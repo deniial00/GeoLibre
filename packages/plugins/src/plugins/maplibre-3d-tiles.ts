@@ -172,7 +172,7 @@ export function closeThreeDTilesLayerPanel(app: GeoLibreAppAPI): void {
 export function restoreThreeDTilesLayers(app: GeoLibreAppAPI): void {
   restoreGooglePhotorealisticTilesLayers(app);
   restoreArcgisI3sTilesLayers(app);
-  if (app.getMapRenderer?.() === "mapbox") {
+  if (["mapbox", "arcgis"].includes(app.getMapRenderer?.() ?? "")) {
     if (useAppStore.getState().layers.some(isMapboxTilesLayer))
       void restoreMapboxTiles(app).catch(console.error);
     return;
@@ -321,7 +321,7 @@ function createThreeDTilesControl(): ThreeDTilesControl {
 }
 
 function syncThreeDTilesStoreFromControl(control: ThreeDTilesControl): void {
-  if (activeThreeDTilesApp?.getMapRenderer?.() === "mapbox") return;
+  if (["mapbox", "arcgis"].includes(activeThreeDTilesApp?.getMapRenderer?.() ?? "")) return;
   const store = useAppStore.getState();
   const state = control.getState();
   const tilesetIds = new Set(state.tilesets.map((tileset) => tileset.id));
@@ -353,7 +353,7 @@ function hydrateThreeDTilesControlFromStore(
   control: ThreeDTilesControl,
   options: { replaceExisting?: boolean } = {},
 ): void {
-  if (activeThreeDTilesApp?.getMapRenderer?.() === "mapbox") return;
+  if (["mapbox", "arcgis"].includes(activeThreeDTilesApp?.getMapRenderer?.() ?? "")) return;
   const layers = useAppStore.getState().layers.filter(isThreeDTilesControlLayer);
   if (layers.length === 0) return;
 
@@ -689,11 +689,26 @@ function installGooglePhotorealisticTilesPanelHandlers(
       }
       applyDefaults();
       const url = urlInput?.value.trim() ?? "";
+      if (
+        activeThreeDTilesApp?.getMapRenderer?.() === "arcgis" &&
+        (isGooglePhotorealisticTilesetUrl(url) || isArcgisI3sSceneLayerUrl(url))
+      ) {
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        const status = panel.querySelector<HTMLElement>(".three-d-tiles-status");
+        if (status) {
+          status.dataset.status = "error";
+          status.textContent =
+            "Google Photorealistic and I3S tiles require another rendering engine. Use a 3D Tiles tileset.json URL here.";
+        }
+        return;
+      }
       // A blank URL falls through to the library's own submit handler so its
       // "Tileset URL is required." error is shown, on Mapbox as on MapLibre.
       if (
         url &&
-        activeThreeDTilesApp?.getMapRenderer?.() === "mapbox" &&
+        activeThreeDTilesApp &&
+        ["mapbox", "arcgis"].includes(activeThreeDTilesApp?.getMapRenderer?.() ?? "") &&
         !isGooglePhotorealisticTilesetUrl(url) &&
         !isArcgisI3sSceneLayerUrl(url)
       ) {
@@ -1072,7 +1087,8 @@ function updateDeckTilesPanelList(control: ThreeDTilesControl | null): void {
     .layers.filter(
       (layer) =>
         isGooglePhotorealisticTilesLayer(layer) ||
-        (activeThreeDTilesApp?.getMapRenderer?.() === "mapbox" && isMapboxTilesLayer(layer)),
+        (["mapbox", "arcgis"].includes(activeThreeDTilesApp?.getMapRenderer?.() ?? "") &&
+          isMapboxTilesLayer(layer)),
     );
   const nativeStatus = panel.querySelector<HTMLElement>(".three-d-tiles-status");
   if (nativeStatus) {

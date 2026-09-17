@@ -41,7 +41,10 @@ export type KindI18nKey =
  * title and description are resolved via `t()` from these keys; `en.json` is the
  * source of truth (see `i18n/locales/en.json`).
  */
-export const KIND_I18N_KEY: Record<Exclude<AddDataKind, "pmtiles" | "zarr">, KindI18nKey> = {
+export const KIND_I18N_KEY: Record<
+  Exclude<AddDataKind, "pmtiles" | "zarr" | "raster">,
+  KindI18nKey
+> = {
   xyz: "xyz",
   wms: "wms",
   csw: "csw",

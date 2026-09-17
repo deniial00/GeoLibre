@@ -572,7 +572,7 @@ describe("ArcgisEngine controls", () => {
     assert.equal(uiAdds.at(-1)?.position, "bottom-right");
     // Plugin IControls have no host here.
     assert.equal(engine.addControl(), false);
-    assert.equal(engine.capabilities.domControls, false);
+    assert.equal(engine.capabilities.domControls, true);
   });
   it("forwards the scale unit and compass label to the widgets", () => {
     const { engine, widgets } = makeEngine();
@@ -1091,4 +1091,22 @@ describe("ArcgisEngine native style plans", () => {
     assert.equal(graphic.geometry.hasZ, true);
     engine.destroy();
   });
+});
+
+it("identifies adapted controls when no native SDK layer is present and clears them on teardown", async () => {
+  const { setArcgisControlPicker } = await import("../packages/map/src/arcgis-control-adapters");
+  const { engine } = makeEngine();
+  const feature = {
+    layerId: "query",
+    featureId: "12",
+    properties: { NAME: "station" },
+    geometry: null,
+  };
+  setArcgisControlPicker(engine.getView()!, (_point, layerId) =>
+    !layerId || layerId === "query" ? [feature] : [],
+  );
+  assert.deepEqual(await engine.identifyFeaturesAt({ x: 1, y: 2 }, "query"), [feature]);
+  assert.deepEqual(await engine.identifyFeaturesAt({ x: 1, y: 2 }, "other"), []);
+  engine.destroy();
+  assert.deepEqual(await engine.identifyFeaturesAt({ x: 1, y: 2 }, "query"), []);
 });

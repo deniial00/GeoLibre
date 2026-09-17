@@ -101,9 +101,9 @@ describe("ArcGIS project and plugin boundaries", () => {
     assert.equal(supportsAddDataRenderer("pmtiles", "arcgis"), true);
     assert.equal(supportsAddDataRenderer("deckgl-viz", "arcgis"), true);
     assert.equal(supportsAddDataRenderer("gltf-model", "arcgis"), true);
-    // The Vector and Raster panels are MapLibre controls with nowhere to mount.
-    assert.equal(supportsAddDataRenderer("vector", "arcgis"), false);
-    assert.equal(supportsAddDataRenderer("raster", "arcgis"), false);
+    // Vector uses the store bridge; raster uses the host importer.
+    assert.equal(supportsAddDataRenderer("vector", "arcgis"), true);
+    assert.equal(supportsAddDataRenderer("raster", "arcgis"), true);
     assert.equal(supportsAddDataRenderer("xyz", "arcgis"), true);
     assert.equal(supportsAddDataRenderer("flatgeobuf", "arcgis"), true);
     assert.equal(supportsAddDataRenderer("arcgis", "arcgis"), true);

@@ -26,6 +26,7 @@ export class ArcgisDeckOverlay {
   private layerView: LayerView | null = null;
   private generation = 0;
   private disposed = false;
+  private events: { remove(): void }[] = [];
   private props: DeckProps;
   private sceneRenderer: SceneDeckRenderer | null = null;
 
@@ -44,6 +45,21 @@ export class ArcgisDeckOverlay {
   }
   private async attach(): Promise<void> {
     if (this.disposed || this.native) return;
+    // Deck uses an offscreen canvas, so ArcGIS owns pointer delivery.
+    for (const [eventType, callback] of [
+      ["click", "onClick"],
+      ["pointer-move", "onHover"],
+    ] as const) {
+      if (!this.view.on) continue;
+      this.events.push(
+        this.view.on(eventType, (event) => {
+          const info = this.getDeck()?.pickObject({ x: event.x, y: event.y });
+          if (!info) return;
+          const handled = info.layer?.props[callback]?.(info, event as never);
+          if (!handled) this.props[callback]?.(info, event as never);
+        }),
+      );
+    }
     if (this.view.type === "3d") {
       if (this.view.viewingMode !== "local") return;
       const [module, { default: factory }] = await Promise.all([
@@ -121,9 +137,15 @@ export class ArcgisDeckOverlay {
     this.layerView?.requestRender();
   }
 
+  getDeck() {
+    return this.resources?.deck ?? this.sceneRenderer?.resources?.deck ?? null;
+  }
+
   finalize(): void {
     if (this.disposed) return;
     this.disposed = true;
+    for (const event of this.events) event.remove();
+    this.events = [];
     this.generation++;
     this.sceneRenderer?.dispose();
     this.sceneRenderer = null;

@@ -1135,6 +1135,15 @@ export function isArcgisPluginLayer(layer: GeoLibreLayer): boolean {
   );
 }
 
+function isArcgisExternalDeckLayer(layer: GeoLibreLayer): boolean {
+  return (
+    (layer.type === "deckgl-viz" && layer.metadata.sourceKind === "deckgl-viz") ||
+    (layer.type === "lidar" && layer.metadata.sourceKind === "lidar-url") ||
+    (layer.type === "duckdb-query" && layer.metadata.sourceKind === "duckdb-query") ||
+    (layer.type === "3d-tiles" && layer.metadata.sourceKind === "3d-tiles-url")
+  );
+}
+
 /** Store layers are immutable records, so the answer is memoized per object. */
 const supportedLayerCache = new WeakMap<GeoLibreLayer, boolean>();
 
@@ -1143,7 +1152,7 @@ const supportedLayerCache = new WeakMap<GeoLibreLayer, boolean>();
  * before the engine's error banner would report them.
  */
 export function isArcgisSupportedLayer(layer: GeoLibreLayer, deckOverlay = true): boolean {
-  if (layer.type === "deckgl-viz" && layer.metadata.sourceKind === "deckgl-viz") return deckOverlay;
+  if (isArcgisExternalDeckLayer(layer)) return deckOverlay;
   const cached = supportedLayerCache.get(layer);
   if (cached !== undefined) return cached;
   let supported = true;
@@ -1181,7 +1190,7 @@ export function compileArcgisLayer(
     ...(bounds(layer) ? { bounds: bounds(layer) } : {}),
     zoomDependent: false,
   };
-  if (layer.type === "deckgl-viz" && layer.metadata.sourceKind === "deckgl-viz") {
+  if (isArcgisExternalDeckLayer(layer)) {
     if (options.deckOverlay === false)
       throw new Error("deck.gl layers require a flat ArcGIS map or local scene");
     return { ...base, kind: "external-deck" };

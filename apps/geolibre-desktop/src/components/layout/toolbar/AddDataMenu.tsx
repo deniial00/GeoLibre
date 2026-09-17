@@ -102,9 +102,15 @@ export function AddDataMenu({
     pmtiles: { onSelect: addLayer.pmtiles },
     zarr: { onSelect: addLayer.zarr },
     netcdf: { onSelect: addLayer.netcdf },
-    lidar: { onSelect: addLayer.lidar },
+    lidar: {
+      onSelect: addLayer.lidar,
+      disabled: renderer === "arcgis" && !capabilities.deckOverlay,
+    },
     splatting: { onSelect: addLayer.splatting },
-    "3d-tiles": { onSelect: addLayer.threeDTiles },
+    "3d-tiles": {
+      onSelect: addLayer.threeDTiles,
+      disabled: renderer === "arcgis" && !capabilities.deckOverlay,
+    },
     // Ion assets load through Cesium only (issue #2290); on the 2D map the
     // entry stays visible but disabled so the capability is discoverable.
     "cesium-ion": { onSelect: () => onSetAddDataKind("cesium-ion"), disabled: !cesiumPrimary },

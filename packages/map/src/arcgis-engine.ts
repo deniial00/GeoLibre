@@ -1,3 +1,5 @@
+import { disposeArcgisControlAdapters, identifyArcgisControls } from "./arcgis-control-adapters";
+import { ArcgisControlHost } from "./arcgis-control-host";
 import { createArcgisZarrLayer } from "./arcgis-zarr";
 import { createArcgisArchiveLayer } from "./arcgis-tile-archives";
 import { createArcgisCogLayer } from "./arcgis-cog-imagery";
@@ -78,10 +80,8 @@ import { drawExtentOnCanvas } from "./extent-drawing";
  *   `deckOverlay` is enabled separately on primary 2D and local scene views.
  * - `terrain` is claimed: the pane renders a `SceneView` over Esri's world
  *   elevation while terrain is on (see {@link arcgisSceneMode}).
- * - `domControls`: the built-in controls are the SDK's own widgets, mounted
- *   through `view.ui`. MapLibre `IControl` plugin controls expect a MapLibre
- *   map to call into, which this engine cannot offer, so `addControl` reports
- *   that it has nowhere to host them.
+ * - `domControls`: the primary view hosts adapted controls through `view.ui`.
+ *   Rendering operations still require an explicit native or deck.gl bridge.
  */
 export const ARCGIS_CAPABILITIES: MapEngineCapabilities = Object.freeze({
   styleSpec: false,
@@ -91,7 +91,7 @@ export const ARCGIS_CAPABILITIES: MapEngineCapabilities = Object.freeze({
   terrain: true,
   picking: true,
   onMapDrawing: true,
-  domControls: false,
+  domControls: true,
 });
 
 export const ARCGIS_DECK_CAPABILITIES: MapEngineCapabilities = Object.freeze({
@@ -381,12 +381,17 @@ export function rotationToBearing(rotation: number): number {
 export class ArcgisEngine implements MapEngine {
   readonly kind = "arcgis" as const;
   get capabilities(): MapEngineCapabilities {
-    return this.options.deckOverlay !== false &&
+    const capabilities =
+      this.options.deckOverlay !== false &&
       (this.view?.type === "2d" || this.view?.viewingMode === "local")
-      ? ARCGIS_DECK_CAPABILITIES
-      : ARCGIS_CAPABILITIES;
+        ? ARCGIS_DECK_CAPABILITIES
+        : ARCGIS_CAPABILITIES;
+    return this.options.domControls === false
+      ? { ...capabilities, domControls: false }
+      : capabilities;
   }
   private view: ArcgisView | null;
+  private controlHost: ArcgisControlHost | null = null;
   private map: ArcgisMap | null;
   private surface: MapRenderSurface | null;
   private layers: GeoLibreLayer[] = [];
@@ -427,6 +432,7 @@ export class ArcgisEngine implements MapEngine {
     private options: {
       /** Secondary panes do not own the primary shared deck overlay. */
       deckOverlay?: boolean;
+      domControls?: boolean;
       /** Whether an API key is configured, so Esri basemap styles are usable. */
       hasApiKey?: boolean;
       /**
@@ -584,6 +590,9 @@ export class ArcgisEngine implements MapEngine {
     const view = this.view;
     if (!view) return;
     this.stopCamera();
+    this.controlHost?.destroy();
+    this.controlHost = null;
+    disposeArcgisControlAdapters(view);
     for (const dispose of this.disposers) dispose();
     this.disposers.clear();
     for (const handle of this.handles) handle.remove();
@@ -1285,21 +1294,22 @@ export class ArcgisEngine implements MapEngine {
   ): Promise<IdentifiedFeature[]> {
     const view = this.view;
     if (!view) return [];
+    const external = identifyArcgisControls(view, screenPoint, layerId);
     const include = [...this.natives]
       .filter(([id]) => !layerId || id === layerId)
       .flatMap(([, entry]) => entry.layers);
-    if (!include.length) return [];
+    if (!include.length) return external;
     let hit;
     try {
       hit = await view.hitTest(screenPoint, { include });
     } catch {
-      return [];
+      return external;
     }
     // The engine may have been destroyed (a renderer swap, an unmounted pane)
     // while the hit test was in flight; the captured view is gone with it.
     if (this.view !== view) return [];
     const seen = new Set<string>();
-    const features: IdentifiedFeature[] = [];
+    const features: IdentifiedFeature[] = [...external];
     for (const result of hit.results) {
       if (result.type !== "graphic" || !result.graphic) continue;
       const native = result.graphic.layer ?? result.layer ?? null;
@@ -1856,10 +1866,14 @@ export class ArcgisEngine implements MapEngine {
 
   // ----------------------------------------------------------------- controls
 
-  addControl(): boolean {
-    return false;
+  addControl(control: maplibregl.IControl, position?: maplibregl.ControlPosition): boolean {
+    if (!control || !this.view || this.options.domControls === false) return false;
+    this.controlHost ??= new ArcgisControlHost(this, this.view, this.sdk);
+    return this.controlHost.addControl(control, position);
   }
-  removeControl(): void {}
+  removeControl(control: maplibregl.IControl): void {
+    this.controlHost?.removeControl(control);
+  }
   private createBuiltInControl(id: BuiltInMapControl): ArcgisWidget | null {
     const view = this.view;
     if (!view) return null;

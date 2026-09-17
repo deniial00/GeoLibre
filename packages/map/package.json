@@ -37,7 +37,8 @@
     "./map-capture": "./src/map-capture.ts",
     "./arcgis-sdk": "./src/arcgis-sdk.ts",
     "./zarr-source": "./src/zarr-source.ts",
-    "./kerchunk-reference-store": "./src/kerchunk-reference-store.ts"
+    "./kerchunk-reference-store": "./src/kerchunk-reference-store.ts",
+    "./arcgis-control-adapters": "./src/arcgis-control-adapters.ts"
   },
   "publishConfig": {
     "main": "./dist/headless.mjs",
@@ -86,12 +87,16 @@
       "./kerchunk-reference-store": {
         "types": "./dist/kerchunk-reference-store.d.mts",
         "import": "./dist/kerchunk-reference-store.mjs"
+      },
+      "./arcgis-control-adapters": {
+        "types": "./dist/arcgis-control-adapters.d.mts",
+        "import": "./dist/arcgis-control-adapters.mjs"
       }
     },
     "access": "public"
   },
   "scripts": {
-    "build": "tsdown src/headless.ts src/derived-geometry.ts src/pmtiles-layer.ts src/style-import.ts src/style-layer-ids.ts src/layer-labels.ts src/map-capture.ts src/arcgis-sdk.ts src/zarr-source.ts src/kerchunk-reference-store.ts --format esm --dts"
+    "build": "tsdown src/headless.ts src/derived-geometry.ts src/pmtiles-layer.ts src/style-import.ts src/style-layer-ids.ts src/layer-labels.ts src/map-capture.ts src/arcgis-sdk.ts src/arcgis-control-adapters.ts src/zarr-source.ts src/kerchunk-reference-store.ts --format esm --dts"
   },
   "dependencies": {
     "@cesium/engine": "^26.3.0",

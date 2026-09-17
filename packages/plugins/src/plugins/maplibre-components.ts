@@ -3457,6 +3457,11 @@ async function openStandaloneLidarControl(
   // clouds, so it passes `reveal: false` to keep the panel out of the user's
   // way; a freshly created control is hidden so it does not pop open on load.
   const reveal = options.reveal ?? true;
+  if (
+    app.getMapRenderer?.() === "arcgis" &&
+    !(await import("./arcgis-deck/control-adapter")).installArcgisDeckControls(app)
+  )
+    return false;
   const { LidarControl: LidarControlClass, LidarLayerAdapter: LidarLayerAdapterClass } =
     await getComponentsConstructors();
 
@@ -4014,6 +4019,13 @@ function createLidarControl(
     ...LIDAR_OPTIONS,
     theme: resolveDocumentTheme(),
   });
+  if (app.getMapRenderer?.() === "arcgis") {
+    // The SDK owns terrain; do not install the plugin's MapLibre DEM source.
+    control.setTerrain = (enabled: boolean) => {
+      app.setTerrainEnabled?.(enabled);
+    };
+    control.getTerrain = () => app.isTerrainEnabled?.() ?? false;
+  }
   lidarLayerAdapter = new LidarLayerAdapterClass(control);
   const onUnload = createLidarUnloadHandler();
   const onLoad = createLidarLoadHandler();
