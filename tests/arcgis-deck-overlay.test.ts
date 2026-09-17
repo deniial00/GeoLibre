@@ -84,3 +84,17 @@ it("destroys a local scene RenderNode and does not mount in a global scene", asy
   await globeOverlay.mount();
   assert.equal(imports, 0);
 });
+
+it("retries a failed CDN mount on the same view", async () => {
+  const f = fixture();
+  let unavailable = true;
+  const overlay = new ArcgisDeckOverlay(f.view, {}, async () => {
+    if (unavailable) throw new Error("CDN unavailable");
+    return f.module;
+  });
+  await assert.rejects(overlay.mount(), /CDN unavailable/);
+  unavailable = false;
+  await overlay.mount();
+  assert.equal(f.added.length, 1);
+  overlay.finalize();
+});

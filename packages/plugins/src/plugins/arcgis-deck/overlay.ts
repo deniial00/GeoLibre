@@ -1,7 +1,7 @@
 import type { SceneDeckRenderer } from "./deck-renderer.js";
 import type { DeckProps } from "@deck.gl/core";
 import type { ArcgisEngine } from "@geolibre/map";
-import { ARCGIS_SDK_CDN } from "@geolibre/map/arcgis-sdk";
+import { arcgisModuleUrl } from "@geolibre/map/arcgis-sdk";
 import { initializeResources, render, finalizeResources, type RenderResources } from "./commons.js";
 
 type ArcgisView = NonNullable<ReturnType<ArcgisEngine["getView"]>>;
@@ -15,7 +15,7 @@ interface LayerView {
 }
 
 async function importModule(path: string): Promise<{ default: unknown }> {
-  return import(/* @vite-ignore */ `${ARCGIS_SDK_CDN}/@arcgis/core/${path}.js`);
+  return import(/* @vite-ignore */ arcgisModuleUrl(path));
 }
 
 /** CDN-backed equivalent of deck.gl's DeckLayer, with explicit store-driven props. */
@@ -41,7 +41,10 @@ export class ArcgisDeckOverlay {
 
   private mountPromise: Promise<void> | null = null;
   mount(): Promise<void> {
-    return (this.mountPromise ??= this.attach());
+    return (this.mountPromise ??= this.attach().catch((error) => {
+      this.mountPromise = null;
+      throw error;
+    }));
   }
   private async attach(): Promise<void> {
     if (this.disposed || this.native) return;
