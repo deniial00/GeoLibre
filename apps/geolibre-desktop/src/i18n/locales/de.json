@@ -359,6 +359,10 @@
       "kml": {
         "label": "KML / KMZ",
         "description": "KML oder KMZ mit nativen Stilen, Overlays und Netzwerklinks auf dem Globus laden."
+      },
+      "wcs": {
+        "description": "Numerischen GeoTIFF-Ausschnitt von einem WCS-1.0.0-Dienst laden.",
+        "label": "WCS-Ebene"
       }
     },
     "shared": {
@@ -966,7 +970,26 @@
       "modelTooLarge": "Dieses Modell überschreitet das Limit von {{limit}} MB für die Einbettung in ein Projekt. Hosten Sie es stattdessen und fügen Sie es per URL hinzu.",
       "modelFileError": "Dieses Modell konnte nicht gelesen werden. Wählen Sie eine gültige glTF-2.0- oder GLB-Datei aus."
     },
-    "nonGeographicCoordinates": "Die Koordinaten in {{names}} sind keine geografische Länge/Breite, daher wird nichts auf der Karte gezeichnet. Das CRS ist falsch angegeben — projizieren Sie die Daten um (oder korrigieren Sie die .prj) und laden Sie sie erneut."
+    "nonGeographicCoordinates": "Die Koordinaten in {{names}} sind keine geografische Länge/Breite, daher wird nichts auf der Karte gezeichnet. Das CRS ist falsch angegeben — projizieren Sie die Daten um (oder korrigieren Sie die .prj) und laden Sie sie erneut.",
+    "wcs": {
+      "retrieve": "Coverages abrufen",
+      "select": "Coverage auswählen",
+      "extent": "Coverage-Ausdehnung verwenden",
+      "width": "Breite (Pixel)",
+      "height": "Höhe (Pixel)",
+      "hint": "Lädt ein GeoTIFF in EPSG:4326 mit den gewählten Pixelmaßen herunter. Werte können neu abgetastet werden. Speichern Sie das Raster, um die Daten zu behalten.",
+      "errors": {
+        "xml": "Der Dienst hat ungültiges XML zurückgegeben.",
+        "version": "Diese Quelle benötigt WCS 1.0.0. Der Dienst hat eine nicht unterstützte Antwort zurückgegeben.",
+        "empty": "Die angeforderte Coverage wurde nicht gefunden.",
+        "format": "Die Coverage bietet keine GeoTIFF-Ausgabe an.",
+        "crs": "Die Coverage muss EPSG:4326 für Anfragen und Ausgabe unterstützen.",
+        "size": "Wählen Sie Abmessungen von 1 bis 4096 Pixeln. Downloads sind auf 128 MB begrenzt.",
+        "response": "Der Dienst hat kein gültiges GeoTIFF zurückgegeben.",
+        "bounds": "Geben Sie einen gültigen Rahmen ein: West/Ost zwischen -180 und 180, Süd/Nord zwischen -90 und 90, mit West < Ost und Süd < Nord.",
+        "url": "Geben Sie eine WCS-Dienst-URL ein."
+      }
+    }
   },
   "offline": {
     "title": "Offline-Bereich herunterladen",
@@ -2561,7 +2584,8 @@
       "czml": "Dynamische CZML-3D-Szene",
       "gltfModel": "3D-Modell (glTF)",
       "postgres": "PostgreSQL-Ebene",
-      "iceberg": "Apache-Iceberg-Ebene"
+      "iceberg": "Apache-Iceberg-Ebene",
+      "wcs": "WCS-Ebene"
     },
     "conversion": {
       "vectorToVector": "Vektor zu Vektor",

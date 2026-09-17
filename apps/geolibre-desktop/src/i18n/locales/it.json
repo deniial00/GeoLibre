@@ -359,6 +359,10 @@
       "kml": {
         "label": "KML / KMZ",
         "description": "Carica KML o KMZ con stili nativi, sovrapposizioni e collegamenti di rete sul globo."
+      },
+      "wcs": {
+        "description": "Carica un sottoinsieme GeoTIFF numerico da un servizio WCS 1.0.0.",
+        "label": "Layer WCS"
       }
     },
     "shared": {
@@ -966,7 +970,26 @@
       "modelTooLarge": "Questo modello supera il limite di {{limit}} MB per l'incorporamento in un progetto. Ospitalo su un server e aggiungilo tramite URL.",
       "modelFileError": "Impossibile leggere questo modello. Scegli un file glTF 2.0 o GLB valido."
     },
-    "nonGeographicCoordinates": "Le coordinate in {{names}} non sono longitudine/latitudine, quindi non verrà disegnato nulla sulla mappa. Il CRS è errato: riproietta i dati (o correggi il .prj) e ricaricali."
+    "nonGeographicCoordinates": "Le coordinate in {{names}} non sono longitudine/latitudine, quindi non verrà disegnato nulla sulla mappa. Il CRS è errato: riproietta i dati (o correggi il .prj) e ricaricali.",
+    "wcs": {
+      "retrieve": "Recupera coperture",
+      "select": "Seleziona una copertura",
+      "extent": "Usa estensione della copertura",
+      "width": "Larghezza (pixel)",
+      "height": "Altezza (pixel)",
+      "hint": "Scarica un GeoTIFF in EPSG:4326 con le dimensioni selezionate. I valori possono essere ricampionati. Salva il raster per conservare i dati scaricati.",
+      "errors": {
+        "xml": "Il servizio ha restituito XML non valido.",
+        "version": "Questa sorgente richiede WCS 1.0.0. Il servizio ha restituito una risposta non supportata.",
+        "empty": "La copertura richiesta non è stata trovata.",
+        "format": "La copertura non dichiara un output GeoTIFF.",
+        "crs": "La copertura deve supportare EPSG:4326 per richieste e output.",
+        "size": "Scegli dimensioni da 1 a 4096 pixel. I download sono limitati a 128 MB.",
+        "response": "Il servizio non ha restituito un GeoTIFF valido.",
+        "bounds": "Inserisci un riquadro valido: ovest/est tra -180 e 180, sud/nord tra -90 e 90, con ovest < est e sud < nord.",
+        "url": "Inserisci un URL del servizio WCS."
+      }
+    }
   },
   "offline": {
     "title": "Scarica area offline",
@@ -2561,7 +2584,8 @@
       "czml": "Scena 3D dinamica CZML",
       "gltfModel": "Modello 3D (glTF)",
       "postgres": "Layer PostgreSQL",
-      "iceberg": "Layer Apache Iceberg"
+      "iceberg": "Layer Apache Iceberg",
+      "wcs": "Layer WCS"
     },
     "conversion": {
       "vectorToVector": "Da vettoriale a vettoriale",

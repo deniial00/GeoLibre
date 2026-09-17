@@ -92,6 +92,7 @@ export const DATA_SOURCE_CATALOG: readonly DataSourceCatalogEntry[] = [
   { id: "osm-pbf", section: "files", labelKey: "toolbar.item.osmPbfLayer", tier: "advanced" },
   // Web services
   { id: "xyz", section: "webServices", labelKey: "toolbar.layerType.xyz", tier: "basic" },
+  { id: "wcs", section: "webServices", labelKey: "toolbar.layerType.wcs", tier: "basic" },
   { id: "wms", section: "webServices", labelKey: "toolbar.layerType.wms", tier: "basic" },
   { id: "csw", section: "webServices", labelKey: "toolbar.layerType.csw", tier: "intermediate" },
   { id: "wfs", section: "webServices", labelKey: "toolbar.layerType.wfs", tier: "intermediate" },

@@ -4,6 +4,7 @@
 
 export type AddDataKind =
   | "xyz"
+  | "wcs"
   | "wms"
   | "csw"
   | "wfs"

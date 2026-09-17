@@ -359,6 +359,10 @@
       "kml": {
         "label": "KML / KMZ",
         "description": "Chargez un KML ou KMZ avec ses styles natifs, superpositions et liens réseau sur le globe."
+      },
+      "wcs": {
+        "description": "Charger un sous-ensemble GeoTIFF numérique depuis un service WCS 1.0.0.",
+        "label": "Couche WCS"
       }
     },
     "shared": {
@@ -966,7 +970,26 @@
       "modelTooLarge": "Ce modèle dépasse la limite de {{limit}} Mo pour l'intégration dans un projet. Hébergez-le et ajoutez-le par URL.",
       "modelFileError": "Impossible de lire ce modèle. Choisissez un fichier glTF 2.0 ou GLB valide."
     },
-    "nonGeographicCoordinates": "Les coordonnées de {{names}} ne sont pas des longitudes/latitudes : rien ne sera dessiné sur la carte. Le SCR est mal déclaré — reprojetez les données (ou corrigez le .prj) puis rechargez-les."
+    "nonGeographicCoordinates": "Les coordonnées de {{names}} ne sont pas des longitudes/latitudes : rien ne sera dessiné sur la carte. Le SCR est mal déclaré — reprojetez les données (ou corrigez le .prj) puis rechargez-les.",
+    "wcs": {
+      "retrieve": "Récupérer les couvertures",
+      "select": "Sélectionner une couverture",
+      "extent": "Utiliser l’emprise de la couverture",
+      "width": "Largeur (pixels)",
+      "height": "Hauteur (pixels)",
+      "hint": "Télécharge un GeoTIFF en EPSG:4326 aux dimensions choisies. Les valeurs peuvent être rééchantillonnées. Enregistrez le raster pour conserver les données téléchargées.",
+      "errors": {
+        "xml": "Le service a renvoyé un XML invalide.",
+        "version": "Cette source nécessite WCS 1.0.0. Le service a renvoyé une réponse non prise en charge.",
+        "empty": "La couverture demandée est introuvable.",
+        "format": "La couverture ne propose pas de sortie GeoTIFF.",
+        "crs": "La couverture doit prendre en charge EPSG:4326 pour les requêtes et la sortie.",
+        "size": "Choisissez des dimensions de 1 à 4096 pixels. Les téléchargements sont limités à 128 Mo.",
+        "response": "Le service n’a pas renvoyé de GeoTIFF valide.",
+        "bounds": "Entrez une zone valide : ouest/est entre -180 et 180, sud/nord entre -90 et 90, avec ouest < est et sud < nord.",
+        "url": "Entrez une URL de service WCS."
+      }
+    }
   },
   "offline": {
     "title": "Télécharger une zone hors ligne",
@@ -2561,7 +2584,8 @@
       "czml": "Scène 3D dynamique CZML",
       "gltfModel": "Modèle 3D (glTF)",
       "postgres": "Couche PostgreSQL",
-      "iceberg": "Couche Apache Iceberg"
+      "iceberg": "Couche Apache Iceberg",
+      "wcs": "Couche WCS"
     },
     "conversion": {
       "vectorToVector": "Vecteur vers vecteur",

@@ -357,6 +357,10 @@
       "kml": {
         "label": "KML / KMZ",
         "description": "Muat KML atau KMZ dengan gaya asli, overlay, dan tautan jaringan pada globe."
+      },
+      "wcs": {
+        "description": "Muat subset GeoTIFF numerik dari layanan WCS 1.0.0.",
+        "label": "Layer WCS"
       }
     },
     "shared": {
@@ -945,7 +949,26 @@
       "modelTooLarge": "Model ini melebihi batas {{limit}} MB untuk disematkan dalam proyek. Hosting model tersebut lalu tambahkan melalui URL.",
       "modelFileError": "Tidak dapat membaca model ini. Pilih file glTF 2.0 atau GLB yang valid."
     },
-    "nonGeographicCoordinates": "Koordinat pada {{names}} bukan bujur/lintang, sehingga tidak ada yang digambar di peta. CRS salah — proyeksikan ulang data (atau perbaiki .prj-nya) lalu muat kembali."
+    "nonGeographicCoordinates": "Koordinat pada {{names}} bukan bujur/lintang, sehingga tidak ada yang digambar di peta. CRS salah — proyeksikan ulang data (atau perbaiki .prj-nya) lalu muat kembali.",
+    "wcs": {
+      "retrieve": "Ambil cakupan",
+      "select": "Pilih cakupan",
+      "extent": "Gunakan batas cakupan",
+      "width": "Lebar (piksel)",
+      "height": "Tinggi (piksel)",
+      "hint": "Mengunduh GeoTIFF dalam EPSG:4326 dengan dimensi piksel yang dipilih. Nilai dapat disampel ulang. Simpan raster untuk mempertahankan data yang diunduh.",
+      "errors": {
+        "xml": "Layanan mengembalikan XML yang tidak valid.",
+        "version": "Sumber ini memerlukan WCS 1.0.0. Layanan mengembalikan respons yang tidak didukung.",
+        "empty": "Cakupan yang diminta tidak ditemukan.",
+        "format": "Cakupan tidak menawarkan keluaran GeoTIFF.",
+        "crs": "Cakupan harus mendukung EPSG:4326 untuk permintaan dan keluaran.",
+        "size": "Pilih dimensi 1 hingga 4096 piksel. Unduhan dibatasi hingga 128 MB.",
+        "response": "Layanan tidak mengembalikan GeoTIFF yang valid.",
+        "bounds": "Masukkan kotak yang valid: barat/timur antara -180 hingga 180, selatan/utara antara -90 hingga 90, dengan barat < timur dan selatan < utara.",
+        "url": "Masukkan URL layanan WCS."
+      }
+    }
   },
   "offline": {
     "title": "Unduh Area Offline",
@@ -2513,7 +2536,8 @@
       "czml": "Adegan 3D Dinamis CZML",
       "gltfModel": "Model 3D (glTF)",
       "postgres": "Layer PostgreSQL",
-      "iceberg": "Layer Apache Iceberg"
+      "iceberg": "Layer Apache Iceberg",
+      "wcs": "Layer WCS"
     },
     "conversion": {
       "vectorToVector": "Vektor ke Vektor",

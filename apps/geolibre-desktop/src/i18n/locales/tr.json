@@ -359,6 +359,10 @@
       "kml": {
         "label": "KML / KMZ",
         "description": "KML veya KMZ dosyalarını özgün stiller, kaplamalar ve ağ bağlantılarıyla küreye yükleyin."
+      },
+      "wcs": {
+        "description": "WCS 1.0.0 servisinden sayısal bir GeoTIFF alt kümesi yükleyin.",
+        "label": "WCS Katmanı"
       }
     },
     "shared": {
@@ -966,7 +970,26 @@
       "modelTooLarge": "Bu model, bir projeye gömme için {{limit}} MB sınırından büyük. Bunun yerine bir sunucuda barındırıp URL ile ekleyin.",
       "modelFileError": "Bu model okunamadı. Geçerli bir glTF 2.0 veya GLB dosyası seçin."
     },
-    "nonGeographicCoordinates": "{{names}} içindeki koordinatlar boylam/enlem değil, bu yüzden haritaya hiçbir şey çizilmeyecek. CRS bilgisi yanlış — verileri yeniden projelendirin (veya .prj dosyasını düzeltin) ve tekrar yükleyin."
+    "nonGeographicCoordinates": "{{names}} içindeki koordinatlar boylam/enlem değil, bu yüzden haritaya hiçbir şey çizilmeyecek. CRS bilgisi yanlış — verileri yeniden projelendirin (veya .prj dosyasını düzeltin) ve tekrar yükleyin.",
+    "wcs": {
+      "retrieve": "Kapsamları getir",
+      "select": "Bir kapsam seçin",
+      "extent": "Kapsam sınırlarını kullan",
+      "width": "Genişlik (piksel)",
+      "height": "Yükseklik (piksel)",
+      "hint": "Seçilen piksel boyutlarında EPSG:4326 GeoTIFF indirir. Değerler yeniden örneklenebilir. İndirilen verileri korumak için rasteri kaydedin.",
+      "errors": {
+        "xml": "Servis geçersiz XML döndürdü.",
+        "version": "Bu kaynak WCS 1.0.0 gerektirir. Servis desteklenmeyen bir yanıt döndürdü.",
+        "empty": "İstenen kapsam bulunamadı.",
+        "format": "Kapsam GeoTIFF çıktısı bildirmiyor.",
+        "crs": "Kapsam hem istekler hem de çıktı için EPSG:4326 desteklemelidir.",
+        "size": "1 ile 4096 piksel arasında boyutlar seçin. İndirmeler 128 MB ile sınırlıdır.",
+        "response": "Servis geçerli bir GeoTIFF döndürmedi.",
+        "bounds": "Geçerli bir kutu girin: batı/doğu -180 ile 180 arasında, güney/kuzey -90 ile 90 arasında, batı < doğu ve güney < kuzey olacak şekilde.",
+        "url": "Bir WCS servis URL'si girin."
+      }
+    }
   },
   "offline": {
     "title": "Çevrimdışı Alan İndir",
@@ -2561,7 +2584,8 @@
       "czml": "CZML Dinamik 3B Sahne",
       "gltfModel": "3D Model (glTF)",
       "postgres": "PostgreSQL Katmanı",
-      "iceberg": "Apache Iceberg Katmanı"
+      "iceberg": "Apache Iceberg Katmanı",
+      "wcs": "WCS Katmanı"
     },
     "conversion": {
       "vectorToVector": "Vektörden Vektöre",

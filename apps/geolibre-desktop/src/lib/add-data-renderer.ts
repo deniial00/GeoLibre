@@ -18,6 +18,7 @@ const ARCGIS_UNSUPPORTED_SOURCES = new Set([
   ...MAPBOX_UNSUPPORTED_SOURCES,
   "vector",
   "raster",
+  "wcs",
   "pmtiles",
   "zarr",
   "netcdf",

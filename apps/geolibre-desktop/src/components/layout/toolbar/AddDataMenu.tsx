@@ -76,6 +76,7 @@ export function AddDataMenu({
     mbtiles: { onSelect: () => onSetAddDataKind("mbtiles") },
     "osm-pbf": { onSelect: onOpenOsmPbfDialog, disabled: osmPbfBusy },
     xyz: { onSelect: () => onSetAddDataKind("xyz") },
+    wcs: { onSelect: () => onSetAddDataKind("wcs") },
     wms: { onSelect: () => onSetAddDataKind("wms") },
     csw: { onSelect: () => onSetAddDataKind("csw") },
     wfs: { onSelect: () => onSetAddDataKind("wfs") },

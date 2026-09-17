@@ -359,6 +359,10 @@
       "kml": {
         "label": "KML / KMZ",
         "description": "Carregue KML ou KMZ com estilos nativos, sobreposições e links de rede no globo."
+      },
+      "wcs": {
+        "description": "Carregar um subconjunto GeoTIFF numérico de um serviço WCS 1.0.0.",
+        "label": "Camada WCS"
       }
     },
     "shared": {
@@ -966,7 +970,26 @@
       "modelTooLarge": "Este modelo excede o limite de {{limit}} MB para incorporação em um projeto. Hospede-o e adicione-o por URL.",
       "modelFileError": "Não foi possível ler este modelo. Escolha um arquivo glTF 2.0 ou GLB válido."
     },
-    "nonGeographicCoordinates": "As coordenadas em {{names}} não são de longitude/latitude, portanto nada será desenhado no mapa. O CRS está incorreto — reprojete os dados (ou corrija o .prj) e carregue novamente."
+    "nonGeographicCoordinates": "As coordenadas em {{names}} não são de longitude/latitude, portanto nada será desenhado no mapa. O CRS está incorreto — reprojete os dados (ou corrija o .prj) e carregue novamente.",
+    "wcs": {
+      "retrieve": "Obter coberturas",
+      "select": "Selecionar uma cobertura",
+      "extent": "Usar extensão da cobertura",
+      "width": "Largura (pixels)",
+      "height": "Altura (pixels)",
+      "hint": "Baixa um GeoTIFF em EPSG:4326 nas dimensões selecionadas. Os valores podem ser reamostrados. Salve o raster para manter os dados baixados.",
+      "errors": {
+        "xml": "O serviço retornou XML inválido.",
+        "version": "Esta fonte requer WCS 1.0.0. O serviço retornou uma resposta não suportada.",
+        "empty": "A cobertura solicitada não foi encontrada.",
+        "format": "A cobertura não anuncia saída GeoTIFF.",
+        "crs": "A cobertura deve suportar EPSG:4326 para solicitações e saída.",
+        "size": "Escolha dimensões de 1 a 4096 pixels. Os downloads são limitados a 128 MB.",
+        "response": "O serviço não retornou um GeoTIFF válido.",
+        "bounds": "Digite uma caixa válida: oeste/leste entre -180 e 180, sul/norte entre -90 e 90, com oeste < leste e sul < norte.",
+        "url": "Digite uma URL de serviço WCS."
+      }
+    }
   },
   "offline": {
     "title": "Baixar área offline",
@@ -2561,7 +2584,8 @@
       "czml": "Cena 3D dinâmica CZML",
       "gltfModel": "Modelo 3D (glTF)",
       "postgres": "Camada PostgreSQL",
-      "iceberg": "Camada Apache Iceberg"
+      "iceberg": "Camada Apache Iceberg",
+      "wcs": "Camada WCS"
     },
     "conversion": {
       "vectorToVector": "Vetor para vetor",

@@ -357,6 +357,10 @@
       "kml": {
         "label": "KML / KMZ",
         "description": "在地球仪上加载 KML 或 KMZ，保留原生样式、叠加层和网络链接。"
+      },
+      "wcs": {
+        "description": "从 WCS 1.0.0 服务加载数值型 GeoTIFF 子集。",
+        "label": "WCS 图层"
       }
     },
     "shared": {
@@ -945,6 +949,25 @@
       "sampleMultiLine": "多线路线批量（3 段）",
       "unitMeters": "{{value}} 米",
       "unitKm": "{{value}} 千米"
+    },
+    "wcs": {
+      "retrieve": "获取覆盖数据",
+      "select": "选择覆盖数据",
+      "extent": "使用覆盖范围",
+      "width": "宽度（像素）",
+      "height": "高度（像素）",
+      "hint": "按所选像素尺寸下载 EPSG:4326 的 GeoTIFF。数值可能经过重采样。请保存栅格以保留下载的数据。",
+      "errors": {
+        "xml": "服务返回了无效的 XML。",
+        "version": "此数据源需要 WCS 1.0.0。服务返回了不支持的响应。",
+        "empty": "未找到请求的覆盖数据。",
+        "format": "覆盖数据未声明支持 GeoTIFF 输出。",
+        "crs": "覆盖数据必须支持使用 EPSG:4326 进行请求和输出。",
+        "size": "请选择 1 到 4096 像素的尺寸。下载大小限制为 128 MB。",
+        "response": "服务未返回有效的 GeoTIFF。",
+        "bounds": "请输入有效的边界框：东西经度在 -180 到 180 之间，南北纬度在 -90 到 90 之间，且西 < 东、南 < 北。",
+        "url": "请输入 WCS 服务 URL。"
+      }
     }
   },
   "offline": {
@@ -2513,7 +2536,8 @@
       "gltfModel": "3D 模型（glTF）",
       "postgres": "PostgreSQL 图层",
       "iceberg": "Apache Iceberg 图层",
-      "polyline": "编码折线"
+      "polyline": "编码折线",
+      "wcs": "WCS 图层"
     },
     "conversion": {
       "vectorToVector": "矢量转矢量",

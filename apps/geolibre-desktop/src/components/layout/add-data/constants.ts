@@ -13,6 +13,7 @@ export const DECK_VIZ_SIZE_WARN_BYTES = 10 * 1024 * 1024;
  * `t(\`addData.kind.${key}.label\`)` lookups stay type-checked against en.json. */
 export type KindI18nKey =
   | "xyz"
+  | "wcs"
   | "wms"
   | "csw"
   | "wfs"
@@ -43,6 +44,7 @@ export type KindI18nKey =
  */
 export const KIND_I18N_KEY: Record<AddDataKind, KindI18nKey> = {
   xyz: "xyz",
+  wcs: "wcs",
   wms: "wms",
   csw: "csw",
   wfs: "wfs",

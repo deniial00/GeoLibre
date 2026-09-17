@@ -344,7 +344,7 @@ export function proxyFeedRequestUrl(url: string): string {
  * @param signal - Optional abort signal.
  * @returns The response ok flag, status, and body text.
  */
-async function fetchCapabilitiesText(
+export async function fetchCapabilitiesText(
   requestUrl: string,
   devProxyPath: string,
   signal?: AbortSignal,
