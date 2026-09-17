@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
   reloadForStaleChunk,
+  isExternalModuleFailure,
   STALE_CHUNK_RELOAD_COOLDOWN_MS,
 } from "../apps/geolibre-desktop/src/lib/stale-chunk-reload";
 
@@ -90,4 +91,38 @@ describe("reloadForStaleChunk", () => {
     assert.equal(state.reloads, 0);
     assert.equal(state.lastReloadAt, lastReloadAt);
   });
+});
+
+it("leaves CDN import errors to their feature while retaining local stale-chunk recovery", () => {
+  const origin = "https://web.geolibre.app";
+  assert.equal(
+    isExternalModuleFailure(
+      new TypeError(
+        "Failed to fetch dynamically imported module: https://js.arcgis.com/5.1/@arcgis/core/Map.js",
+      ),
+      origin,
+    ),
+    true,
+  );
+  assert.equal(
+    isExternalModuleFailure(
+      "error loading dynamically imported module: https://cdn.jsdelivr.net/npm/example/index.js",
+      origin,
+    ),
+    true,
+  );
+  assert.equal(
+    isExternalModuleFailure(
+      new Error(
+        "Failed to fetch dynamically imported module: https://web.geolibre.app/assets/old-hash.js",
+      ),
+      origin,
+    ),
+    false,
+  );
+  assert.equal(
+    isExternalModuleFailure(new Error("Importing a module script failed."), origin),
+    false,
+  );
+  assert.equal(isExternalModuleFailure(undefined, origin), false);
 });

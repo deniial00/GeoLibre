@@ -89,6 +89,23 @@ export function reloadForStaleChunk(deps: StaleChunkReloadDeps): StaleChunkReloa
   return "reloaded";
 }
 
+/** A third-party module cannot become available by refreshing our app build. */
+export function isExternalModuleFailure(payload: unknown, appOrigin: string): boolean {
+  const message =
+    payload instanceof Error ? payload.message : typeof payload === "string" ? payload : "";
+  const urls = message.match(/https?:\/\/[^\s"'<>]+/g) ?? [];
+  return (
+    urls.length > 0 &&
+    urls.every((url) => {
+      try {
+        return new URL(url).origin !== appOrigin;
+      } catch {
+        return false;
+      }
+    })
+  );
+}
+
 /**
  * Registers a `vite:preloadError` handler that reloads once (cooldown-guarded)
  * to recover from chunks orphaned by a redeploy. A no-op when disabled or
@@ -116,6 +133,9 @@ export function installStaleChunkReload(options?: { enabled?: boolean }): () => 
     // Vite dispatches a plain Event with the underlying error on `.payload`
     // (not a CustomEvent `.detail`); surface it so a recovery is visible.
     const payload = (event as Event & { payload?: unknown }).payload;
+    // CDN engines (ArcGIS, Pyodide, etc.) are not deployment chunks. Leave
+    // their rejection intact for the feature to report, preserving its project.
+    if (isExternalModuleFailure(payload, window.location.origin)) return;
     let outcome: StaleChunkReloadOutcome = "suppressed-cooldown";
     try {
       outcome = reloadForStaleChunk({

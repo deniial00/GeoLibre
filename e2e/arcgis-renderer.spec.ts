@@ -92,8 +92,22 @@ test("ArcGIS renderer draws the project basemap, a dropped GeoJSON layer and ide
 
   // Sources without an SDK adapter are greyed out while ArcGIS is primary.
   await page.getByRole("button", { name: "Add Data", exact: true }).click();
-  for (const name of ["PMTiles Layer", "Deck.gl Layer", "MBTiles Layer"]) {
+  for (const name of ["Gaussian Splatting", "Cesium Ion Asset", "CZML Dynamic 3D Scene"]) {
     await expect(page.getByRole("menuitem", { name, exact: true })).toBeDisabled();
+  }
+  for (const name of [
+    "Vector Layer",
+    "Raster Layer",
+    "PMTiles Layer",
+    "Deck.gl Layer",
+    "MBTiles Layer",
+    "Zarr Layer",
+    "NetCDF / HDF",
+    "LiDAR Layer",
+    "DuckDB Layer",
+    "3D Tiles Layer",
+  ]) {
+    await expect(page.getByRole("menuitem", { name, exact: true })).toBeEnabled();
   }
   await expect(page.getByRole("menuitem", { name: "XYZ Layer", exact: true })).toBeEnabled();
   await page.keyboard.press("Escape");

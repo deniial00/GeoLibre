@@ -270,6 +270,11 @@ experimental alignment and depth limitations described above.
 boundaries. None of them touch the network. `e2e/arcgis-renderer.spec.ts` is
 the opt-in browser check against Esri's real CDN: set `ARCGIS_API_KEY` for
 the full suite, or `ARCGIS_E2E=1` for keyless coordinate and H3 search coverage.
+With `ARCGIS_E2E=1`, `e2e/arcgis-offline.spec.ts` also verifies a fresh keyless
+boot under the production Tauri CSP, cached SDK/inline-data startup with the
+browser offline, and a visible error when the CDN is unavailable on first use.
+The CSP test runs in Chromium with the exact policy header; it does not replace
+native webview testing on each desktop platform.
 
 ## License and terms
 
