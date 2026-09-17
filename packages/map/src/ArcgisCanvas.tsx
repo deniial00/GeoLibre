@@ -369,6 +369,7 @@ export function ArcgisCanvas({
               } catch (error) {
                 // A failed DEM restore must not prevent the map from opening.
                 if (!cancelled) {
+                  terrainSource.current = { source: null, band: 1 };
                   console.warn(
                     "ArcGIS terrain restore failed:",
                     redactArcgisError(error instanceof Error ? error.message : String(error)),
