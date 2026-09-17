@@ -57,6 +57,8 @@ mod native_duckdb {
 #[cfg(all(feature = "mas", feature = "native-duckdb"))]
 compile_error!("the `mas` (Mac App Store) build must not enable `native-duckdb`: DuckDB loads its spatial extension as unsigned native code at runtime, which App Sandbox and App Store guideline 2.5.2 forbid.");
 
+mod http_body;
+
 use earth_engine_oauth::{poll_earth_engine_oauth, start_earth_engine_oauth};
 #[cfg(not(any(feature = "mas", target_os = "ios")))]
 use earth_engine_oauth::EarthEngineOAuthState;
@@ -1357,11 +1359,19 @@ fn build_guarded_http_client_with_redirects(
 /// whole dataset rather than a tile; it is clamped to
 /// `[REMOTE_TILE_TIMEOUT_SECS, MAX_FETCH_TIMEOUT_SECS]`, so the budget can only
 /// ever be raised and never removed.
+/// `max_bytes`, when supplied, limits the body while it is read rather than
+/// buffering an oversized response before rejecting it.
 #[tauri::command]
-async fn fetch_url_bytes(url: String, timeout_secs: Option<u64>) -> Result<Vec<u8>, String> {
-    tauri::async_runtime::spawn_blocking(move || fetch_url_bytes_blocking(url, timeout_secs))
-        .await
-        .map_err(|error| format!("Tile fetch task failed: {error}"))?
+async fn fetch_url_bytes(
+    url: String,
+    timeout_secs: Option<u64>,
+    max_bytes: Option<u64>,
+) -> Result<Vec<u8>, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        fetch_url_bytes_blocking(url, timeout_secs, max_bytes)
+    })
+    .await
+    .map_err(|error| format!("Tile fetch task failed: {error}"))?
 }
 
 /// Resolves the request budget for a fetch, defaulting to the tile timeout and
@@ -1375,7 +1385,11 @@ fn resolve_fetch_timeout_secs(timeout_secs: Option<u64>) -> u64 {
         .clamp(REMOTE_TILE_TIMEOUT_SECS, MAX_FETCH_TIMEOUT_SECS)
 }
 
-fn fetch_url_bytes_blocking(url: String, timeout_secs: Option<u64>) -> Result<Vec<u8>, String> {
+fn fetch_url_bytes_blocking(
+    url: String,
+    timeout_secs: Option<u64>,
+    max_bytes: Option<u64>,
+) -> Result<Vec<u8>, String> {
     ensure_fetchable_url(&url)?;
 
     let client = guarded_http_client()?;
@@ -1391,10 +1405,15 @@ fn fetch_url_bytes_blocking(url: String, timeout_secs: Option<u64>) -> Result<Ve
         return Err(format!("Request failed with status {status}"));
     }
 
-    response
-        .bytes()
-        .map(|bytes| bytes.to_vec())
-        .map_err(|error| format!("Could not read response body: {error}"))
+    if let Some(limit) = max_bytes {
+        let content_length = response.content_length();
+        http_body::read_limited_body(response, content_length, limit)
+    } else {
+        response
+            .bytes()
+            .map(|bytes| bytes.to_vec())
+            .map_err(|error| format!("Could not read response body: {error}"))
+    }
 }
 
 /// Install a packaged plugin from a local `.zip` archive into GeoLibre's

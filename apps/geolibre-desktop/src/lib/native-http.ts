@@ -36,6 +36,8 @@ interface FetchUrlBytesOptions extends NativeHttpOptions {
    * one is capped at 600; the timeout can be raised but never removed.
    */
   timeoutSecs?: number;
+  /** Optional response byte limit, enforced while the native body is read. */
+  maxBytes?: number;
 }
 
 function recordSource(command: NativeHttpCommand, context?: string): string {
@@ -104,6 +106,7 @@ async function invokeNativeHttp<T>(
     const result = await invoke<T>(command, {
       url,
       ...(options?.timeoutSecs === undefined ? {} : { timeoutSecs: options.timeoutSecs }),
+      ...(options?.maxBytes === undefined ? {} : { maxBytes: options.maxBytes }),
     });
     appendDiagnostic(
       nativeHttpSuccessRecord(

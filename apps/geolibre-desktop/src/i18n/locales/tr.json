@@ -981,7 +981,7 @@
       "errors": {
         "xml": "Servis geçersiz XML döndürdü.",
         "version": "Bu kaynak WCS 1.0.0 gerektirir. Servis desteklenmeyen bir yanıt döndürdü.",
-        "empty": "İstenen kapsam bulunamadı.",
+        "empty": "Eşleşen kapsam bulunmuyor.",
         "format": "Kapsam GeoTIFF çıktısı bildirmiyor.",
         "crs": "Kapsam hem istekler hem de çıktı için EPSG:4326 desteklemelidir.",
         "size": "1 ile 4096 piksel arasında boyutlar seçin. İndirmeler 128 MB ile sınırlıdır.",

@@ -981,7 +981,7 @@
       "errors": {
         "xml": "El servicio devolvió XML no válido.",
         "version": "Esta fuente requiere WCS 1.0.0. El servicio devolvió una respuesta no compatible.",
-        "empty": "No se encontró la cobertura solicitada.",
+        "empty": "No hay coberturas coincidentes disponibles.",
         "format": "La cobertura no anuncia salida GeoTIFF.",
         "crs": "La cobertura debe admitir EPSG:4326 para solicitudes y salida.",
         "size": "Elija dimensiones de 1 a 4096 píxeles. Las descargas se limitan a 128 MB.",

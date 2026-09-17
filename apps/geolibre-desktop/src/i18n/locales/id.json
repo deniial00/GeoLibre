@@ -960,7 +960,7 @@
       "errors": {
         "xml": "Layanan mengembalikan XML yang tidak valid.",
         "version": "Sumber ini memerlukan WCS 1.0.0. Layanan mengembalikan respons yang tidak didukung.",
-        "empty": "Cakupan yang diminta tidak ditemukan.",
+        "empty": "Tidak ada cakupan yang cocok.",
         "format": "Cakupan tidak menawarkan keluaran GeoTIFF.",
         "crs": "Cakupan harus mendukung EPSG:4326 untuk permintaan dan keluaran.",
         "size": "Pilih dimensi 1 hingga 4096 piksel. Unduhan dibatasi hingga 128 MB.",

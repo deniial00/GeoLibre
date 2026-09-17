@@ -985,7 +985,7 @@
         "url": "Enter an HTTP or HTTPS WCS service URL.",
         "xml": "The service returned invalid XML.",
         "version": "This source requires WCS 1.0.0. The service returned an unsupported response.",
-        "empty": "The requested coverage was not found.",
+        "empty": "No matching coverages are available.",
         "format": "The coverage does not advertise GeoTIFF output.",
         "crs": "The coverage must support EPSG:4326 for both requests and output.",
         "bounds": "Enter a valid box: west/east within -180 to 180, south/north within -90 to 90, with west < east and south < north.",

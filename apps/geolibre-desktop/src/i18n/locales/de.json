@@ -981,7 +981,7 @@
       "errors": {
         "xml": "Der Dienst hat ungültiges XML zurückgegeben.",
         "version": "Diese Quelle benötigt WCS 1.0.0. Der Dienst hat eine nicht unterstützte Antwort zurückgegeben.",
-        "empty": "Die angeforderte Coverage wurde nicht gefunden.",
+        "empty": "Keine passenden Coverages verfügbar.",
         "format": "Die Coverage bietet keine GeoTIFF-Ausgabe an.",
         "crs": "Die Coverage muss EPSG:4326 für Anfragen und Ausgabe unterstützen.",
         "size": "Wählen Sie Abmessungen von 1 bis 4096 Pixeln. Downloads sind auf 128 MB begrenzt.",

@@ -2,6 +2,8 @@
 
 The **Add Data** menu is the main way to bring layers into GeoLibre. It groups sources into Files, Web services, Cloud formats, 3D layers, and Databases. You can also drag files straight onto the map.
 
+For a consolidated list of file formats, service protocols, and platform limitations, see [Supported Data Formats](../data-formats.md).
+
 To collect supported dataset links from a catalog or other webpage and open several at once, use the [GeoLibre Chrome extension](chrome-extension.md), available from the [Chrome Web Store](https://chromewebstore.google.com/detail/open-data-in-geolibre/joinecgbfoldanidcoakpjgkbaceaooj).
 
 ![The Add Data menu, grouped into Files, Web services, Cloud formats, 3D layers, and Databases](https://assets.geolibre.app/images/geolibre-add-data-menu.webp)
@@ -57,6 +59,7 @@ GeoParquet opens across its variants: 1.0 and 1.1 files (including one carrying 
 | Item | Notes |
 | --- | --- |
 | **XYZ Layer** | A raster or vector tile service using a `{z}/{x}/{y}` URL template. |
+| **[WCS Layer](../data-formats.md#wcs-raster-subsets)** | Downloads numerical GeoTIFF subsets from WCS 1.0.0 services. |
 | **WMS Layer** | A Web Map Service layer, with click-to-identify through GetFeatureInfo where supported. |
 | **WFS Layer** | A Web Feature Service layer, with optional automatic refresh. |
 | **WMTS Layer** | A Web Map Tile Service layer. |

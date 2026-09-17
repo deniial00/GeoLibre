@@ -9,6 +9,7 @@ import {
   wcsCoverageUrl,
   wcsRequestUrl,
   WcsError,
+  waitForWcsRequest,
 } from "../apps/geolibre-desktop/src/lib/wcs";
 
 const originalParser = Object.getOwnPropertyDescriptor(globalThis, "DOMParser");
@@ -137,4 +138,23 @@ test("surfaces WCS exception text and rejects HTTP-200 non-TIFF payloads", () =>
     [73, 73, 43, 0, 0, 0, 0, 0],
   ])
     assert.doesNotThrow(() => assertWcsTiff(new Uint8Array(bytes)));
+});
+
+test("native requests stop waiting on abort and observe late rejections", async () => {
+  const controller = new AbortController();
+  let fail!: (reason: Error) => void;
+  const native = new Promise<never>((_, reject) => {
+    fail = reject;
+  });
+  const waiting = waitForWcsRequest(native, controller.signal);
+  controller.abort(new Error("cancelled"));
+  await assert.rejects(waiting, /cancelled/);
+  fail(new Error("late native failure"));
+  await Promise.resolve();
+  assert.equal(await waitForWcsRequest(Promise.resolve(42), new AbortController().signal), 42);
+  await assert.rejects(waitForWcsRequest(Promise.resolve(42), controller.signal), /cancelled/);
+  await assert.rejects(
+    waitForWcsRequest(Promise.reject(new Error("native error")), new AbortController().signal),
+    /native error/,
+  );
 });

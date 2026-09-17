@@ -981,7 +981,7 @@
       "errors": {
         "xml": "De service heeft ongeldige XML teruggestuurd.",
         "version": "Deze bron vereist WCS 1.0.0. De service heeft een niet-ondersteund antwoord teruggestuurd.",
-        "empty": "De gevraagde coverage is niet gevonden.",
+        "empty": "Er zijn geen overeenkomende coverages beschikbaar.",
         "format": "De coverage biedt geen GeoTIFF-uitvoer aan.",
         "crs": "De coverage moet EPSG:4326 ondersteunen voor aanvragen en uitvoer.",
         "size": "Kies afmetingen van 1 tot 4096 pixels. Downloads zijn beperkt tot 128 MB.",

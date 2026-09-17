@@ -981,7 +981,7 @@
       "errors": {
         "xml": "Le service a renvoyé un XML invalide.",
         "version": "Cette source nécessite WCS 1.0.0. Le service a renvoyé une réponse non prise en charge.",
-        "empty": "La couverture demandée est introuvable.",
+        "empty": "Aucune couverture correspondante n’est disponible.",
         "format": "La couverture ne propose pas de sortie GeoTIFF.",
         "crs": "La couverture doit prendre en charge EPSG:4326 pour les requêtes et la sortie.",
         "size": "Choisissez des dimensions de 1 à 4096 pixels. Les téléchargements sont limités à 128 Mo.",
