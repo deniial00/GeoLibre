@@ -151,6 +151,12 @@ In a scene:
   [World Elevation](https://elevation3d.arcgis.com/arcgis/rest/services/WorldElevation3D/Terrain3D/ImageServer)
   service. It needs no API key. **Controls → Terrain exaggeration** scales the
   heights.
+- **Controls → Terrain exaggeration** also accepts a local or remote COG DEM
+  in EPSG:3857 or EPSG:4326, using the same reader as the other engines.
+  The local file stays on the device. The source and exaggeration survive
+  switches between flat maps, local scenes and the globe during the session;
+  they are not saved in the project. Missing DEM pixels and areas outside the
+  COG use zero metres. **Use global terrain** restores Esri's World Elevation.
 - Polygon layers whose style extrudes (the Style panel's **3D extrusion**) draw as
   extruded 3D shapes with the same height and colour as MapLibre's
   fill-extrusion: the height property times the height scale (or the advanced
@@ -178,8 +184,6 @@ drop the file instead.
 
 ## Not supported yet
 
-- Custom terrain sources (a COG DEM chosen in **Controls → Terrain exaggeration**): terrain is
-  always Esri's World Elevation.
 - deck.gl overlays (Deck.gl Layers, 3D Models, DuckDB query layers, 3D Tiles,
   LiDAR), COGs, Zarr, NetCDF, PMTiles and MBTiles archives, Gaussian splats and
   Cesium-only sources. **Add Data** greys these out while ArcGIS is the primary

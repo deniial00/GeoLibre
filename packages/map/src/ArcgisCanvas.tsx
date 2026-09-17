@@ -59,6 +59,11 @@ export function ArcgisCanvas({
   const container = useRef<HTMLDivElement>(null);
   // Views replaced by a 2D/3D switch, kept on screen until the new view draws.
   const retiring = useRef<{ element: HTMLElement; engine: ArcgisEngine }[]>([]);
+  const terrainSource = useRef<{ source: string | Blob | null; band: number }>({
+    source: null,
+    band: 1,
+  });
+  const terrainExaggeration = useRef(1);
   const readyCallback = useRef(onEngineReady);
   readyCallback.current = onEngineReady;
   // Read through a ref so a language change reaches the next popup without
@@ -140,6 +145,9 @@ export function ArcgisCanvas({
             });
         engine = new ArcgisEngine(sdk, map, mapView, {
           hasApiKey: Boolean(apiKey?.trim()),
+          onTerrainSourceChange: (source, band) => {
+            if (!cancelled) terrainSource.current = { source, band };
+          },
           onLayerVisibilityChange: (id, visible) => {
             if (cancelled) return;
             const store = useAppStore.getState();
@@ -170,6 +178,7 @@ export function ArcgisCanvas({
           },
         });
         const current = engine;
+        current.setTerrainExaggeration(terrainExaggeration.current);
         let applying = false;
         // Until the initial camera has landed, `stationary` reports the view's
         // default camera, which must not be written back to the store.
@@ -349,8 +358,15 @@ export function ArcgisCanvas({
         );
         void mapView
           .when()
-          .then(() => {
+          .then(async () => {
             if (cancelled) return;
+            if (terrainSource.current.source) {
+              await current.setTerrainCogSource(
+                terrainSource.current.source,
+                terrainSource.current.band,
+              );
+              if (cancelled) return;
+            }
             const latest = useAppStore.getState();
             const pane = latest.secondaryMapViews.find((p) => p.id === viewId);
             return current.settleView(
@@ -413,6 +429,7 @@ export function ArcgisCanvas({
       });
     return () => {
       cancelled = true;
+      if (engine) terrainExaggeration.current = engine.getTerrainExaggeration();
       cleanup();
       if (engineRef && engineRef.current === engine) engineRef.current = null;
       if (engine) {

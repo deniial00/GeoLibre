@@ -1,5 +1,7 @@
 import { SEARCH_HIGHLIGHT_COLOR } from "./map-engine";
 import { renderFillPatternCanvas } from "./fill-patterns";
+import { registerCogDemSource, type CogDemSourceRegistration } from "./cog-dem-source";
+import { createCogElevationLayer } from "./arcgis-cog-terrain";
 import type * as maplibregl from "maplibre-gl";
 import type { FeatureCollection, Geometry, Point, Polygon, Position } from "geojson";
 import {
@@ -399,6 +401,9 @@ export class ArcgisEngine implements MapEngine {
   private zoomWatch: ArcgisHandle | null = null;
   private terrain = false;
   private exaggeration = 1;
+  private cogTerrain: CogDemSourceRegistration | null = null;
+  private cogTerrainUrl: string | null = null;
+  private cogTerrainRequest = 0;
   private elevation: ArcgisElevationLayer | null = null;
 
   constructor(
@@ -421,6 +426,8 @@ export class ArcgisEngine implements MapEngine {
       onProjectionToggle?: (projection: MapProjection) => void;
       /** Write LayerList changes through the owning pane's store state. */
       onLayerVisibilityChange?: (id: string, visible: boolean) => void;
+      /** Preserve the device-local terrain choice across a 2D/3D view rebuild. */
+      onTerrainSourceChange?: (source: string | Blob | null, band: number) => void;
       /**
        * Override built-in control visibility before the controls are added.
        * Split/grid panes pass `{ "layer-control": false }` like the other
@@ -569,6 +576,9 @@ export class ArcgisEngine implements MapEngine {
     this.zoomWatch = null;
     this.clearFeatureHighlight();
     this.removeElevation();
+    this.cogTerrainRequest++;
+    this.cogTerrain?.dispose();
+    this.cogTerrain = null;
     for (const id of [...this.natives.keys()]) this.removeLayer(id);
     for (const widget of this.builtInControls.values()) widget.destroy();
     this.builtInControls.clear();
@@ -1956,7 +1966,9 @@ export class ArcgisEngine implements MapEngine {
     const ground = this.map?.ground;
     const scene = this.options.scene;
     if (!this.terrain || !this.canDrape() || !ground || !scene) return;
-    this.elevation = createElevationLayer(scene, this.exaggeration);
+    this.elevation = this.cogTerrain
+      ? createCogElevationLayer(scene, this.cogTerrain, this.exaggeration)
+      : createElevationLayer(scene, this.exaggeration);
     ground.layers.add(this.elevation);
   }
   private removeElevation(): void {
@@ -1970,14 +1982,34 @@ export class ArcgisEngine implements MapEngine {
     (layer as { source?: ArcgisElevationLayer }).source?.destroy();
     layer.destroy();
   }
-  getTerrainCogSource(): null {
-    return null;
+  getTerrainCogSource(): string | null {
+    return this.cogTerrainUrl;
   }
   hasCustomTerrainSource(): boolean {
-    return false;
+    return this.cogTerrain !== null;
   }
-  async setTerrainCogSource(source: string | Blob | null): Promise<boolean> {
-    return source === null;
+  async setTerrainCogSource(source: string | Blob | null, band = 1): Promise<boolean> {
+    if (!this.view) return false;
+    const normalized = typeof source === "string" ? source.trim() || null : source;
+    const request = ++this.cogTerrainRequest;
+    let registration: CogDemSourceRegistration | null;
+    try {
+      registration = normalized ? await registerCogDemSource(normalized, band) : null;
+    } catch (error) {
+      if (request !== this.cogTerrainRequest || !this.view) return false;
+      throw error;
+    }
+    if (request !== this.cogTerrainRequest || !this.view) {
+      registration?.dispose();
+      return false;
+    }
+    const previous = this.cogTerrain;
+    this.cogTerrain = registration;
+    this.cogTerrainUrl = typeof normalized === "string" ? normalized : null;
+    this.applyElevation();
+    previous?.dispose();
+    this.options.onTerrainSourceChange?.(normalized, band);
+    return true;
   }
 }
 
