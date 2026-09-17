@@ -671,7 +671,11 @@ function isViteDevServer(): boolean {
 }
 
 function proxyWfsRequestUrl(url: string): string {
-  return isViteDevServer() ? `${WFS_PROXY_PATH}?url=${encodeURIComponent(url)}` : url;
+  // Relative endpoints already target the app's origin; the CORS proxy only
+  // accepts absolute HTTP(S) targets.
+  return isViteDevServer() && isHttpUrl(url)
+    ? `${WFS_PROXY_PATH}?url=${encodeURIComponent(url)}`
+    : url;
 }
 
 function proxyCswRequestUrl(url: string): string {

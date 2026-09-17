@@ -3,7 +3,7 @@ import { ExternalLink, Loader2, Search } from "lucide-react";
 import { type FormEvent, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { CSW_SAMPLES } from "../constants";
-import { createBaseLayer } from "../helpers";
+import { createBaseLayer, isServiceFormUrl } from "../helpers";
 import { openAddData } from "../open-add-data";
 import { ServiceLibrarySection } from "../ServiceLibrarySection";
 import { serviceFieldString, type ServiceLibraryEntry } from "../service-library";
@@ -11,7 +11,6 @@ import { AddDataError, SampleDataSelect, useAddDataSource } from "../shared";
 import {
   fetchCswGeoJson,
   isCswFeatureCollection,
-  isHttpCswEndpoint,
   searchCsw,
   type CswRecord,
   type CswResource,
@@ -88,7 +87,7 @@ export function CswSource({
     abortSearch();
     setRecords([]);
     setRecordsEndpoint("");
-    if (!isHttpCswEndpoint(target)) {
+    if (!isServiceFormUrl(target)) {
       source.setError(t("addData.csw.errorUrl"));
       return;
     }

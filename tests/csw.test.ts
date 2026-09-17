@@ -50,6 +50,19 @@ describe("CSW catalog helpers", () => {
     assert.equal(isHttpCswEndpoint("catalog.test/csw"), false);
   });
 
+  it("resolves same-origin relative endpoints against the app origin", () => {
+    // Outside a browser the builder uses a fixed base so the resolution stays
+    // pure and testable; in the app it is the document origin.
+    const url = new URL(createCswGetRecordsUrl("/catalog/csw", "water"));
+    assert.equal(url.origin, "http://localhost");
+    assert.equal(url.pathname, "/catalog/csw");
+    assert.equal(url.searchParams.get("request"), "GetRecords");
+    assert.match(url.searchParams.get("constraint") ?? "", /water/);
+    const routeRelative = new URL(createCswGetRecordsUrl("catalog/csw", ""));
+    assert.equal(routeRelative.origin, "http://localhost");
+    assert.equal(routeRelative.pathname, "/catalog/csw");
+  });
+
   it("requires a features array, not just a FeatureCollection type", () => {
     assert.equal(isCswFeatureCollection({ type: "FeatureCollection", features: [] }), true);
     assert.equal(isCswFeatureCollection({ type: "FeatureCollection" }), false);

@@ -11,13 +11,13 @@ import {
 } from "../constants";
 import {
   fetchWmsCapabilities,
+  isServiceFormUrl,
   normalizeWmsVersion,
   serviceRequestErrorMessage,
   wmsVersionFromEndpoint,
   type WmsLayerOption,
 } from "../helpers";
 import { routeWmsLayerThroughNativeProtocol } from "../../../../lib/xyz-url";
-import { isHttpWmsUrl } from "../../../../lib/native-wms-url";
 import { ServiceLibrarySection } from "../ServiceLibrarySection";
 import { serviceFieldBoolean, serviceFieldString, type ServiceFields } from "../service-library";
 import { AddDataSourceForm, SampleDataSelect, useAddDataSource } from "../shared";
@@ -127,7 +127,7 @@ export function WmsSource({
 
   const handleRetrieveLayers = async () => {
     const endpoint = wmsEndpoint.trim();
-    if (!isHttpWmsUrl(endpoint)) {
+    if (!isServiceFormUrl(endpoint)) {
       setRetrieveError(t("addData.wms.errorUrl"));
       return;
     }
@@ -208,7 +208,7 @@ export function WmsSource({
 
   const handleSubmit = source.runSubmit(() => {
     const name = source.layerName.trim() || t("addData.wms.defaultName");
-    if (!isHttpWmsUrl(wmsEndpoint.trim())) throw new Error(t("addData.wms.errorUrl"));
+    if (!isServiceFormUrl(wmsEndpoint.trim())) throw new Error(t("addData.wms.errorUrl"));
     if (!wmsLayers.trim()) {
       throw new Error(t("addData.wms.errorLayers"));
     }

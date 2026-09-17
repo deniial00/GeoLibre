@@ -334,12 +334,13 @@ export function proxyFeedRequestUrl(url: string): string {
  * cross-origin restrictions that block a plain browser fetch of a WMS/WFS host
  * that omits CORS headers:
  * - Desktop (Tauri): fetched natively through the `fetch_url_bytes` command,
- *   which runs in Rust and is not subject to browser CORS, so any service works.
- * - Dev server (Vite): routed through the same-origin dev proxy.
- * - Hosted web build: a direct fetch, which only succeeds when the service
- *   sends `Access-Control-Allow-Origin`.
+ *   which runs in Rust and is not subject to browser CORS.
+ * - Dev server (Vite): absolute HTTP(S) URLs use the same-origin dev proxy;
+ *   relative URLs are fetched directly from the app's origin.
+ * - Hosted web build: a direct fetch. Cross-origin services must send
+ *   `Access-Control-Allow-Origin`; same-origin ones need none.
  *
- * @param requestUrl - The absolute GetCapabilities request URL.
+ * @param requestUrl - The GetCapabilities request URL, absolute or relative.
  * @param devProxyPath - The dev-server proxy path to use under Vite.
  * @param signal - Optional abort signal.
  * @returns The response ok flag, status, and body text.
@@ -376,9 +377,10 @@ async function fetchCapabilitiesText(
       throw error;
     }
   }
-  const fetchUrl = isViteDevServer()
-    ? `${devProxyPath}?url=${encodeURIComponent(requestUrl)}`
-    : requestUrl;
+  const fetchUrl =
+    isViteDevServer() && /^https?:\/\//i.test(requestUrl)
+      ? `${devProxyPath}?url=${encodeURIComponent(requestUrl)}`
+      : requestUrl;
   let response: Response;
   try {
     response = await fetch(fetchUrl, {
@@ -448,6 +450,23 @@ function decodeXmlBytes(bytes: Uint8Array, httpCharset?: string): string {
 /** Extracts the `charset` from a `Content-Type` header value, if any. */
 function charsetFromContentType(contentType: string | null): string | undefined {
   return contentType?.match(/charset=["']?([\w-]+)/i)?.[1];
+}
+
+/**
+ * Whether a service form value is a usable endpoint: an absolute HTTP(S) URL or
+ * a same-origin reference (root-/route-relative path, protocol-relative URL).
+ * Relative endpoints are how reverse-proxied deployments (e.g. GeoServer behind
+ * the app origin) express their services. Only scheme-bearing values that are
+ * not HTTP(S) are refused — javascript:, data:, ftp: and friends are never
+ * service endpoints.
+ */
+export function isServiceFormUrl(value: string): boolean {
+  const trimmed = value.trim();
+  if (!trimmed || /\s/.test(trimmed)) return false;
+  if (/^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(trimmed)) {
+    return /^https?:\/\//i.test(trimmed);
+  }
+  return true;
 }
 
 /**

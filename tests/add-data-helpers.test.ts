@@ -24,6 +24,7 @@ import {
   stripOgcOperationParams,
   wmsVersionFromEndpoint,
   geoJsonToPointRows,
+  isServiceFormUrl,
   layerNameFromPath,
   normalizeCrs,
   parseOptionalNumber,
@@ -479,6 +480,29 @@ describe("attributionForTileUrl", () => {
       undefined,
     );
     assert.equal(attributionForTileUrl("not a url"), undefined);
+  });
+});
+
+describe("isServiceFormUrl", () => {
+  it("accepts absolute HTTP(S) service URLs", () => {
+    assert.equal(isServiceFormUrl("https://geoserver.example.org/geoserver/wms"), true);
+    assert.equal(isServiceFormUrl("http://127.0.0.1:8080/wfs"), true);
+    assert.equal(isServiceFormUrl("  https://x.test/wms  "), true);
+  });
+
+  it("accepts same-origin references for reverse-proxied deployments", () => {
+    assert.equal(isServiceFormUrl("/geoserver/wms"), true);
+    assert.equal(isServiceFormUrl("geoserver/wfs"), true);
+    assert.equal(isServiceFormUrl("//example.com/geoserver/wms"), true);
+  });
+
+  it("refuses non-HTTP schemes and blank or malformed values", () => {
+    assert.equal(isServiceFormUrl(""), false);
+    assert.equal(isServiceFormUrl("   "), false);
+    assert.equal(isServiceFormUrl("javascript:alert(1)"), false);
+    assert.equal(isServiceFormUrl("data:text/plain,x"), false);
+    assert.equal(isServiceFormUrl("ftp://x.test/wms"), false);
+    assert.equal(isServiceFormUrl("/geoserver/wms has space"), false);
   });
 });
 

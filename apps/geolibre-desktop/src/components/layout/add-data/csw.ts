@@ -91,8 +91,10 @@ export function parseCswRecords(xmlText: string): CswRecord[] {
 }
 
 /** True when the endpoint is an absolute http(s) URL. A bare `https://` passes a
- * `^https?://` regex but makes {@link createCswGetRecordsUrl} throw, so callers
- * validate here to surface their own message instead of a raw `TypeError`. */
+ * `^https?://` regex but makes {@link createCswGetRecordsUrl} throw, so sample
+ * data validates here to surface its own message instead of a raw `TypeError`.
+ * The form itself accepts these plus same-origin relative endpoints (see
+ * `isServiceFormUrl` in helpers.ts); this predicate is for absolute URLs. */
 export function isHttpCswEndpoint(endpoint: string): boolean {
   try {
     const { protocol } = new URL(endpoint);
@@ -103,7 +105,11 @@ export function isHttpCswEndpoint(endpoint: string): boolean {
 }
 
 export function createCswGetRecordsUrl(endpoint: string, keyword: string, maxRecords = 20): string {
-  const url = new URL(endpoint);
+  // Relative endpoints (deployment reverse-proxies) resolve against the app's
+  // own origin; outside a browser a fixed base keeps the builder pure so unit
+  // tests can assert the relative-to-origin resolution.
+  const base = typeof window === "undefined" ? "http://localhost/" : window.location.href;
+  const url = new URL(endpoint, base);
   const operationKeys = new Set([
     "service",
     "request",
