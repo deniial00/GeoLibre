@@ -656,14 +656,9 @@ export function BrowserPanel({
   };
 
   // Toggle a node's presence in the Favorites section; the favorites change
-  // event refreshes the tree via useBrowserTree. The descriptor carries enough
-  // to rebuild + activate the favorited node without the live original.
-  //
-  // The label/payload are snapshotted at favorite time and not refreshed while
-  // the original still exists — intentional, matching the "rebuild without the
-  // live original" design. There's no rename for services/connections today, so
-  // this is currently unreachable; a future rename feature should re-sync (or
-  // accept) the stored label.
+  // event refreshes the tree via useBrowserTree. Snapshot only display metadata
+  // and stable identity; activating a service resolves its current definition
+  // from the library rather than persisting deployment configuration here.
   const toggleFavorite = (node: BrowserNode) => {
     if (favoriteIds.has(node.id)) {
       removeFavorite(node.id);
@@ -678,6 +673,7 @@ export function BrowserPanel({
       serviceId: node.serviceId,
       serviceKind: node.serviceKind,
       builtin: node.builtin,
+      deployment: node.deployment,
       path: node.path,
     });
   };
