@@ -1038,7 +1038,9 @@ function pwaPlugin(): Plugin[] {
       // Precache the app shell: HTML plus the JS/CSS/fonts that boot the map.
       // The heavy lazily-fetched chunks/binaries are runtime-cached instead.
       globPatterns: ["**/*.{js,css,html,woff,woff2}"],
-      globIgnores: HEAVY_PRECACHE_IGNORES,
+      // Deployment configuration changes independently of the application build.
+      // Never pin it to a build revision in the service worker.
+      globIgnores: [...HEAVY_PRECACHE_IGNORES, "**/geolibre-runtime-config.js"],
       // deck.gl/vendor shell chunks can run a few MB; allow them into the
       // precache. MapLibre and the huge binaries are globIgnored above.
       maximumFileSizeToCacheInBytes: 4 * 1024 * 1024,

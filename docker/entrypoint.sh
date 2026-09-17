@@ -130,6 +130,7 @@ fi
 # the generated script.
 python -c '
 import json
+import math
 import os
 import re
 import base64
@@ -145,6 +146,82 @@ browser_globals = {}
 if os.environ.get("GEOLIBRE_AI_URL"):
     deployment["VITE_GEOLIBRE_AI_URL"] = os.environ["GEOLIBRE_AI_URL"]
     deployment["VITE_GEOLIBRE_AI_MODEL"] = os.environ["GEOLIBRE_AI_MODEL"]
+
+# Optional deployment service catalog. Read the mounted file on every startup;
+# only the catalog fields below are public, never the file path or other keys.
+services_file = os.environ.get("GEOLIBRE_SERVICES_FILE", "")
+builtins_hidden = os.environ.get("GEOLIBRE_BUILTIN_SERVICES", "").strip().lower() == "off"
+if services_file:
+    def invalid_json_constant(value):
+        raise ValueError("non-finite JSON number")
+
+    try:
+        with open(services_file, encoding="utf-8") as source:
+            catalog = json.load(source, parse_constant=invalid_json_constant)
+    except OSError as error:
+        raise SystemExit(
+            "ERROR: GEOLIBRE_SERVICES_FILE cannot be read. Check the mounted file path and read permissions."
+        ) from error
+    except (ValueError, UnicodeError) as error:
+        raise SystemExit(
+            "ERROR: GEOLIBRE_SERVICES_FILE must contain valid UTF-8 JSON with a services array."
+        ) from error
+    if not isinstance(catalog, dict) or not isinstance(catalog.get("services"), list):
+        raise SystemExit(
+            "ERROR: GEOLIBRE_SERVICES_FILE must contain an object with a services array."
+        )
+    services = []
+    service_ids = set()
+    service_kinds = ("wms", "wfs", "wmts", "xyz", "arcgis", "csw")
+    for index, entry in enumerate(catalog["services"], start=1):
+        prefix = f"ERROR: GEOLIBRE_SERVICES_FILE services entry {index}"
+        if not isinstance(entry, dict):
+            raise SystemExit(prefix + " must be an object.")
+        for key in ("id", "name"):
+            if not isinstance(entry.get(key), str) or not entry[key].strip():
+                raise SystemExit(prefix + f" must have a nonblank string {key}.")
+        service_id = entry["id"].strip()
+        if service_id in service_ids:
+            raise SystemExit(prefix + " has a duplicate trimmed id; give every service a unique stable id.")
+        if entry.get("kind") not in service_kinds:
+            raise SystemExit(prefix + " kind must be one of: " + ", ".join(service_kinds) + ".")
+        if "category" in entry and not isinstance(entry["category"], str):
+            raise SystemExit(prefix + " category must be a string when present.")
+        fields = entry.get("fields")
+        if not isinstance(fields, dict) or not fields or any(
+            not isinstance(value, (str, int, float, bool))
+            or (isinstance(value, float) and not math.isfinite(value))
+            for value in fields.values()
+        ):
+            raise SystemExit(
+                prefix + " fields must be a nonempty object of strings, finite numbers, or booleans."
+            )
+        service_ids.add(service_id)
+        service = {
+            "id": service_id,
+            "name": entry["name"].strip(),
+            "kind": entry["kind"],
+            "fields": fields,
+        }
+        if "category" in entry:
+            service["category"] = entry["category"]
+        services.append(service)
+    deployment["VITE_GEOLIBRE_SERVICES"] = json.dumps(
+        {"services": services}, separators=(",", ":"), allow_nan=False
+    )
+
+# Optional hide of the built-in starter service library: with
+# GEOLIBRE_BUILTIN_SERVICES=off the Browser and the service pickers show the
+# configured catalog and personal entries only, so an entirely org-curated
+# deployment never offers the built-in presets. Any other nonempty value fails
+# the boot rather than silently keeping the built-ins (same discipline as
+# GEOLIBRE_SERVICES_FILE).
+if os.environ.get("GEOLIBRE_BUILTIN_SERVICES", "").strip() and not builtins_hidden:
+    raise SystemExit(
+        "ERROR: GEOLIBRE_BUILTIN_SERVICES must be \"off\" to hide the built-in starter services, or unset to keep them."
+    )
+if builtins_hidden:
+    deployment["VITE_GEOLIBRE_BUILTIN_SERVICES"] = "off"
 
 # Optional Clerk sign-in gate. The publishable key is intentionally public and
 # is all the browser needs; Clerk secrets never enter the image or runtime
@@ -408,6 +485,10 @@ fi
 
 if [ -n "${GEOLIBRE_EMBED_ORIGINS:-}" ]; then
   echo "Embed postMessage API enabled for: $GEOLIBRE_EMBED_ORIGINS"
+fi
+
+if [ "$(printf '%s' "$(trim "${GEOLIBRE_BUILTIN_SERVICES:-}")" | tr '[:upper:]' '[:lower:]')" = "off" ]; then
+  echo "Built-in starter services: hidden (GEOLIBRE_BUILTIN_SERVICES=off)"
 fi
 
 if [ -n "$(trim "${GEOLIBRE_CLERK_PUBLISHABLE_KEY:-}")" ]; then
