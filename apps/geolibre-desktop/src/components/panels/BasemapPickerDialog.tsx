@@ -122,7 +122,6 @@ export function BasemapPickerDialog({ open, onOpenChange }: BasemapPickerDialogP
   );
   const setBasemapStyleUrl = useAppStore((s) => s.setBasemapStyleUrl);
   const setPreferences = useAppStore((s) => s.setPreferences);
-  const preferences = useAppStore((s) => s.preferences);
   const isArcgis = useAppStore((s) => s.primaryRenderer === "arcgis");
   const arcgisBasemap = useAppStore((s) => s.preferences.map.arcgisBasemap);
   const arcgisApiKey = useArcgisApiKey();
@@ -273,9 +272,11 @@ export function BasemapPickerDialog({ open, onOpenChange }: BasemapPickerDialogP
                     name={basemap.name}
                     selected={activeChoice === basemap.id}
                     onSelect={() => {
+                      // Read live state so a concurrent preference change is preserved.
+                      const current = useAppStore.getState().preferences;
                       setPreferences({
-                        ...preferences,
-                        map: { ...preferences.map, arcgisBasemap: basemap.id },
+                        ...current,
+                        map: { ...current.map, arcgisBasemap: basemap.id },
                       });
                       onOpenChange(false);
                     }}

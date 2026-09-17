@@ -56,7 +56,8 @@ allotment.
 
 With a key, new projects use **ArcGIS Streets** for the ArcGIS renderer. The
 **Change background** picker offers Esri's Streets, Navigation, Topographic,
-gray, Imagery, Oceans, Outdoor and OpenStreetMap styles when ArcGIS is active
+Light Gray, Dark Gray, Imagery, Imagery (no labels), Oceans, Outdoor and
+OpenStreetMap styles when ArcGIS is active
 and a key is configured. Selecting one preserves the camera. The
 choice is saved as `preferences.map.arcgisBasemap` (an Esri basemap style id
 such as `arcgis/streets`, `arcgis/imagery` or `osm/standard`); selecting a
