@@ -199,7 +199,7 @@ if services_file:
             for value in fields.values()
         ):
             raise SystemExit(
-                prefix + " fields must be a nonempty object of strings, finite numbers within the safe integer range, or booleans."
+                prefix + " fields must be a nonempty object of strings, booleans, or finite numbers with integers within the safe-integer range."
             )
         service_ids.add(service_id)
         service = {

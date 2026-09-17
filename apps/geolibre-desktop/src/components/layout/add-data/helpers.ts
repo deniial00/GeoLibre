@@ -466,7 +466,14 @@ export function isServiceFormUrl(value: string): boolean {
   if (!trimmed || /\s/.test(trimmed)) return false;
   if (trimmed.startsWith("//")) return false;
   if (/^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(trimmed)) {
-    return /^https?:\/\//i.test(trimmed);
+    if (!/^https?:\/\//i.test(trimmed)) return false;
+    try {
+      // "https://" has a scheme but no host: reject scheme-only values here
+      // instead of letting new URL() throw down in the request builders.
+      return new URL(trimmed).hostname !== "";
+    } catch {
+      return false;
+    }
   }
   return true;
 }

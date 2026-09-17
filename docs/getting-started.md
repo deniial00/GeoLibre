@@ -711,9 +711,9 @@ Configured services:
   entries.
 
 Invalid entries — a missing id, an unknown kind, duplicate ids, empty
-fields, or numbers outside JavaScript's safe integer range (2<sup>53</sup>−1)
-— **fail the container boot** with an error naming the offending entry,
-rather than publishing a half-configured library.
+fields, integers outside JavaScript's safe integer range (2<sup>53</sup>−1),
+or non-finite numbers — **fail the container boot** with an error naming the
+offending entry, rather than publishing a half-configured library.
 
 !!! warning "Made for public data"
     The catalog is published to every visitor as part of the page's runtime

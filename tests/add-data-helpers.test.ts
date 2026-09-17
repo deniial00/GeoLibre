@@ -507,6 +507,12 @@ describe("isServiceFormUrl", () => {
     // would skip them too).
     assert.equal(isServiceFormUrl("//example.com/geoserver/wms"), false);
     assert.equal(isServiceFormUrl("//attacker.example/wms"), false);
+    // A scheme without a host is not a usable endpoint: reject here rather
+    // than throwing from new URL() in the request builders.
+    assert.equal(isServiceFormUrl("https://"), false);
+    assert.equal(isServiceFormUrl("http://"), false);
+    assert.equal(isServiceFormUrl("https://host"), true);
+    assert.equal(isServiceFormUrl("https://x.test/wms"), true);
   });
 });
 
