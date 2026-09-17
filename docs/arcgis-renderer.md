@@ -221,6 +221,12 @@ synthetic tile addresses never go to the network. MLT encoding and archive text
 labels are not supported. The adapter reads PMTiles zoom limits from the archive
 header, including for older projects that omit those limits.
 
+Each vector source layer uses a separate native VectorTileLayer so its style and
+visibility can be controlled independently. The PMTiles reader is shared, but
+the SDK decodes tiles separately for each native layer. Archives with many source
+layers therefore use more decoding work and memory than the shared MapLibre
+source; enable only the layers needed for the current view.
+
 ## Not supported yet
 
 - DuckDB query layers, 3D Tiles, LiDAR, Zarr, NetCDF, Gaussian splats and
