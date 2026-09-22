@@ -26,9 +26,7 @@ implementation or storage engine. The reference implementation lives in
 
 ## What the reference server leaves to the operator
 
-Three parts of the contract above are deliberately not implemented in
-`backend/geolibre_server_api`, and an operator exposing it publicly has to
-supply them:
+Two deployment protections remain the operator's responsibility:
 
 - **Rate limiting.** `429` is in the error vocabulary, but no route returns it.
   `POST /api/auth/token` and `POST /api/accounts` are unauthenticated and run
@@ -36,15 +34,12 @@ supply them:
   brute-forcing, username enumeration through the `409`/`401` distinction, and
   a cheap CPU-burn. Put a reverse proxy or WAF limit on both, keyed by client IP
   and by username.
-- **Token expiry.** `401` covers an expired token, but tokens issued here do not
-  carry an expiry and stay valid until `DELETE /api/auth/token` revokes them.
 - **A request-size limit.** The server rejects an oversized *declared*
   `Content-Length` before reading the body, but a chunked or HTTP/2 request
   declares no length and is parsed in full before the per-route limit applies.
   Cap request size at the proxy as well.
 
-All three are contract-level capabilities a compatible server may implement;
-the reference implementation is a correctness baseline, not a hardened
+The reference implementation is a correctness baseline, not a hardened
 deployment.
 
 ## Limits
@@ -78,13 +73,19 @@ not a capability URL for a private project.
 
 ### `POST /api/accounts`
 
-Creates an account and returns a token once. This endpoint may be disabled when
-an installation delegates identity to an external provider.
+Creates an account and returns a personal API token once. This endpoint may be
+disabled when an installation delegates identity to an external provider.
+`name`, `scopes`, and `expiresInDays` are optional. New tokens default to all
+three project scopes and expire after 90 days; the accepted lifetime is 1–365
+days.
 
 ```json
 {
   "username": "ada",
-  "password": "correct horse battery staple"
+  "password": "correct horse battery staple",
+  "name": "GeoLibre desktop",
+  "scopes": ["read:projects", "write:projects"],
+  "expiresInDays": 30
 }
 ```
 
@@ -93,20 +94,18 @@ Response `201`:
 ```json
 {
   "account": {"id": "uuid", "username": "ada", "createdAt": "2026-08-03T12:00:00Z"},
-  "token": "secret-token"
+  "token": "secret-token",
+  "tokenId": "uuid",
+  "scopes": ["read:projects", "write:projects"],
+  "expiresAt": "2026-09-02T12:00:00Z"
 }
 ```
 
 ### `POST /api/auth/token`
 
-Exchanges account credentials for a personal API token.
-
-```json
-{"username": "ada", "password": "correct horse battery staple"}
-```
-
-Response `200` has the same shape as account creation. Tokens are opaque and
-must be stored hashed by the server.
+Exchanges account credentials for a personal API token. It accepts the same
+optional policy fields and returns the same shape as account creation. Tokens
+are opaque and stored only as SHA-256 digests.
 
 ### `DELETE /api/auth/token`
 
@@ -114,10 +113,13 @@ Revokes the presented Bearer token. Response: `204`.
 
 ### `GET /api/users/me`
 
-Returns the account associated with the token:
+Returns the account and effective project scopes associated with the token:
 
 ```json
-{"user": {"id": "uuid", "username": "ada", "createdAt": "2026-08-03T12:00:00Z"}}
+{
+  "user": {"id": "uuid", "username": "ada", "createdAt": "2026-08-03T12:00:00Z"},
+  "scopes": ["read:projects", "write:projects", "share:public"]
+}
 ```
 
 An identity provider may create accounts without a username. Project creation
@@ -291,6 +293,25 @@ must not count failed or unauthorized reads.
 `PUT /api/projects/{id}/thumbnail` requires ownership and accepts the image
 bytes with their image content type. `GET /api/projects/{id}/thumbnail` follows
 project visibility. `DELETE` removes it. Upload and delete responses are `204`.
+
+## Personal token scopes
+
+| Scope | Grants |
+| --- | --- |
+| `read:projects` | List and open the caller's own projects, including unlisted/private projects |
+| `write:projects` | Create, update, delete, and fork projects owned by the caller |
+| `share:public` | Create a public project or raise a project's visibility to public |
+
+New personal tokens require a nonempty subset of these scopes. Omitting
+`scopes` preserves the historical project permissions for existing clients.
+Tokens that predate the policy table are upgraded on first use with all three
+project scopes, no expiry, and a legacy marker.
+
+A valid credential missing a required scope receives `403` with
+`{"error": "insufficient_scope", "requiredScope": "<scope>"}` and
+`WWW-Authenticate: Bearer error="insufficient_scope"`. Missing credentials use
+the `Bearer` challenge; malformed, unknown, revoked, and expired credentials use
+`Bearer error="invalid_token"`.
 
 ## Compatibility
 

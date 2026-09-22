@@ -269,3 +269,42 @@ jobs:
 
       - name: Test projects and identity server
         run: python -m pytest backend/geolibre_server_api/tests
+
+  projects-identity-postgres:
+    name: Personal-token PostgreSQL concurrency gate
+    runs-on: ubuntu-22.04
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_DB: geolibre_test
+          POSTGRES_USER: geolibre
+          POSTGRES_PASSWORD: geolibre
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U geolibre -d geolibre_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+
+      - name: Install the projects-and-identity API with the postgres extra
+        run: python -m pip install -e "backend/geolibre_server_api[test,postgres]"
+
+      # Legacy-token policy creation can race across API workers. Exercise the
+      # real PostgreSQL uniqueness boundary rather than relying on SQLite's
+      # process-local write serialization.
+      - name: Run the postgres-marked concurrency gate
+        env:
+          GEOLIBRE_TEST_POSTGRES_URL: postgresql+psycopg://geolibre:geolibre@127.0.0.1:5432/geolibre_test
+        run: python -m pytest backend/geolibre_server_api/tests -m postgres

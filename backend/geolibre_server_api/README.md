@@ -40,6 +40,6 @@ docker run --rm -v geolibre_geolibre-projects:/data/objects busybox \
 
 ## Hardening
 
-`429` and token expiry are part of the contract but are not implemented here;
-see the "What the reference server leaves to the operator" section of
+Rate limiting and a complete request-size limit are not implemented here; see
+the "What the reference server leaves to the operator" section of
 `docs/server-api.md` before exposing this publicly.

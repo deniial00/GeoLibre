@@ -1,51 +1,9 @@
 import hashlib
 import json
 
-import pytest
 from fastapi.testclient import TestClient
 from geolibre_server_api.main import FileStorage, create_app
-
-
-@pytest.fixture
-def client(tmp_path):
-    # Storage is constructed explicitly rather than left to make_storage(), which
-    # reads GEOLIBRE_STORAGE/GEOLIBRE_STORAGE_PATH from the ambient environment:
-    # that both created a ./data directory in the pytest working directory and
-    # would hand back an S3Storage if GEOLIBRE_STORAGE=s3 happened to be set.
-    app = create_app(
-        f"sqlite:///{tmp_path / 'test.db'}",
-        public_url="https://share.example",
-        storage=FileStorage(str(tmp_path / "objects")),
-    )
-    with TestClient(app) as test_client:
-        yield test_client
-
-
-def account(client, username="ada"):
-    response = client.post(
-        "/api/accounts", json={"username": username, "password": "correct horse"}
-    )
-    assert response.status_code == 201
-    return response.json()["token"]
-
-
-def auth(token):
-    return {"Authorization": f"Bearer {token}"}
-
-
-def create_project(client, token, visibility="public", title="Wetlands"):
-    content = json.dumps({"version": "1.0", "title": title, "layers": []})
-    response = client.post(
-        "/api/projects",
-        headers=auth(token),
-        json={
-            "filename": "fallback.geolibre.json",
-            "content": content,
-            "visibility": visibility,
-        },
-    )
-    assert response.status_code == 201, response.text
-    return response.json()["project"], content
+from helpers import account, auth, create_project  # noqa: F401
 
 
 def test_accounts_login_current_user_and_hashed_secrets(client):
