@@ -76,8 +76,11 @@ not a capability URL for a private project.
 Creates an account and returns a personal API token once. This endpoint may be
 disabled when an installation delegates identity to an external provider.
 `name`, `scopes`, and `expiresInDays` are optional. New tokens default to all
-three project scopes and expire after 90 days; the accepted lifetime is 1–365
-days.
+three project scopes. Omitting `expiresInDays` preserves the v1 delete-only
+token lifecycle (the token does not expire); the accepted explicit lifetime is
+1–365 days. An unknown or empty `scopes` list returns `400`
+`{"error": "invalid_scope"}`; an `expiresInDays` outside 1–365 returns `400`
+`{"error": "invalid_request"}`.
 
 ```json
 {
@@ -304,6 +307,8 @@ project visibility. `DELETE` removes it. Upload and delete responses are `204`.
 
 New personal tokens require a nonempty subset of these scopes. Omitting
 `scopes` preserves the historical project permissions for existing clients.
+Omitting `expiresInDays` keeps the token valid until revoked (the v1
+delete-only lifecycle); set `expiresInDays` to 1–365 to mint an expiring token.
 Tokens that predate the policy table are upgraded on first use with all three
 project scopes, no expiry, and a legacy marker.
 

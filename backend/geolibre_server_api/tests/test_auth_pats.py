@@ -10,14 +10,21 @@ from geolibre_server_api.main import FileStorage, create_app
 from helpers import account, auth, ensure_account, pat
 
 
-def test_default_pat_has_all_project_scopes_and_expiry(client):
+def test_default_pat_has_all_project_scopes_and_no_default_expiry(client):
     ensure_account(client)
     response = client.post("/api/auth/token", json={"username": "ada", "password": "correct horse"})
     assert response.status_code == 200, response.text
     body = response.json()
     assert body["scopes"] == ["read:projects", "write:projects", "share:public"]
     assert body["tokenId"]
-    assert body["expiresAt"] == "2024-02-12T22:13:20Z"
+    # An omitted lifetime preserves the v1 delete-only token lifecycle.
+    assert body["expiresAt"] is None
+    with client.app.state.engine.connect() as connection:
+        row = connection.exec_driver_sql(
+            "select legacy, scope, expires_at from personal_token_policies where token_digest = ?",
+            (token_digest(body["token"]),),
+        ).fetchone()
+    assert row == (0, "read:projects write:projects share:public", None)
 
 
 def test_requested_pat_policy_is_honored(client):
@@ -54,6 +61,15 @@ def test_invalid_pat_policy_is_rejected(client):
         {"scopes": []},
         {"scopes": ["unknown:scope"]},
         {"scopes": ["admin:org"]},
+    ):
+        response = client.post(
+            "/api/auth/token",
+            json={"username": "ada", "password": "correct horse", **extra},
+        )
+        assert response.status_code == 400, extra
+        assert response.json() == {"error": "invalid_scope"}
+
+    for extra in (
         {"expiresInDays": 0},
         {"expiresInDays": 366},
         {"expiresInDays": -1},
@@ -63,7 +79,7 @@ def test_invalid_pat_policy_is_rejected(client):
             json={"username": "ada", "password": "correct horse", **extra},
         )
         assert response.status_code == 400, extra
-        assert response.json() == {"error": "invalid_scope"}
+        assert response.json() == {"error": "invalid_request"}
 
     for days in (1, 365):
         response = client.post(
@@ -180,7 +196,7 @@ def test_pre_policy_database_is_upgraded_additively(tmp_path, clock):
         ]
 
 
-def test_account_bootstrap_token_is_scoped_and_expiring(client):
+def test_account_bootstrap_token_is_scoped_and_non_expiring(client):
     raw = account(client, "bob")
     response = client.get("/api/users/me", headers=auth(raw))
     assert response.status_code == 200

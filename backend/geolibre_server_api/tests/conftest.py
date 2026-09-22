@@ -64,6 +64,7 @@ def postgres_app(tmp_path, postgres_url):
     admin = create_engine(postgres_url, isolation_level="AUTOCOMMIT")
     with admin.connect() as connection:
         connection.execute(text(f'CREATE SCHEMA "{schema}"'))
+    app = None
     try:
         option = f"-csearch_path={schema},public"
         quoted = option.replace("=", "%3D").replace(",", "%2C")
@@ -75,6 +76,8 @@ def postgres_app(tmp_path, postgres_url):
         )
         yield app
     finally:
+        if app is not None:
+            app.state.engine.dispose()
         with admin.connect() as connection:
             connection.execute(text(f'DROP SCHEMA "{schema}" CASCADE'))
         admin.dispose()

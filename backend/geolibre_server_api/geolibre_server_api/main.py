@@ -323,6 +323,7 @@ def create_app(
     public_url: str | None = None,
     clock: Callable[[], int] | None = None,
 ) -> FastAPI:
+    """Build the FastAPI app, wiring the engine, sessions, storage, and routes."""
     database_url = database_url or os.getenv(
         "GEOLIBRE_DATABASE_URL", "sqlite:///./geolibre-server-api.db"
     )
@@ -406,6 +407,7 @@ def create_app(
 
     @app.exception_handler(InsufficientScopeError)
     async def insufficient_scope_handler(_request: Request, exc: InsufficientScopeError):
+        """Serialize an insufficient-scope failure as a documented 403."""
         return JSONResponse(
             {"error": "insufficient_scope", "requiredScope": exc.required_scope},
             status_code=403,
@@ -467,6 +469,7 @@ def create_app(
         }
 
     def visible(project: Project | None, principal: AuthPrincipal | None) -> Project:
+        """Return the project or 404 when it is private to another caller."""
         if project is None or (
             project.visibility == "private"
             and (principal is None or project.owner_id != principal.account.id)
@@ -485,6 +488,7 @@ def create_app(
         return project
 
     def owned(project: Project | None, principal: AuthPrincipal) -> Project:
+        """Return the project or 403/404 when the caller does not own it."""
         if project is None:
             raise HTTPException(404, "project not found")
         if project.owner_id != principal.account.id:
@@ -551,6 +555,7 @@ def create_app(
         principal: AuthPrincipal | None = Depends(optional_principal),
         session: Session = Depends(get_session),
     ):
+        """List a user's projects; the owner's own listing needs read:projects."""
         owner = session.scalar(select(Account).where(Account.username == username))
         if owner is None:
             raise HTTPException(404, "user not found")
@@ -577,6 +582,7 @@ def create_app(
         principal: AuthPrincipal = Depends(require_scope("write:projects")),
         session: Session = Depends(get_session),
     ):
+        """Create a project; publishing to public additionally needs share:public."""
         if body.visibility == "public":
             ensure_scope(principal, "share:public")
         return {
@@ -596,6 +602,7 @@ def create_app(
         principal: AuthPrincipal | None = Depends(optional_principal),
         session: Session = Depends(get_session),
     ):
+        """List public projects, or the caller's own when ``mine`` and read:projects."""
         query = select(Project)
         count = select(func.count()).select_from(Project)
         if mine:
@@ -636,6 +643,7 @@ def create_app(
         principal: AuthPrincipal | None = Depends(optional_principal),
         session: Session = Depends(get_session),
     ):
+        """Return one project; private reads by the owner need read:projects."""
         return {
             "project": project_json(
                 visible_private_read(session.get(Project, project_id), principal)
@@ -648,6 +656,7 @@ def create_app(
         principal: AuthPrincipal = Depends(require_scope("read:projects")),
         session: Session = Depends(get_session),
     ):
+        """Return the activity log for one of the caller's own projects."""
         project = owned(session.get(Project, project_id), principal)
         activities = session.scalars(
             select(ProjectActivity)
@@ -663,6 +672,7 @@ def create_app(
         principal: AuthPrincipal = Depends(require_scope("write:projects")),
         session: Session = Depends(get_session),
     ):
+        """Clear the activity log of one of the caller's own projects."""
         project = owned(session.get(Project, project_id), principal)
         session.execute(delete(ProjectActivity).where(ProjectActivity.project_id == project.id))
         session.commit()
@@ -675,6 +685,7 @@ def create_app(
         principal: AuthPrincipal = Depends(require_scope("write:projects")),
         session: Session = Depends(get_session),
     ):
+        """Patch one of the caller's projects; raising to public needs share:public."""
         project = owned(session.get(Project, project_id), principal)
         old_visibility = project.visibility
         updates = body.model_dump(exclude_unset=True)
@@ -719,6 +730,7 @@ def create_app(
         principal: AuthPrincipal = Depends(require_scope("write:projects")),
         session: Session = Depends(get_session),
     ):
+        """Write a new version of one of the caller's projects."""
         project = owned(session.get(Project, project_id), principal)
         parse_content(body.content, max_project_bytes)
         # Allocated from max(number) and committed *before* the object is
@@ -762,6 +774,7 @@ def create_app(
         principal: AuthPrincipal = Depends(require_scope("write:projects")),
         session: Session = Depends(get_session),
     ):
+        """Delete one of the caller's projects and its stored objects."""
         project = owned(session.get(Project, project_id), principal)
         session.delete(project)
         session.commit()
@@ -779,6 +792,7 @@ def create_app(
         principal: AuthPrincipal = Depends(require_scope("write:projects")),
         session: Session = Depends(get_session),
     ):
+        """Fork a project; forking a private source or publishing needs extra scopes."""
         source = visible(session.get(Project, project_id), principal)
         if source.visibility == "private":
             ensure_scope(principal, "read:projects")
@@ -828,6 +842,7 @@ def create_app(
         principal: AuthPrincipal | None = Depends(optional_principal),
         session: Session = Depends(get_session),
     ):
+        """Fetch one project version; private fetches by the owner need read:projects."""
         project = visible_private_read(session.get(Project, project_id), principal)
         version = session.get(Version, (project_id, number))
         if version is None:
@@ -849,6 +864,7 @@ def create_app(
         principal: AuthPrincipal = Depends(require_scope("write:projects")),
         session: Session = Depends(get_session),
     ):
+        """Upload a thumbnail image for one of the caller's projects."""
         project = owned(session.get(Project, project_id), principal)
         content_type = request.headers.get("content-type", "").split(";")[0]
         if content_type not in IMAGE_TYPES:
@@ -876,6 +892,7 @@ def create_app(
         principal: AuthPrincipal | None = Depends(optional_principal),
         session: Session = Depends(get_session),
     ):
+        """Fetch a project thumbnail; private reads by the owner need read:projects."""
         project = visible_private_read(session.get(Project, project_id), principal)
         if not project.thumbnail_type:
             raise HTTPException(404, "thumbnail not found")
@@ -892,6 +909,7 @@ def create_app(
         principal: AuthPrincipal = Depends(require_scope("write:projects")),
         session: Session = Depends(get_session),
     ):
+        """Remove a project's thumbnail."""
         project = owned(session.get(Project, project_id), principal)
         object_storage.delete(f"projects/{project.id}/thumbnail")
         project.thumbnail_type = None
@@ -905,6 +923,7 @@ def create_app(
         principal: AuthPrincipal | None = Depends(optional_principal),
         session: Session = Depends(get_session),
     ):
+        """Serve the latest raw project JSON, counting a view for anonymous fetches."""
         project = session.scalar(
             select(Project).join(Account).where(Account.username == username, Project.slug == slug)
         )
@@ -932,6 +951,7 @@ def create_app(
         principal: AuthPrincipal | None = Depends(optional_principal),
         session: Session = Depends(get_session),
     ):
+        """Redirect to the viewer for a project, counting an anonymous open."""
         project = session.scalar(
             select(Project).join(Account).where(Account.username == username, Project.slug == slug)
         )

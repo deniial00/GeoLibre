@@ -64,5 +64,8 @@ class PersonalTokenPolicy(Base):
     scope: Mapped[str] = mapped_column(Text)
     expires_at: Mapped[int | None] = mapped_column(Integer, nullable=True)
     last_used_at: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # Checked on every request but not yet written: revocation currently deletes
+    # the Token row (cascading the policy). TODO(#1666): revoke by token id
+    # without deleting history once the OAuth follow-up lands.
     revoked_at: Mapped[int | None] = mapped_column(Integer, nullable=True)
     legacy: Mapped[bool] = mapped_column(Boolean, default=False)
