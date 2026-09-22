@@ -24,6 +24,6 @@ packages = ["geolibre_server_api"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 markers = [
-    "postgres: requires GEOLIBRE_TEST_POSTGRES_URL (disposable schema; PAT concurrency gate)",
+  "postgres: requires GEOLIBRE_TEST_POSTGRES_URL (disposable schema; PAT concurrency gate)",
 ]
 addopts = "-m 'not postgres'"
