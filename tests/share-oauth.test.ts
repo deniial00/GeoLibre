@@ -33,7 +33,11 @@ function installRefreshEnvironment(issuer: string, fetchImpl: typeof fetch) {
       clearTimeout,
     },
   });
-  Object.defineProperty(globalThis, "fetch", { configurable: true, writable: true, value: fetchImpl });
+  Object.defineProperty(globalThis, "fetch", {
+    configurable: true,
+    writable: true,
+    value: fetchImpl,
+  });
   return {
     storage,
     restore() {
@@ -143,7 +147,6 @@ describe("refresh failure handling", () => {
     }
   });
 });
-
 
 describe("randomUrlSafeToken", () => {
   // RFC 7636 requires a 43–128 character verifier. 32 bytes → 43 base64url
