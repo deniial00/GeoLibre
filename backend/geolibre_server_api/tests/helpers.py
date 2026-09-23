@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import base64
 import hashlib
+import json
 import re
 from urllib.parse import parse_qs, urlparse
 
@@ -36,7 +37,7 @@ def auth(token):
 
 
 def create_project(client, token, visibility="public", title="Wetlands"):
-    content = json_dumps({"version": "1.0", "title": title, "layers": []})
+    content = json.dumps({"version": "1.0", "title": title, "layers": []})
     response = client.post(
         "/api/projects",
         headers=auth(token),
@@ -48,12 +49,6 @@ def create_project(client, token, visibility="public", title="Wetlands"):
     )
     assert response.status_code == 201, response.text
     return response.json()["project"], content
-
-
-def json_dumps(value) -> str:
-    import json
-
-    return json.dumps(value)
 
 
 def pat(client, username="ada", password="correct horse", **extra):

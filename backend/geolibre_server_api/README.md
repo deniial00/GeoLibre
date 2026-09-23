@@ -21,9 +21,12 @@ Configuration:
   enabled, its canonical issuer. Production OAuth requires HTTPS. Loopback HTTP
   requires `localhost` or `127.0.0.1` plus an explicit port.
 - `GEOLIBRE_VIEWER_URL`: GeoLibre viewer origin.
-- `GEOLIBRE_CORS_ORIGINS`: comma-separated web origins, default `*`. OAuth CORS
-  remains restricted to registered web callback origins and recognized
-  Tauri/development origins even when ordinary API CORS is `*`.
+- `GEOLIBRE_CORS_ORIGINS`: comma-separated web origins, default `*` for
+  ordinary API routes. OAuth CORS always includes registered web callback
+  origins, but never inherits `*`. To permit browser requests from
+  `tauri://localhost`, `http://tauri.localhost`, `http://localhost:5173`, or
+  `http://127.0.0.1:5173`, list each needed origin explicitly here. Native
+  desktop requests that do not use browser fetch/XHR do not require CORS.
 - `GEOLIBRE_OAUTH_CLIENTS`: JSON array of exact public-client registrations:
   `[{"client_id":"geolibre-web","name":"GeoLibre Web","redirect_uris":["https://app.example/oauth-callback.html"],"scopes":["read:projects","write:projects","share:public"]}]`.
   Empty or unset disables OAuth without validating OAuth-only settings. The

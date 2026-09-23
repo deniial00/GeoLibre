@@ -43,6 +43,38 @@ def test_disabled_oauth_ignores_oauth_only_configuration(tmp_path, monkeypatch):
         assert client.get("/.well-known/oauth-authorization-server").status_code == 404
 
 
+def test_oauth_cors_needs_explicit_desktop_origin_even_with_wildcard_api(tmp_path, monkeypatch):
+    desktop = {
+        "client_id": "geolibre-desktop",
+        "name": "GeoLibre Desktop",
+        "redirect_uris": ["org.geolibre.desktop:/oauth/callback"],
+        "scopes": ["read:projects"],
+    }
+    monkeypatch.setenv("GEOLIBRE_OAUTH_CLIENTS", json.dumps([*VALID_CLIENTS, desktop]))
+    monkeypatch.delenv("GEOLIBRE_CORS_ORIGINS", raising=False)
+    headers = {"Origin": "tauri://localhost", "Access-Control-Request-Method": "POST"}
+    default = make_app(tmp_path)
+    with TestClient(default, base_url=PUBLIC_URL) as client:
+        assert (
+            client.get("/health", headers={"Origin": "tauri://localhost"}).headers[
+                "access-control-allow-origin"
+            ]
+            == "*"
+        )
+        blocked = client.options("/oauth/token", headers=headers)
+        assert blocked.status_code == 400
+        assert "access-control-allow-origin" not in blocked.headers
+    default.state.engine.dispose()
+
+    monkeypatch.setenv("GEOLIBRE_CORS_ORIGINS", "*,tauri://localhost")
+    explicit = make_app(tmp_path)
+    with TestClient(explicit, base_url=PUBLIC_URL) as client:
+        allowed = client.options("/oauth/token", headers=headers)
+        assert allowed.status_code == 200
+        assert allowed.headers["access-control-allow-origin"] == "tauri://localhost"
+    explicit.state.engine.dispose()
+
+
 @pytest.mark.parametrize(
     "issuer",
     [
