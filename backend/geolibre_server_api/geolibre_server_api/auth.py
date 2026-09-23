@@ -296,7 +296,12 @@ def parse_issuer(raw: str) -> str:
         raise RuntimeError(
             "GEOLIBRE_PUBLIC_URL http is only allowed on loopback with an explicit port"
         )
-    return urlunparse((parsed.scheme, parsed.netloc, parsed.path.rstrip("/"), "", "", ""))
+    host = parsed.hostname.lower()
+    if ":" in host:
+        host = f"[{host}]"
+    default_port = 443 if parsed.scheme == "https" else 80
+    netloc = host if port in (None, default_port) else f"{host}:{port}"
+    return urlunparse((parsed.scheme, netloc, parsed.path.rstrip("/"), "", "", ""))
 
 
 def make_oauth_config(public_url: str | None) -> OAuthConfig | None:

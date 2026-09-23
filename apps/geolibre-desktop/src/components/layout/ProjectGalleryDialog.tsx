@@ -45,6 +45,7 @@ import {
   fetchMyProjects,
   fetchSharedProjects,
   GalleryError,
+  type GalleryErrorCode,
   projectOpenToken,
   type SharedProject,
 } from "../../lib/share-gallery";
@@ -133,6 +134,7 @@ export function ProjectGalleryDialog({
   const [projects, setProjects] = useState<SharedProject[]>([]);
   const [status, setStatus] = useState<"idle" | "loading" | "loadingMore">("idle");
   const [error, setError] = useState<string | null>(null);
+  const [errorCode, setErrorCode] = useState<GalleryErrorCode | null>(null);
   const [hasMore, setHasMore] = useState(false);
   // Next-page offset tracked from the server's raw record count, not the
   // filtered `projects.length` (normalizeProject may drop records, which would
@@ -152,6 +154,7 @@ export function ProjectGalleryDialog({
   // fetch errors use, translated from the ShareOAuthError code.
   const handleSignIn = () => {
     setError(null);
+    setErrorCode(null);
     signInToShare().catch((err: unknown) => {
       setError(
         t(err instanceof ShareOAuthError ? shareOAuthErrorKey(err.code) : "share.oauthFailed"),
@@ -236,6 +239,7 @@ export function ProjectGalleryDialog({
 
       setStatus(offset === 0 ? "loading" : "loadingMore");
       setError(null);
+      setErrorCode(null);
       try {
         if (effectiveScope === "mine") {
           // "My projects" returns the full set (no pagination) and includes the
@@ -270,6 +274,7 @@ export function ProjectGalleryDialog({
         if (controller.signal.aborted) return;
         if (err instanceof DOMException && err.name === "AbortError") return;
         console.error("Failed to load project gallery", err);
+        setErrorCode(err instanceof GalleryError ? err.code : null);
         setError(galleryErrorMessage(err, t, oauthSupported));
       } finally {
         if (abortRef.current === controller) abortRef.current = null;
@@ -281,7 +286,7 @@ export function ProjectGalleryDialog({
 
   // Reload from the first page when the dialog opens or the scope changes (the
   // `loadPage` identity changes with scope); reset transient state and abort any
-  // in-flight request when it closes.
+  // in-flight fetch when it closes.
   useEffect(() => {
     reloadGenerationRef.current += 1;
     if (open) {
@@ -289,6 +294,7 @@ export function ProjectGalleryDialog({
       setQuery("");
       setOpeningState(null);
       setOpenError(null);
+      setErrorCode(null);
       setHasMore(false);
       setRawOffset(0);
       void loadPage(0);
@@ -486,7 +492,7 @@ export function ProjectGalleryDialog({
                 <Button variant="outline" size="sm" onClick={() => loadPage(0)}>
                   {t("gallery.retry")}
                 </Button>
-                {oauthSupported && !oauthSignedIn ? (
+                {oauthSupported && (!oauthSignedIn || errorCode === "unauthorized") ? (
                   <Button size="sm" onClick={handleSignIn} disabled={oauthPending}>
                     {oauthPending ? (
                       <Loader2 className="me-2 h-3.5 w-3.5 animate-spin" />
@@ -567,22 +573,18 @@ function ScopeTab({
   label: string;
 }) {
   return (
-    <button
+    <Button
       type="button"
-      aria-pressed={active}
+      variant={active ? "secondary" : "ghost"}
+      size="sm"
+      className="flex-1 gap-1.5 sm:flex-none"
       onClick={onClick}
-      className={`flex flex-1 items-center justify-center gap-1.5 rounded px-3 py-1 text-sm font-medium transition-colors sm:flex-none ${
-        active
-          ? "bg-background text-foreground shadow-sm"
-          : "text-muted-foreground hover:text-foreground"
-      }`}
     >
       {icon}
       {label}
-    </button>
+    </Button>
   );
 }
-
 /** A small badge marking unlisted/private projects; public renders nothing. */
 function VisibilityBadge({ visibility }: { visibility: string }) {
   const { t } = useTranslation();

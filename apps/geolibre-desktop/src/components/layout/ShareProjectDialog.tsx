@@ -361,6 +361,11 @@ export function ShareProjectDialog({
       // pasted personal token is the fallback on desktop or when the web
       // session is absent.
       const oauthToken = oauthSupported ? await getShareAccessToken() : null;
+      if (oauthSupported && !oauthToken && !shareToken.trim()) {
+        setErrorCode("unauthorized");
+        setError(null);
+        return;
+      }
       const { content, filename, redactedCount: removed = 0 } = await getProject(title.trim());
       const uploaded = await uploadProjectToShare({
         token: oauthToken ?? shareToken,
@@ -375,8 +380,11 @@ export function ShareProjectDialog({
       if (err instanceof DOMException && err.name === "AbortError") return;
       // A missing account username gets dedicated, actionable UI (a deep link to
       // the website's settings) rather than the raw server string.
-      if (err instanceof ShareUploadError && err.code === "username-required") {
-        setErrorCode("username-required");
+      if (
+        err instanceof ShareUploadError &&
+        (err.code === "username-required" || err.code === "unauthorized")
+      ) {
+        setErrorCode(err.code);
         setError(null);
       } else {
         setError(err instanceof Error ? err.message : t("share.errorFallback"));
@@ -470,7 +478,7 @@ export function ShareProjectDialog({
                   {t("share.oauthSetupDescription", { shareHost })}
                 </p>
                 <Button
-                  ref={getTokenButtonRef}
+                  ref={oauthSupported ? getTokenButtonRef : undefined}
                   type="button"
                   onClick={handleSignIn}
                   disabled={oauthPending}
@@ -497,7 +505,7 @@ export function ShareProjectDialog({
                   {t("share.step1Description", { shareHost })}
                 </p>
                 <Button
-                  ref={getTokenButtonRef}
+                  ref={oauthSupported ? undefined : getTokenButtonRef}
                   type="button"
                   variant="outline"
                   onClick={() => void openExternalLink(settingsUrl)}

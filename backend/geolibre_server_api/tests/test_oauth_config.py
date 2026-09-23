@@ -10,6 +10,7 @@ from concurrent.futures import ThreadPoolExecutor
 import pytest
 from fastapi.testclient import TestClient
 from geolibre_server_api import auth as auth_module
+from geolibre_server_api.auth import parse_issuer
 from geolibre_server_api.auth_models import OAUTH_INDEXES
 from geolibre_server_api.main import FileStorage, create_app
 from helpers import approve, sign_in, start_authorize
@@ -88,6 +89,18 @@ def test_enabled_oauth_rejects_invalid_issuers(tmp_path, monkeypatch, issuer):
     monkeypatch.setenv("GEOLIBRE_OAUTH_CLIENTS", json.dumps(VALID_CLIENTS))
     with pytest.raises(RuntimeError, match="GEOLIBRE_PUBLIC_URL"):
         make_app(tmp_path, public_url=issuer)
+
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [
+        ("https://SHARE.Example:443/services/", "https://share.example/services"),
+        ("http://LOCALHOST:80", "http://localhost"),
+        ("https://share.example:8443", "https://share.example:8443"),
+        ("https://[2001:DB8::1]:443/path/", "https://[2001:db8::1]/path"),
+    ],
+)
+def test_parse_issuer_normalizes_authority(raw, expected):
+    assert parse_issuer(raw) == expected
 
 
 @pytest.mark.parametrize(

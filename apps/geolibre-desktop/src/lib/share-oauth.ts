@@ -260,17 +260,8 @@ function clearStoredSession(issuer: string): void {
 
 function loadSignedInIssuer(): string | null {
   if (typeof window === "undefined") return null;
-  try {
-    for (let i = 0; i < window.sessionStorage.length; i += 1) {
-      const key = window.sessionStorage.key(i);
-      if (key?.startsWith(SESSION_PREFIX) && readSession(key.slice(SESSION_PREFIX.length))) {
-        return key.slice(SESSION_PREFIX.length);
-      }
-    }
-  } catch {
-    return null;
-  }
-  return null;
+  const issuer = resolveShareIssuer();
+  return issuer && readSession(issuer) ? issuer : null;
 }
 
 interface CachedAccessToken {
@@ -280,6 +271,7 @@ interface CachedAccessToken {
 }
 
 let cachedAccess: CachedAccessToken | null = null;
+let sessionGeneration = 0;
 
 function setStoreIssuer(issuer: string | null): void {
   useShareOAuthStore.setState((state) => (state.issuer === issuer ? state : { ...state, issuer }));
@@ -328,6 +320,7 @@ export async function signInToShare(baseUrl?: string): Promise<void> {
 
     const code = await waitForCallbackCode(popup, { state, issuer, flow });
     const tokens = await exchangeCode(issuer, code, verifier, redirectUri);
+    sessionGeneration += 1;
     writeSession(issuer, tokens.refresh_token);
     cachedAccess = {
       issuer,
@@ -469,16 +462,21 @@ export async function getShareAccessToken(baseUrl?: string): Promise<string | nu
   const session = readSession(issuer);
   if (!session) return null;
 
+  const generation = sessionGeneration;
   const existing = refreshInFlight.get(issuer);
   if (existing) return existing;
-  const refreshPromise = refreshAccessToken(issuer, session.refreshToken).finally(() => {
-    refreshInFlight.delete(issuer);
+  const refreshPromise = refreshAccessToken(issuer, session.refreshToken, generation).finally(() => {
+    if (refreshInFlight.get(issuer) === refreshPromise) refreshInFlight.delete(issuer);
   });
   refreshInFlight.set(issuer, refreshPromise);
   return refreshPromise;
 }
 
-async function refreshAccessToken(issuer: string, refreshToken: string): Promise<string | null> {
+async function refreshAccessToken(
+  issuer: string,
+  refreshToken: string,
+  generation: number,
+): Promise<string | null> {
   let response: Response;
   try {
     response = await fetch(new URL("/oauth/token", issuer), {
@@ -494,23 +492,29 @@ async function refreshAccessToken(issuer: string, refreshToken: string): Promise
     // Network trouble is not an authorization failure: keep the session.
     return null;
   }
+  if (generation !== sessionGeneration) return null;
   if (!response.ok) {
-    // Dead family (reused/rotated elsewhere, revoked, expired): drop it.
-    clearStoredSession(issuer);
-    if (cachedAccess?.issuer === issuer) cachedAccess = null;
-    if (loadSignedInIssuer() === null) setStoreIssuer(null);
+    const body = (await response.json().catch(() => null)) as { error?: unknown } | null;
+    if (generation !== sessionGeneration) return null;
+    const grantDead =
+      (response.status === 400 || response.status === 401) &&
+      (body?.error === "invalid_grant" || body?.error === "invalid_client");
+    if (grantDead) {
+      // Dead family (reused/rotated elsewhere, revoked, expired): drop it.
+      clearStoredSession(issuer);
+      if (cachedAccess?.issuer === issuer) cachedAccess = null;
+      if (loadSignedInIssuer() === null) setStoreIssuer(null);
+    }
     return null;
   }
   const payload = (await response.json().catch(() => null)) as Partial<TokenResponse> | null;
+  if (generation !== sessionGeneration) return null;
   if (
     typeof payload?.access_token !== "string" ||
     !payload.access_token ||
     typeof payload?.refresh_token !== "string" ||
     !payload.refresh_token
   ) {
-    clearStoredSession(issuer);
-    if (cachedAccess?.issuer === issuer) cachedAccess = null;
-    if (loadSignedInIssuer() === null) setStoreIssuer(null);
     return null;
   }
   // Rotation: the presented refresh token is consumed; store the successor.
@@ -531,6 +535,7 @@ async function refreshAccessToken(issuer: string, refreshToken: string): Promise
 
 export async function signOutOfShare(baseUrl?: string): Promise<void> {
   if (!supportsShareOAuth()) return;
+  sessionGeneration += 1;
   const issuer = resolveShareIssuer(baseUrl);
   if (!issuer) return;
   const session = readSession(issuer);
