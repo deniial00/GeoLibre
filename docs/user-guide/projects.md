@@ -70,7 +70,12 @@ An ArcGIS Pro project can contain several maps; GeoLibre imports its first 2D ma
 
 ## Share
 
-**Project → Share...** uploads the current project to `share.geolibre.app` and returns a public URL you can send to anyone or open in the live viewer. Sharing uses a personal API token, which you set once as the **Share.GeoLibre API token** in **Settings → Environment Variables**. The shared file is the same `.geolibre.json` the app saves locally, so anyone who opens the link sees the same layers, styles, and map view. See the [Sharing & Embedding tutorial](../tutorials/sharing-embedding.md).
+**Project → Share...** uploads the current project to `share.geolibre.app` and returns a public URL you can send to anyone or open in the live viewer. The shared file is the same `.geolibre.json` the app saves locally, so anyone who opens the link sees the same layers, styles, and map view. See the [Sharing & Embedding tutorial](../tutorials/sharing-embedding.md).
+
+Connecting your account depends on the build:
+
+- **Web app**: click **Sign in** in the Share dialog (or Settings → Environment Variables). A popup opens `share.geolibre.app`'s consent page; approving it connects the app, and the sign-in is kept for the browser session. Session expired prompts offer a one-click re-sign-in.
+- **GeoLibre Desktop** (and as a fallback everywhere): paste a personal API token — created under Settings → API tokens at [share.geolibre.app/settings](https://share.geolibre.app/settings) — into the **Share.GeoLibre API token** field in **Settings → Environment Variables**.
 
 ### Share-readiness check
 

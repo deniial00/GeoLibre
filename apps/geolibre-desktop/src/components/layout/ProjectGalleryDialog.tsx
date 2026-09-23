@@ -16,6 +16,7 @@ import {
   ImageOff,
   Loader2,
   Lock,
+  LogIn,
   Search,
   Star,
   User,
@@ -32,6 +33,14 @@ import { useTranslation } from "react-i18next";
 import { useDesktopSettingsStore } from "../../hooks/useDesktopSettings";
 import { observeGalleryEnd } from "../../lib/gallery-auto-load";
 import { openExternalLink } from "../../lib/open-external";
+import {
+  getShareAccessToken,
+  ShareOAuthError,
+  shareOAuthErrorKey,
+  signInToShare,
+  supportsShareOAuth,
+  useShareOAuthStore,
+} from "../../lib/share-oauth";
 import {
   fetchMyProjects,
   fetchSharedProjects,
@@ -71,9 +80,10 @@ function searchHaystack(project: SharedProject): string {
 /**
  * Translate a fetch error into a localized message. The gallery library throws
  * coded {@link GalleryError}s (it can't call `t()`); the UI maps each code to a
- * catalog string here.
+ * catalog string here. Web builds name the OAuth session in the unauthorized
+ * case, since that is the credential the web sign-in produced.
  */
-function galleryErrorMessage(error: unknown, t: TFunction): string {
+function galleryErrorMessage(error: unknown, t: TFunction, oauthSupported: boolean): string {
   if (error instanceof GalleryError) {
     switch (error.code) {
       case "timeout":
@@ -83,7 +93,9 @@ function galleryErrorMessage(error: unknown, t: TFunction): string {
       case "invalid-response":
         return t("gallery.errorInvalidResponse");
       case "unauthorized":
-        return t("gallery.errorUnauthorized", { shareHost: shareHostLabel() });
+        return oauthSupported
+          ? t("gallery.errorUnauthorizedOAuth", { shareHost: shareHostLabel() })
+          : t("gallery.errorUnauthorized", { shareHost: shareHostLabel() });
       case "username-required":
         return t("gallery.errorUsernameRequired", { shareHost: shareHostLabel() });
       case "not-configured":
@@ -110,7 +122,13 @@ export function ProjectGalleryDialog({
 }: ProjectGalleryDialogProps) {
   const { t } = useTranslation();
   const trimmedToken = (useDesktopSettingsStore((s) => s.desktopSettings.shareToken) ?? "").trim();
-  const hasToken = trimmedToken.length > 0;
+  // Web-only OAuth session; on desktop/embed both flags stay inert and the
+  // personal-API-token behavior is unchanged.
+  const oauthSupported = supportsShareOAuth();
+  const oauthIssuer = useShareOAuthStore((s) => s.issuer);
+  const oauthPending = useShareOAuthStore((s) => s.pending);
+  const oauthSignedIn = oauthSupported && oauthIssuer !== null;
+  const hasToken = oauthSignedIn || trimmedToken.length > 0;
   const [scope, setScope] = useState<GalleryScope>("featured");
   const [projects, setProjects] = useState<SharedProject[]>([]);
   const [status, setStatus] = useState<"idle" | "loading" | "loadingMore">("idle");
@@ -129,6 +147,17 @@ export function ProjectGalleryDialog({
   const reloadGenerationRef = useRef(0);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const loadMoreSentinelRef = useRef<HTMLDivElement>(null);
+
+  // Web sign-in from the gallery. Failures land in the same error strip the
+  // fetch errors use, translated from the ShareOAuthError code.
+  const handleSignIn = () => {
+    setError(null);
+    signInToShare().catch((err: unknown) => {
+      setError(
+        t(err instanceof ShareOAuthError ? shareOAuthErrorKey(err.code) : "share.oauthFailed"),
+      );
+    });
+  };
 
   // Without a token, the "My projects" scope isn't available; fall back to the
   // featured tab.
@@ -210,9 +239,12 @@ export function ProjectGalleryDialog({
       try {
         if (effectiveScope === "mine") {
           // "My projects" returns the full set (no pagination) and includes the
-          // owner's unlisted/private projects via the API token.
+          // owner's unlisted/private projects. Web builds resolve a fresh OAuth
+          // access token per load (null → empty token → the fetcher reports
+          // unauthorized, prompting re-sign-in); desktop uses the pasted token.
+          const token = oauthSupported ? ((await getShareAccessToken()) ?? "") : trimmedToken;
           const mine = await fetchMyProjects({
-            token: trimmedToken,
+            token,
             signal: controller.signal,
           });
           if (controller.signal.aborted) return;
@@ -238,13 +270,13 @@ export function ProjectGalleryDialog({
         if (controller.signal.aborted) return;
         if (err instanceof DOMException && err.name === "AbortError") return;
         console.error("Failed to load project gallery", err);
-        setError(galleryErrorMessage(err, t));
+        setError(galleryErrorMessage(err, t, oauthSupported));
       } finally {
         if (abortRef.current === controller) abortRef.current = null;
         if (!controller.signal.aborted) setStatus("idle");
       }
     },
-    [t, effectiveScope, trimmedToken],
+    [t, effectiveScope, trimmedToken, oauthSupported, oauthSignedIn],
   );
 
   // Reload from the first page when the dialog opens or the scope changes (the
@@ -271,9 +303,13 @@ export function ProjectGalleryDialog({
     setOpeningState({ id: project.id, action });
     setOpenError(null);
     try {
+      // Same credential resolution as loadPage: a fresh OAuth token on web,
+      // the pasted personal token on desktop. Public/unlisted opens still send
+      // no Authorization header at all (see projectOpenToken).
+      const token = oauthSupported ? ((await getShareAccessToken()) ?? "") : trimmedToken;
       await onOpenProject(
         project.rawJsonUrl,
-        effectiveScope === "mine" ? projectOpenToken(project, trimmedToken) : undefined,
+        effectiveScope === "mine" ? projectOpenToken(project, token) : undefined,
         options,
       );
       onOpenChange(false);
@@ -390,9 +426,29 @@ export function ProjectGalleryDialog({
         </div>
 
         {!hasToken ? (
-          <p className="text-xs text-muted-foreground">
-            {t("gallery.signedOutHint", { shareHost: shareHostLabel() })}
-          </p>
+          oauthSupported ? (
+            <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground">
+              <span>{t("gallery.signedOutHint", { shareHost: shareHostLabel() })}</span>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={handleSignIn}
+                disabled={oauthPending}
+              >
+                {oauthPending ? (
+                  <Loader2 className="me-2 h-3.5 w-3.5 animate-spin" />
+                ) : (
+                  <LogIn className="me-2 h-3.5 w-3.5" />
+                )}
+                {oauthPending ? t("share.oauthSigningIn") : t("share.oauthSignIn", { shareHost: shareHostLabel() })}
+              </Button>
+            </div>
+          ) : (
+            <p className="text-xs text-muted-foreground">
+              {t("gallery.signedOutHint", { shareHost: shareHostLabel() })}
+            </p>
+          )
         ) : null}
 
         {openError ? (
@@ -424,9 +480,21 @@ export function ProjectGalleryDialog({
                 <AlertCircle className="h-4 w-4 shrink-0" />
                 {error}
               </p>
-              <Button variant="outline" size="sm" onClick={() => loadPage(0)}>
-                {t("gallery.retry")}
-              </Button>
+              <div className="flex gap-2">
+                <Button variant="outline" size="sm" onClick={() => loadPage(0)}>
+                  {t("gallery.retry")}
+                </Button>
+                {oauthSupported && !oauthSignedIn ? (
+                  <Button size="sm" onClick={handleSignIn} disabled={oauthPending}>
+                    {oauthPending ? (
+                      <Loader2 className="me-2 h-3.5 w-3.5 animate-spin" />
+                    ) : (
+                      <LogIn className="me-2 h-3.5 w-3.5" />
+                    )}
+                    {t("share.oauthSignIn", { shareHost: shareHostLabel() })}
+                  </Button>
+                ) : null}
+              </div>
             </div>
           ) : (
             <>

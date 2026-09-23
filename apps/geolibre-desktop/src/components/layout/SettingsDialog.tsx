@@ -1,3 +1,11 @@
+import {
+  ShareOAuthError,
+  shareOAuthErrorKey,
+  signInToShare,
+  signOutOfShare,
+  supportsShareOAuth,
+  useShareOAuthStore,
+} from "../../lib/share-oauth";
 import { migrateMapboxTokenSettings } from "../../lib/mapbox-token-settings";
 import {
   DEFAULT_PROJECT_PREFERENCES,
@@ -41,6 +49,7 @@ import {
   Bot,
   Braces,
   Check,
+  CircleCheck,
   Crosshair,
   DownloadCloud,
   FolderOpen,
@@ -51,6 +60,8 @@ import {
   FolderTree,
   Languages,
   Locate,
+  LogIn,
+  LogOut,
   MapPinned,
   LayoutPanelTop,
   MessageSquare,
@@ -552,6 +563,26 @@ export function SettingsDialog({
     shareHostState.status === "invalid"
       ? t("settings.env.tokenHostInvalid")
       : t("settings.env.tokenUnavailable");
+  // Web-only OAuth account panel. Desktop/embed keep the pasted-token flow;
+  // supportsShareOAuth is false there, so this block never renders.
+  const oauthSupported = supportsShareOAuth();
+  const oauthIssuer = useShareOAuthStore((s) => s.issuer);
+  const oauthPending = useShareOAuthStore((s) => s.pending);
+  const [oauthError, setOauthError] = useState<string | null>(null);
+
+  const handleShareSignIn = () => {
+    setOauthError(null);
+    signInToShare().catch((err: unknown) => {
+      setOauthError(
+        t(err instanceof ShareOAuthError ? shareOAuthErrorKey(err.code) : "share.oauthFailed"),
+      );
+    });
+  };
+
+  const handleShareSignOut = () => {
+    setOauthError(null);
+    void signOutOfShare();
+  };
   const { language, options: languageOptions, setLanguage } = useLanguage();
   const preferences = useAppStore((s) => s.preferences);
   const setPreferences = useAppStore((s) => s.setPreferences);
@@ -2827,7 +2858,56 @@ export function SettingsDialog({
               ) : null}
               {effectiveSection === "environment" ? (
                 <div className="space-y-5">
-                  <div className="space-y-2">
+                  {oauthSupported && shareTokenUsable ? (
+                    <div className="space-y-2">
+                      <h3 className="text-sm font-semibold">{t("settings.env.oauthTitle")}</h3>
+                      <p className="text-xs text-muted-foreground">
+                        {t("settings.env.oauthDescription", { shareHost })}
+                      </p>
+                      {oauthIssuer ? (
+                        <div className="flex flex-wrap items-center gap-2">
+                          <CircleCheck className="h-4 w-4 shrink-0 text-emerald-600 dark:text-emerald-400" />
+                          <span className="text-xs text-muted-foreground">
+                            {t("settings.env.oauthConnected", { shareHost })}
+                          </span>
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            className="ms-auto"
+                            onClick={handleShareSignOut}
+                          >
+                            <LogOut className="me-2 h-3.5 w-3.5" />
+                            {t("settings.env.oauthSignOut")}
+                          </Button>
+                        </div>
+                      ) : (
+                        <div className="space-y-2">
+                          <Button type="button" onClick={handleShareSignIn} disabled={oauthPending}>
+                            {oauthPending ? (
+                              <LoaderCircle className="me-2 h-3.5 w-3.5 animate-spin" />
+                            ) : (
+                              <LogIn className="me-2 h-3.5 w-3.5" />
+                            )}
+                            {oauthPending
+                              ? t("settings.env.oauthSigningIn")
+                              : t("settings.env.oauthSignIn")}
+                          </Button>
+                          {oauthError ? (
+                            <p role="alert" className="text-xs text-destructive">
+                              {oauthError}
+                            </p>
+                          ) : null}
+                        </div>
+                      )}
+                    </div>
+                  ) : null}
+                  <div
+                    className={cn(
+                      "space-y-2",
+                      oauthSupported && shareTokenUsable && "border-t pt-5",
+                    )}
+                  >
                     <h3 className="text-sm font-semibold">{t("settings.env.tokenTitle")}</h3>
                     {shareTokenUsable ? (
                       <>

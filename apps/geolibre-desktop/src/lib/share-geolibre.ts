@@ -1,6 +1,6 @@
 // Uploads a serialized GeoLibre project to a share server via its
-// `POST /api/projects` endpoint, authenticated with a personal API token the
-// user created on that server. Used by the Project > Share action.
+// `POST /api/projects` endpoint, authenticated with an OAuth access token or
+// a personal API token. Used by the Project > Share action.
 //
 // The host is share.geolibre.app unless the deployment names another one; see
 // `resolveShareHost` for the precedence and for why a rejected value disables
@@ -20,10 +20,10 @@ export type ShareVisibility = "public" | "unlisted" | "private";
 /**
  * Machine-readable cause for an upload failure the dialog can react to. Only
  * conditions that warrant dedicated UI (beyond showing the message) get a code.
- * `username-required` means the account has no username yet, which the user must
- * set on the share.geolibre.app website before any upload can succeed.
+ * `username-required` directs the user to account settings; `unauthorized`
+ * prompts a fresh sign-in or replacement personal token.
  */
-export type ShareUploadErrorCode = "username-required";
+export type ShareUploadErrorCode = "username-required" | "unauthorized";
 
 /**
  * Error thrown by {@link uploadProjectToShare}. Carries a human-readable message
@@ -322,7 +322,7 @@ async function uploadErrorInfo(
   response: Response,
 ): Promise<{ message: string; code?: ShareUploadErrorCode }> {
   if (response.status === 401) {
-    return { message: "Invalid or expired API token. Update it in Settings." };
+    return { message: "unauthorized", code: "unauthorized" };
   }
   if (response.status === 403) {
     return { message: "This API token is not allowed to upload projects." };

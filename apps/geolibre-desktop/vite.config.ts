@@ -1520,6 +1520,14 @@ export default defineConfig({
     sourcemap: !!process.env.TAURI_DEBUG,
     chunkSizeWarningLimit: GIS_CHUNK_WARNING_LIMIT_KB,
     rollupOptions: {
+      // Two pages: the app shell and the standalone OAuth callback. The
+      // callback gets its own entry so its tiny script is compiled through
+      // Vite (base-path-aware asset URLs) instead of shipped as raw inline
+      // HTML; see oauth-callback.html.
+      input: {
+        main: path.resolve(__dirname, "index.html"),
+        oauthCallback: path.resolve(__dirname, "oauth-callback.html"),
+      },
       onwarn,
       output: {
         manualChunks,

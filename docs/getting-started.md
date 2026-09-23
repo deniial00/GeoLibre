@@ -552,9 +552,11 @@ Production web callbacks require HTTPS and must end in
 `/oauth-callback.html`. The desktop client uses the exact callback
 `org.geolibre.desktop:/oauth/callback`. Add its separate
 `geolibre-desktop` registration to the same JSON array when desktop sign-in is
-required. Web-app sign-in integration is still pending, so visitors cannot
-start OAuth sign-in from the web UI yet. See the
-[server API OAuth contract](server-api.md#oauth-20-sign-in-authorization-code-s256-pkce)
+required. The web app signs in through a popup to the server's consent page
+using this registration, so the `geolibre-web` callback URL must match the web
+app's own origin (including any base path). Desktop sign-in (the system
+browser flow) is still pending; desktop users paste a personal API token. See
+the [server API OAuth contract](server-api.md#oauth-20-sign-in-authorization-code-s256-pkce)
 for the flow and lifetime settings.
 
 Behind a reverse proxy, keep the projects API behind the rate-limit boundary:

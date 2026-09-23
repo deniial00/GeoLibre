@@ -54,9 +54,10 @@ Panels also auto-hide on small screens for a responsive layout.
 
 ## Environment Variables
 
-**Settings → Environment Variables** (the **Environment** tab in the Settings dialog) holds the share token and the runtime key-value pairs that GeoLibre and its plugins read, such as API keys:
+**Settings → Environment Variables** (the **Environment** tab in the Settings dialog) holds the share account connection and the runtime key-value pairs that GeoLibre and its plugins read, such as API keys:
 
-- **Share.GeoLibre API token**: the personal API token used by **Project → Share** to upload to `share.geolibre.app`. See [Projects](projects.md#share).
+- **Share.GeoLibre account** (web app): sign in to `share.geolibre.app` through a popup, or sign out, used by **Project → Share** and the Project Gallery. See [Projects](projects.md#share).
+- **Share.GeoLibre API token**: the personal API token used by **Project → Share** — the normal path on the desktop app, and a fallback on the web. See [Projects](projects.md#share).
 - **Environment variables**: named key-value pairs (for example, API keys for Earth Engine, Street View, and other integrations). You can enable or disable individual variables, and secret values are masked. Variable names must start with a letter or underscore and contain only letters, numbers, and underscores.
 
 !!! tip "Where credentials go"

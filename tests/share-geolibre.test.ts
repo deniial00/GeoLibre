@@ -260,11 +260,14 @@ describe("uploadProjectToShare", () => {
     assert.equal(result.rawJsonUrl, PROJECT_DTO.rawJsonUrl);
   });
 
-  it("maps 401 to an invalid-token message", async () => {
+  it("flags 401 with an unauthorized code so the UI prompts re-auth", async () => {
     const { fn } = fakeFetch(401, { error: "Unauthorized" });
     await assert.rejects(
       () => uploadProjectToShare({ ...baseArgs, fetchImpl: fn }),
-      /invalid or expired/i,
+      (err: ShareUploadError) =>
+        err instanceof ShareUploadError &&
+        err.code === "unauthorized" &&
+        err.message === "unauthorized",
     );
   });
 
