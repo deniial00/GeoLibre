@@ -150,7 +150,6 @@ export function ProjectGalleryDialog({
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const loadMoreSentinelRef = useRef<HTMLDivElement>(null);
 
-
   // Without a token, the "My projects" scope isn't available; fall back to the
   // featured tab.
   const effectiveScope: GalleryScope = scope === "mine" && !hasToken ? "featured" : scope;
@@ -289,7 +288,6 @@ export function ProjectGalleryDialog({
         );
       });
   };
-
 
   // Reload from the first page when the dialog opens or the scope changes (the
   // `loadPage` identity changes with scope); reset transient state and abort any
