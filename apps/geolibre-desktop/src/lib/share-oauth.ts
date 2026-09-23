@@ -132,14 +132,17 @@ export function supportsShareOAuth(): boolean {
 }
 
 /**
- * The OAuth issuer for this deployment: the configured (or hosted default)
- * share base, without a trailing slash. Null when sharing is disabled or the
- * configured host was rejected — exactly the states where no credential may be
- * obtained or sent.
+ * The canonical OAuth issuer for this deployment, or null when sharing is
+ * unavailable or the configured base URL is invalid.
  */
 export function resolveShareIssuer(baseUrl?: string): string | null {
   const base = baseUrl ?? resolveShareBaseUrl();
-  return base ? base.replace(/\/+$/, "") : null;
+  if (!base) return null;
+  try {
+    return new URL(base).toString().replace(/\/+$/, "");
+  } catch {
+    return null;
+  }
 }
 
 /** Resolve an OAuth endpoint below the issuer, preserving any issuer path. */

@@ -9,6 +9,7 @@ import {
   getShareAccessToken,
   oauthEndpointUrl,
   randomUrlSafeToken,
+  resolveShareIssuer,
   s256Challenge,
   ShareOAuthError,
   validateCallbackPayload,
@@ -173,6 +174,24 @@ describe("s256Challenge", () => {
 
   it("differs per verifier", async () => {
     assert.notEqual(await s256Challenge("a".repeat(43)), await s256Challenge("b".repeat(43)));
+  });
+});
+
+describe("resolveShareIssuer", () => {
+  it("normalizes hostname casing and explicit default ports", () => {
+    assert.equal(
+      resolveShareIssuer("https://SHARE.Example:443/services/"),
+      "https://share.example/services",
+    );
+  });
+
+  it("preserves non-default ports and IPv6 authority", () => {
+    assert.equal(resolveShareIssuer("https://[2001:DB8::1]:8443/path"), "https://[2001:db8::1]:8443/path");
+  });
+
+  it("returns null for missing or invalid issuers", () => {
+    assert.equal(resolveShareIssuer(""), null);
+    assert.equal(resolveShareIssuer("not a URL"), null);
   });
 });
 
