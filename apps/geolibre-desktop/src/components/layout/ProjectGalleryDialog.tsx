@@ -246,7 +246,7 @@ export function ProjectGalleryDialog({
           // owner's unlisted/private projects. Web builds resolve a fresh OAuth
           // access token per load (null → empty token → the fetcher reports
           // unauthorized, prompting re-sign-in); desktop uses the pasted token.
-          const token = oauthSupported ? ((await getShareAccessToken()) ?? "") : trimmedToken;
+          const token = oauthSupported ? ((await getShareAccessToken()) ?? trimmedToken) : trimmedToken;
           const mine = await fetchMyProjects({
             token,
             signal: controller.signal,
@@ -312,7 +312,7 @@ export function ProjectGalleryDialog({
       // Same credential resolution as loadPage: a fresh OAuth token on web,
       // the pasted personal token on desktop. Public/unlisted opens still send
       // no Authorization header at all (see projectOpenToken).
-      const token = oauthSupported ? ((await getShareAccessToken()) ?? "") : trimmedToken;
+      const token = oauthSupported ? ((await getShareAccessToken()) ?? trimmedToken) : trimmedToken;
       await onOpenProject(
         project.rawJsonUrl,
         effectiveScope === "mine" ? projectOpenToken(project, token) : undefined,
@@ -579,6 +579,7 @@ function ScopeTab({
       size="sm"
       className="flex-1 gap-1.5 sm:flex-none"
       onClick={onClick}
+      aria-pressed={active}
     >
       {icon}
       {label}

@@ -134,6 +134,15 @@ export function resolveShareIssuer(baseUrl?: string): string | null {
   return base ? base.replace(/\/+$/, "") : null;
 }
 
+/** Resolve an OAuth endpoint below the issuer, preserving any issuer path. */
+export function oauthEndpointUrl(
+  issuer: string,
+  endpoint: "authorize" | "token" | "revoke",
+): URL {
+  return new URL(`oauth/${endpoint}`, `${issuer}/`);
+}
+
+
 // ---------------------------------------------------------------------------
 // Pure helpers (unit-tested security boundaries)
 // ---------------------------------------------------------------------------
@@ -162,13 +171,19 @@ export async function s256Challenge(verifier: string): Promise<string> {
  * subpath deployments (`GEOLIBRE_APP_BASE`) the same way Auth0Gate's redirect
  * does — one stable value an operator can register.
  */
-export function deriveCallbackUrl(appOrigin: string, base?: string): string {
+export function deriveCallbackUrl(appOrigin: string, base?: string, documentUrl?: string): string {
   // Vite exposes the configured base with a trailing slash; the tsx test
   // loader has no import.meta.env at all, hence the safe read.
   const env = (import.meta as { env?: { BASE_URL?: string } }).env;
   const raw = base ?? env?.BASE_URL ?? "/";
   const baseDir = raw.endsWith("/") ? raw : `${raw}/`;
-  return new URL(`${baseDir}oauth-callback.html`, appOrigin).toString();
+  const resolutionBase =
+    raw.startsWith(".") && documentUrl
+      ? documentUrl
+      : raw.startsWith(".") && typeof window !== "undefined"
+        ? window.location.href
+        : appOrigin;
+  return new URL(`${baseDir}oauth-callback.html`, resolutionBase).toString();
 }
 
 export interface CallbackPayload {
@@ -306,7 +321,7 @@ export async function signInToShare(baseUrl?: string): Promise<void> {
   try {
     const challenge = await s256Challenge(verifier);
     const redirectUri = deriveCallbackUrl(window.location.origin);
-    const authorizeUrl = new URL("/oauth/authorize", issuer);
+    const authorizeUrl = oauthEndpointUrl(issuer, "authorize");
     authorizeUrl.search = new URLSearchParams({
       response_type: "code",
       client_id: CLIENT_ID,
@@ -398,7 +413,7 @@ async function exchangeCode(
 ): Promise<TokenResponse> {
   let response: Response;
   try {
-    response = await fetch(new URL("/oauth/token", issuer), {
+    response = await fetch(oauthEndpointUrl(issuer, "token"), {
       method: "POST",
       headers: { "Content-Type": "application/x-www-form-urlencoded" },
       body: new URLSearchParams({
@@ -481,7 +496,7 @@ async function refreshAccessToken(
 ): Promise<string | null> {
   let response: Response;
   try {
-    response = await fetch(new URL("/oauth/token", issuer), {
+    response = await fetch(oauthEndpointUrl(issuer, "token"), {
       method: "POST",
       headers: { "Content-Type": "application/x-www-form-urlencoded" },
       body: new URLSearchParams({
@@ -549,7 +564,7 @@ export async function signOutOfShare(baseUrl?: string): Promise<void> {
   if (loadSignedInIssuer() === null) setStoreIssuer(null);
   if (!session) return;
   try {
-    await fetch(new URL("/oauth/revoke", issuer), {
+    await fetch(oauthEndpointUrl(issuer, "revoke"), {
       method: "POST",
       headers: { "Content-Type": "application/x-www-form-urlencoded" },
       body: new URLSearchParams({

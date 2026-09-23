@@ -9,6 +9,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
   deriveCallbackUrl,
+  oauthEndpointUrl,
   randomUrlSafeToken,
   s256Challenge,
   validateCallbackPayload,
@@ -55,6 +56,22 @@ describe("deriveCallbackUrl", () => {
 
   it("repairs a base missing its trailing slash", () => {
     assert.equal(deriveCallbackUrl(APP, "/demo"), `${APP}/demo/oauth-callback.html`);
+  });
+
+  it("resolves a relative base from the current document path", () => {
+    assert.equal(
+      deriveCallbackUrl(APP, "./", `${APP}/demo/`),
+      `${APP}/demo/oauth-callback.html`,
+    );
+  });
+});
+
+describe("oauthEndpointUrl", () => {
+  it("preserves a path-mounted issuer", () => {
+    assert.equal(
+      oauthEndpointUrl("https://share.example/geolibre", "authorize").toString(),
+      "https://share.example/geolibre/oauth/authorize",
+    );
   });
 });
 
