@@ -159,7 +159,7 @@ def test_unknown_client_and_redirect_never_get_location(oauth_client):
     response = oauth_client.get("/oauth/authorize", params=query)
     assert response.status_code == 400
     assert "location" not in response.headers
-    assert "ev-example" not in response.text
+    assert "evil.example" not in response.text
 
     # Registered client with an unregistered redirect is equally refused.
     response, _, interaction, _ = start_authorize(

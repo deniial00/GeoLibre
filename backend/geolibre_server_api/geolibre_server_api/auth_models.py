@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from sqlalchemy import Boolean, ForeignKey, Integer, String, Text
+from sqlalchemy import Boolean, ForeignKey, Index, Integer, String, Text
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 if TYPE_CHECKING:
@@ -120,6 +120,26 @@ class OAuthRefreshToken(Base):
     expires_at: Mapped[int] = mapped_column(Integer)
     consumed_at: Mapped[int | None] = mapped_column(Integer, nullable=True)
     successor_digest: Mapped[str | None] = mapped_column(String(64), nullable=True)
+
+
+# Keep these indexes as separate metadata objects so startup can add them to
+# existing OAuth tables as well as create them with fresh databases.
+OAUTH_INDEXES = (
+    Index(
+        "ix_oauth_authorization_codes_browser_cookie_digest",
+        OAuthAuthorizationCode.__table__.c.browser_cookie_digest,
+    ),
+    Index(
+        "ix_oauth_authorization_codes_interaction_expires_at",
+        OAuthAuthorizationCode.__table__.c.interaction_expires_at,
+    ),
+    Index(
+        "ix_oauth_authorization_codes_session_id",
+        OAuthAuthorizationCode.__table__.c.session_id,
+    ),
+    Index("ix_oauth_sessions_expires_at", OAuthSession.__table__.c.expires_at),
+    Index("ix_oauth_access_tokens_expires_at", OAuthAccessToken.__table__.c.expires_at),
+)
 
 
 class PersonalTokenPolicy(Base):

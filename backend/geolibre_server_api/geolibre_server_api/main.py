@@ -49,7 +49,7 @@ from geolibre_server_api.auth import (
     optional_principal,
     require_scope,
 )
-from geolibre_server_api.auth_models import Account, Base
+from geolibre_server_api.auth_models import OAUTH_INDEXES, Account, Base
 
 Visibility = Literal["public", "unlisted", "private"]
 SLUG_RE = re.compile(r"[^a-z0-9]+")
@@ -387,6 +387,10 @@ def create_app(
             dbapi_connection.execute("PRAGMA foreign_keys=ON")
 
     Base.metadata.create_all(engine)
+    # create_all leaves pre-existing tables untouched, including their indexes.
+    # Add the OAuth indexes idempotently when upgrading a persisted database.
+    for index in OAUTH_INDEXES:
+        index.create(engine, checkfirst=True)
     sessions = sessionmaker(engine, expire_on_commit=False)
     oauth_config = make_oauth_config(public_url)
     clock_fn = clock or (lambda: int(datetime.now(UTC).timestamp()))

@@ -38,6 +38,11 @@ Configuration:
   `geolibre-server-api` entry point, default `0.0.0.0` and `8000`. Bind to
   `127.0.0.1` when a reverse proxy fronts the service.
 
+On startup, the API adds the OAuth lookup and expiry indexes to databases
+created by earlier builds as well as to fresh databases, without changing
+unexpired grants or tokens. Index creation on a populated database can hold
+write locks, so start one API instance during the upgrade before scaling out.
+
 ## Volume ownership
 
 The container runs as the unprivileged `geolibre` user, and the image creates

@@ -441,6 +441,7 @@ the database stores only SHA-256 digests.
 OAuth access tokens use the same project scope matrix as personal tokens.
 `admin:org` and `manage:sessions` are reserved for later stacks and are rejected
 by this server.
+
 ## Compatibility
 
 The API is additive within version 1. Implementations must not repurpose fields

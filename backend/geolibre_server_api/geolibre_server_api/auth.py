@@ -825,7 +825,9 @@ def is_sqlite_lock_error(session: Session, exc: OperationalError) -> bool:
 
 
 async def read_form_body(request: Request) -> bytes | None:
-    """Read a bounded form-urlencoded body, returning None when oversized."""
+    """Read a bounded URL-encoded body asynchronously, if the content type matches."""
+    if request.headers.get("content-type", "").split(";")[0] != "application/x-www-form-urlencoded":
+        return None
     chunks: list[bytes] = []
     total = 0
     async for chunk in request.stream():
@@ -1052,10 +1054,9 @@ def build_oauth_router(config: OAuthConfig) -> APIRouter:
 
     # -- GET /oauth/authorize: start a pending interaction and render consent --
 
-    @router.get("/oauth/authorize")
-    def oauth_authorize(
+    def _begin_authorization(
         request: Request,
-        session: Session = Depends(get_session),
+        session: Session,
     ):
         params = request.query_params
         for key in (
@@ -1172,12 +1173,25 @@ def build_oauth_router(config: OAuthConfig) -> APIRouter:
         )
         return response
 
-    # -- POST /oauth/authorize: verify credentials and consent, mint the code --
-
-    @router.post("/oauth/authorize")
-    async def oauth_authorize_post(
+    @router.get("/oauth/authorize")
+    def oauth_authorize(
         request: Request,
         session: Session = Depends(get_session),
+    ):
+        try:
+            return _begin_authorization(request, session)
+        except OperationalError as exc:
+            session.rollback()
+            if not is_sqlite_lock_error(session, exc):
+                raise
+            return oauth_error_page(503, "temporarily_unavailable", "please try again")
+
+    # -- POST /oauth/authorize: verify credentials and consent, mint the code --
+
+    def _complete_authorization(
+        request: Request,
+        session: Session,
+        body: bytes | None,
     ):
         origin = request.headers.get("origin")
         referer = request.headers.get("referer")
@@ -1186,7 +1200,6 @@ def build_oauth_router(config: OAuthConfig) -> APIRouter:
         content_type = request.headers.get("content-type", "").split(";")[0]
         if content_type != "application/x-www-form-urlencoded":
             return oauth_error_page(400, "invalid_request", "invalid content type")
-        body = await read_form_body(request)
         if body is None:
             return oauth_error_page(400, "invalid_request", "request body too large")
         fields = parse_form_fields(body)
@@ -1315,6 +1328,20 @@ def build_oauth_router(config: OAuthConfig) -> APIRouter:
                 config.issuer, interaction.redirect_uri, code_value, interaction.state
             )
         )
+
+    @router.post("/oauth/authorize")
+    def oauth_authorize_post(
+        request: Request,
+        body: bytes | None = Depends(read_form_body),
+        session: Session = Depends(get_session),
+    ):
+        try:
+            return _complete_authorization(request, session, body)
+        except OperationalError as exc:
+            session.rollback()
+            if not is_sqlite_lock_error(session, exc):
+                raise
+            return oauth_error_page(503, "temporarily_unavailable", "please try again")
 
     # -- POST /oauth/token: exchange a code, or rotate a refresh token --
 
@@ -1477,6 +1504,8 @@ def build_oauth_router(config: OAuthConfig) -> APIRouter:
         # Serialization point shared with revocation: a conditional UPDATE on
         # the family row. If a concurrent revoke wins, this matches 0 rows and
         # no new tokens are issued.
+        # The increment is the write that locks this family row, serializing
+        # refreshes with each other and with revocation; no reader needs its value.
         rotated = session.execute(
             update(OAuthSession)
             .where(
@@ -1546,14 +1575,14 @@ def build_oauth_router(config: OAuthConfig) -> APIRouter:
         )
 
     @router.post("/oauth/token")
-    async def oauth_token(
+    def oauth_token(
         request: Request,
+        body: bytes | None = Depends(read_form_body),
         session: Session = Depends(get_session),
     ):
         content_type = request.headers.get("content-type", "").split(";")[0]
         if content_type != "application/x-www-form-urlencoded":
             return oauth_token_error(400, "invalid_request")
-        body = await read_form_body(request)
         if body is None:
             return oauth_token_error(400, "invalid_request")
         fields = parse_form_fields(body)
@@ -1580,14 +1609,14 @@ def build_oauth_router(config: OAuthConfig) -> APIRouter:
     # -- POST /oauth/revoke: revoke an access or refresh token's family --
 
     @router.post("/oauth/revoke")
-    async def oauth_revoke(
+    def oauth_revoke(
         request: Request,
+        body: bytes | None = Depends(read_form_body),
         session: Session = Depends(get_session),
     ):
         content_type = request.headers.get("content-type", "").split(";")[0]
         if content_type != "application/x-www-form-urlencoded":
             return oauth_token_error(400, "invalid_request")
-        body = await read_form_body(request)
         if body is None:
             return oauth_token_error(400, "invalid_request")
         fields = parse_form_fields(body)

@@ -13,6 +13,8 @@ import threading
 
 import pytest
 from fastapi.testclient import TestClient
+from geolibre_server_api.auth_models import OAUTH_INDEXES
+from geolibre_server_api.main import FileStorage, create_app
 from helpers import (
     approve,
     exchange_code,
@@ -21,9 +23,36 @@ from helpers import (
     sign_in,
     start_authorize,
 )
-from sqlalchemy import event
+from sqlalchemy import event, inspect
 
 pytestmark = pytest.mark.postgres
+
+
+def test_existing_postgres_oauth_tables_gain_indexes(postgres_app, tmp_path):
+    app = postgres_app
+    with TestClient(app, base_url="https://share.example") as client:
+        tokens = sign_in(client)
+    for index in OAUTH_INDEXES:
+        index.drop(app.state.engine)
+
+    upgraded = create_app(
+        app.state.engine.url.render_as_string(hide_password=False),
+        public_url="https://share.example",
+        storage=FileStorage(str(tmp_path / "objects")),
+    )
+    try:
+        with TestClient(upgraded, base_url="https://share.example") as client:
+            response = client.get(
+                "/api/users/me", headers={"Authorization": f"Bearer {tokens['access_token']}"}
+            )
+            assert response.status_code == 200
+            for index in OAUTH_INDEXES:
+                assert index.name in {
+                    item["name"]
+                    for item in inspect(upgraded.state.engine).get_indexes(index.table.name)
+                }
+    finally:
+        upgraded.state.engine.dispose()
 
 
 def _two_clients(app):
