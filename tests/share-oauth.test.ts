@@ -59,10 +59,7 @@ describe("deriveCallbackUrl", () => {
   });
 
   it("resolves a relative base from the current document path", () => {
-    assert.equal(
-      deriveCallbackUrl(APP, "./", `${APP}/demo/`),
-      `${APP}/demo/oauth-callback.html`,
-    );
+    assert.equal(deriveCallbackUrl(APP, "./", `${APP}/demo/`), `${APP}/demo/oauth-callback.html`);
   });
 });
 

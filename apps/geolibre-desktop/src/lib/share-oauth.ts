@@ -138,13 +138,9 @@ export function resolveShareIssuer(baseUrl?: string): string | null {
 }
 
 /** Resolve an OAuth endpoint below the issuer, preserving any issuer path. */
-export function oauthEndpointUrl(
-  issuer: string,
-  endpoint: "authorize" | "token" | "revoke",
-): URL {
+export function oauthEndpointUrl(issuer: string, endpoint: "authorize" | "token" | "revoke"): URL {
   return new URL(`oauth/${endpoint}`, `${issuer}/`);
 }
-
 
 // ---------------------------------------------------------------------------
 // Pure helpers (unit-tested security boundaries)

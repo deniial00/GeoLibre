@@ -246,7 +246,9 @@ export function ProjectGalleryDialog({
           // owner's unlisted/private projects. Web builds resolve a fresh OAuth
           // access token per load (null → empty token → the fetcher reports
           // unauthorized, prompting re-sign-in); desktop uses the pasted token.
-          const token = oauthSupported ? ((await getShareAccessToken()) ?? trimmedToken) : trimmedToken;
+          const token = oauthSupported
+            ? ((await getShareAccessToken()) ?? trimmedToken)
+            : trimmedToken;
           const mine = await fetchMyProjects({
             token,
             signal: controller.signal,
