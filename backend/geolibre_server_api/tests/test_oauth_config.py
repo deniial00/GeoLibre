@@ -90,6 +90,7 @@ def test_enabled_oauth_rejects_invalid_issuers(tmp_path, monkeypatch, issuer):
     with pytest.raises(RuntimeError, match="GEOLIBRE_PUBLIC_URL"):
         make_app(tmp_path, public_url=issuer)
 
+
 @pytest.mark.parametrize(
     ("raw", "expected"),
     [

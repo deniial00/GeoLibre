@@ -465,9 +465,11 @@ export async function getShareAccessToken(baseUrl?: string): Promise<string | nu
   const generation = sessionGeneration;
   const existing = refreshInFlight.get(issuer);
   if (existing) return existing;
-  const refreshPromise = refreshAccessToken(issuer, session.refreshToken, generation).finally(() => {
-    if (refreshInFlight.get(issuer) === refreshPromise) refreshInFlight.delete(issuer);
-  });
+  const refreshPromise = refreshAccessToken(issuer, session.refreshToken, generation).finally(
+    () => {
+      if (refreshInFlight.get(issuer) === refreshPromise) refreshInFlight.delete(issuer);
+    },
+  );
   refreshInFlight.set(issuer, refreshPromise);
   return refreshPromise;
 }
