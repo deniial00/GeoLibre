@@ -4,7 +4,7 @@ import {
   parseCesiumIonAssetId,
   type CesiumIonAssetKind,
 } from "@geolibre/core";
-import { Button, Input, Label, Select } from "@geolibre/ui";
+import { Input, Label, Select } from "@geolibre/ui";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useCesiumIonToken } from "../../../../hooks/useCesiumIonToken";
@@ -24,6 +24,15 @@ export function CesiumIonSource() {
   const [kind, setKind] = useState<CesiumIonAssetKind>("3d-tiles");
   const [altitudeOffset, setAltitudeOffset] = useState("0");
 
+  // The dropdown mirrors the form rather than holding its own state: typing an
+  // asset id by hand, or switching the layer type, drops it back to the
+  // placeholder instead of leaving a stale pick selected.
+  const selectedPick = CESIUM_ION_QUICK_PICKS.find(
+    (pick) => String(pick.assetId) === assetId.trim() && pick.kind === kind,
+  );
+  const globalPicks = CESIUM_ION_QUICK_PICKS.filter((pick) => pick.group === "global");
+  const depotPicks = CESIUM_ION_QUICK_PICKS.filter((pick) => pick.group === "depot");
+
   const handleSubmit = source.runSubmit(() => {
     const id = parseCesiumIonAssetId(assetId);
     if (id === null) throw new Error(t("addData.cesiumIon.errorAssetId"));
@@ -39,6 +48,9 @@ export function CesiumIonSource() {
         kind,
         altitudeOffset: kind === "3d-tiles" ? offset : 0,
       }),
+      // The asset's extent is only known once the globe has loaded it, so the
+      // fit waits for the tileset/imagery rather than resolving from the store.
+      { fit: true },
     );
   });
 
@@ -91,25 +103,51 @@ export function CesiumIonSource() {
           </div>
         ) : null}
         <div className="space-y-1.5">
-          <Label>{t("addData.cesiumIon.quickPicks")}</Label>
-          <div className="flex flex-wrap gap-2">
-            {CESIUM_ION_QUICK_PICKS.map((pick) => (
-              <Button
-                key={pick.assetId}
-                type="button"
-                variant="outline"
-                size="sm"
-                onClick={() => {
-                  setAssetId(String(pick.assetId));
-                  setKind(pick.kind);
-                  source.setLayerName(pick.name);
-                }}
-              >
-                {pick.name}
-              </Button>
-            ))}
-          </div>
-          <p className="text-xs text-muted-foreground">{t("addData.cesiumIon.hint")}</p>
+          <Label htmlFor="cesium-ion-quick-pick">{t("addData.cesiumIon.quickPicks")}</Label>
+          <Select
+            id="cesium-ion-quick-pick"
+            value={selectedPick ? String(selectedPick.assetId) : ""}
+            onChange={(event) => {
+              const pick = CESIUM_ION_QUICK_PICKS.find(
+                (candidate) => String(candidate.assetId) === event.target.value,
+              );
+              if (!pick) {
+                // Re-picking the placeholder means "I'll type an id myself", so
+                // drop what the previous pick filled in, the way the Deck.gl
+                // sample dropdown drops a sample's placement. Returning without
+                // a state change would leave the native select showing the
+                // placeholder while the fields below still held the old pick.
+                setAssetId("");
+                setKind("3d-tiles");
+                source.setLayerName(t("addData.cesiumIon.defaultName"));
+                return;
+              }
+              setAssetId(String(pick.assetId));
+              setKind(pick.kind);
+              source.setLayerName(pick.name);
+            }}
+          >
+            <option value="">{t("addData.cesiumIon.quickPicksPlaceholder")}</option>
+            <optgroup label={t("addData.cesiumIon.quickPicksGlobal")}>
+              {globalPicks.map((pick) => (
+                <option key={pick.assetId} value={String(pick.assetId)}>
+                  {pick.name}
+                </option>
+              ))}
+            </optgroup>
+            <optgroup label={t("addData.cesiumIon.quickPicksDepot")}>
+              {depotPicks.map((pick) => (
+                <option key={pick.assetId} value={String(pick.assetId)}>
+                  {pick.name}
+                </option>
+              ))}
+            </optgroup>
+          </Select>
+          <p className="text-xs text-muted-foreground">
+            {selectedPick?.group === "depot"
+              ? t("addData.cesiumIon.depotHint")
+              : t("addData.cesiumIon.hint")}
+          </p>
         </div>
       </div>
     </AddDataSourceForm>

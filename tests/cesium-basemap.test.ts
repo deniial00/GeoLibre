@@ -1,11 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import type { CesiumBasemapImagery } from "../packages/core/src/cesium-imagery";
-import {
-  applyBasemapAppearance,
-  applyBasemapImagery,
-  getStadiaApiKey,
-} from "../packages/map/src/cesium-basemap";
+import { applyBasemapAppearance, applyBasemapImagery } from "../packages/map/src/cesium-basemap";
 
 // Verifies that the project basemap lands at the bottom of the globe's imagery
 // stack (below the data layers CesiumLayerSync appends), that a basemap change
@@ -22,6 +18,8 @@ function makeFakes() {
   // The imagery stack, bottom (index 0) to top, as Cesium models it.
   const stack: FakeLayer[] = [];
   const arcgisRequests: Array<{ url: string; options: unknown }> = [];
+  const ionRequests: Array<{ assetId: number; options: unknown }> = [];
+  const openStreetMapRequests: Array<{ url: string }> = [];
 
   const viewer = {
     imageryLayers: {
@@ -62,11 +60,17 @@ function makeFakes() {
       url: string;
       constructor(options: { url: string }) {
         this.url = options.url;
+        openStreetMapRequests.push({ url: options.url });
       }
     },
+    IonImageryProvider: {
+      fromAssetId(assetId: number, options: unknown) {
+        ionRequests.push({ assetId, options });
+        return Promise.resolve({});
+      },
+    },
     ImageryLayer: {
-      fromWorldImagery: (): FakeLayer => ({ source: "ion-world-imagery" }),
-      fromProviderAsync: (): FakeLayer => ({ source: "osm" }),
+      fromProviderAsync: (provider: unknown): FakeLayer => ({ provider: { provider } }),
     },
   };
 
@@ -74,6 +78,8 @@ function makeFakes() {
   return {
     stack,
     arcgisRequests,
+    ionRequests,
+    openStreetMapRequests,
     viewer: viewer as unknown as Parameters<typeof applyBasemapImagery>[1],
     Cesium: Cesium as unknown as Parameters<typeof applyBasemapImagery>[0],
   };
@@ -187,54 +193,80 @@ describe("applyBasemapImagery", () => {
     assert.deepEqual(stack, [added[0], data]);
   });
 
-  it("adds the live Stadia key only to Stadia requests, encoding special characters", () => {
-    const previousWindow = Object.getOwnPropertyDescriptor(globalThis, "window");
-    Object.defineProperty(globalThis, "window", {
-      configurable: true,
-      value: { __GEOLIBRE_RUNTIME_ENV__: { VITE_STADIA_API_KEY: " test&key=? " } },
-    });
-    try {
-      const { Cesium, viewer } = makeFakes();
-      const template = "https://tiles.stadiamaps.com/tiles/stamen_watercolor/{z}/{x}/{y}.jpg";
-      const added = applyBasemapImagery(
-        Cesium,
-        viewer,
-        [],
-        { ...XYZ, template, apiKeyProvider: "stadia" },
-        undefined,
-      );
-      assert.equal((added[0] as FakeLayer).provider?.url, template + "?api_key=test%26key%3D%3F");
-      const unrelated = applyBasemapImagery(Cesium, viewer, added, XYZ, undefined);
-      assert.equal(
-        (unrelated[0] as FakeLayer).provider?.url,
-        XYZ.kind === "xyz" ? XYZ.template : "",
-      );
-    } finally {
-      if (previousWindow) Object.defineProperty(globalThis, "window", previousWindow);
-      else Reflect.deleteProperty(globalThis, "window");
-    }
-  });
-
-  it("allows Stadia domain authentication and normalizes runtime API keys", () => {
-    assert.equal(getStadiaApiKey({}), undefined);
-    assert.equal(
-      getStadiaApiKey({ VITE_STADIA_API_KEY: " first ", STADIA_API_KEY: "second" }),
-      "first",
-    );
-    assert.equal(getStadiaApiKey({ STADIA_API_KEY: " second " }), "second");
-  });
-
-  it("falls back to Ion World Imagery when a token is configured", () => {
-    const { Cesium, viewer, stack } = makeFakes();
+  it("uses Bing Maps Aerial through Ion when a token is configured", () => {
+    const { Cesium, viewer, stack, ionRequests } = makeFakes();
     const added = applyBasemapImagery(Cesium, viewer, [], { kind: "default" }, "ion.jwt.token");
-    assert.equal((added[0] as FakeLayer).source, "ion-world-imagery");
+    assert.deepEqual(ionRequests, [{ assetId: 2, options: { accessToken: "ion.jwt.token" } }]);
     assert.equal(stack[0], added[0]);
   });
 
-  it("falls back to keyless OpenStreetMap without a token", () => {
-    const { Cesium, viewer } = makeFakes();
+  it("falls back to keyless Esri World Imagery without a token", async () => {
+    const { Cesium, viewer, ionRequests, arcgisRequests, openStreetMapRequests } = makeFakes();
     const added = applyBasemapImagery(Cesium, viewer, [], { kind: "default" }, undefined);
-    assert.equal((added[0] as FakeLayer).source, "osm");
+    assert.ok((added[0] as FakeLayer).provider?.provider instanceof Promise);
+    // Which provider, not merely that one was promised: an Ion basemap would
+    // satisfy the shape above while needing the key this branch exists to do
+    // without, and street tiles under a globe mostly show empty ocean.
+    assert.deepEqual(
+      arcgisRequests.map(({ url }) => url),
+      ["https://services.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer"],
+    );
+    assert.deepEqual(ionRequests, []);
+    await (added[0] as FakeLayer).provider?.provider;
+    assert.deepEqual(openStreetMapRequests, [], "Esri answered, so nothing stood in for it");
+  });
+
+  it("falls through to keyless imagery when an Ion token is refused", async () => {
+    const { Cesium, viewer, arcgisRequests } = makeFakes();
+    Cesium.IonImageryProvider.fromAssetId = () => Promise.reject(new Error("401 token revoked"));
+    const added = applyBasemapImagery(Cesium, viewer, [], { kind: "default" }, "stale.jwt.token");
+    await (added[0] as FakeLayer).provider?.provider;
+    // A revoked or expired token leaves a drawn globe, not a bare one.
+    assert.deepEqual(
+      arcgisRequests.map(({ url }) => url),
+      ["https://services.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer"],
+    );
+  });
+
+  it("keeps a refused Ion basemap from blanking the globe", async () => {
+    // The chosen basemap is an Ion asset, not the `default` fallback: a token
+    // restricted to other origins 403s here, and Cesium draws no tile at all
+    // while any imagery layer in the stack has no provider — the globe goes to
+    // bare space rather than merely losing its basemap.
+    const { Cesium, viewer, arcgisRequests } = makeFakes();
+    Cesium.IonImageryProvider.fromAssetId = () => Promise.reject(new Error("403 Forbidden"));
+    const added = applyBasemapImagery(Cesium, viewer, [], { kind: "ion", assetId: 2 }, "jwt.token");
+    const provider = await (added[0] as FakeLayer).provider?.provider;
+    assert.ok(provider, "the layer resolved to a provider instead of rejecting");
+    assert.deepEqual(
+      arcgisRequests.map(({ url }) => url),
+      ["https://services.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer"],
+    );
+  });
+
+  it("keeps an unreachable ArcGIS basemap from blanking the globe", async () => {
+    const { Cesium, viewer, openStreetMapRequests } = makeFakes();
+    const attempted: string[] = [];
+    Cesium.ArcGisMapServerImageryProvider.fromUrl = (url: string) => {
+      attempted.push(url);
+      return Promise.reject(new Error("offline"));
+    };
+    const url = "https://services.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer";
+    const added = applyBasemapImagery(Cesium, viewer, [], { kind: "arcgis", url }, undefined);
+    const provider = await (added[0] as FakeLayer).provider?.provider;
+    assert.ok(provider, "the layer resolved to a provider instead of rejecting");
+    // World Imagery is itself the keyless fallback, so it is tried once, not
+    // twice: a retry would double the wait before the globe draws anything.
+    assert.deepEqual(attempted, [url]);
+    assert.deepEqual(openStreetMapRequests, [{ url: "https://tile.openstreetmap.org/" }]);
+  });
+
+  it("stands OpenStreetMap in when the keyless imagery service cannot be reached", async () => {
+    const { Cesium, viewer, openStreetMapRequests } = makeFakes();
+    Cesium.ArcGisMapServerImageryProvider.fromUrl = () => Promise.reject(new Error("offline"));
+    const added = applyBasemapImagery(Cesium, viewer, [], { kind: "default" }, undefined);
+    await (added[0] as FakeLayer).provider?.provider;
+    assert.deepEqual(openStreetMapRequests, [{ url: "https://tile.openstreetmap.org/" }]);
   });
 });
 

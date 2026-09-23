@@ -40,6 +40,7 @@ import {
   useState,
 } from "react";
 import { useTranslation } from "react-i18next";
+import { screenOverlayCovers, useExtentScreenOverlay } from "../../hooks/useExtentScreenOverlay";
 import { clamp } from "../../lib/clamp";
 import {
   deleteOfflineBasemap,
@@ -87,12 +88,15 @@ const CONFIRM_BYTES = 150 * 1024 * 1024;
 
 type Phase = "idle" | "running" | "done";
 
-interface PanelPos {
-  x: number;
-  y: number;
-}
+/**
+ * A near-global box (e.g. "Use view" at a world/globe zoom) has corners that
+ * project to the same pole or wrap around, so the four-corner SVG polygon
+ * degenerates into a stray diagonal line. Past this span the panel takes the
+ * engine's native rectangle instead.
+ */
+const MAX_OVERLAY_SPAN_DEG = 170;
 
-interface ScreenPoint {
+interface PanelPos {
   x: number;
   y: number;
 }
@@ -332,7 +336,6 @@ export function BasemapExtractPanel({
     parentW: number;
     parentH: number;
   } | null>(null);
-  const [screenPoints, setScreenPoints] = useState<ScreenPoint[] | null>(null);
 
   // Cancels an in-flight extraction when the panel closes or a new run starts.
   const abortRef = useRef<AbortController | null>(null);
@@ -382,62 +385,16 @@ export function BasemapExtractPanel({
     setUrl(seededUrl);
   }, [open]);
 
-  // Latest box, read inside the projection callback so the map listeners don't
-  // need `bbox` as a dependency (which changes on every drag mousemove).
-  const bboxRef = useRef(bbox);
-  bboxRef.current = bbox;
-  const reprojectRef = useRef<() => void>(() => {});
-
-  // Keep the SVG overlay's corner positions in sync with the camera. Subscribed
-  // once per open (not per box edit) to avoid re-attaching listeners on every
-  // drag tick. Rendered as an SVG so it sits above any deck.gl overlay.
-  useEffect(() => {
-    const map = mapControllerRef.current?.getMap();
-    if (!map || !open) {
-      setScreenPoints(null);
-      return;
-    }
-    const reproject = () => {
-      const b = bboxRef.current;
-      if (!b) {
-        setScreenPoints(null);
-        return;
-      }
-      const [w, s, e, n] = b;
-      // A near-global box (e.g. "Use view" at a world/globe zoom) has corners
-      // that project to the same pole or wrap around, so the four-corner polygon
-      // degenerates into a stray diagonal line. Skip the overlay for such boxes;
-      // the extraction still works, there's just no meaningful rectangle to draw.
-      if (e - w > 170 || n - s > 170) {
-        setScreenPoints(null);
-        return;
-      }
-      const corners: [number, number][] = [
-        [w, n],
-        [e, n],
-        [e, s],
-        [w, s],
-      ];
-      setScreenPoints(
-        corners.map((corner) => {
-          const p = map.project(corner);
-          return { x: p.x, y: p.y };
-        }),
-      );
-    };
-    reprojectRef.current = reproject;
-    reproject();
-    map.on("move", reproject);
-    map.on("resize", reproject);
-    return () => {
-      map.off("move", reproject);
-      map.off("resize", reproject);
-    };
-  }, [open, mapControllerRef, mapReadyGeneration]);
-
-  useEffect(() => {
-    reprojectRef.current();
-  }, [bbox]);
+  // Keep the SVG overlay's corner positions in sync with the camera. Rendered
+  // as an SVG so it sits above any deck.gl overlay, and projected through the
+  // engine's render surface so both 2D engines get it.
+  const screenPoints = useExtentScreenOverlay(
+    mapControllerRef,
+    bbox ?? null,
+    open,
+    mapReadyGeneration,
+    { maxSpanDeg: MAX_OVERLAY_SPAN_DEG },
+  );
 
   // Both renderers share the pointer lifecycle; the globe draws a native rectangle.
   useEffect(() => {
@@ -457,9 +414,15 @@ export function BasemapExtractPanel({
     });
   }, [drawing, mapControllerRef, clearStatus, mapReadyGeneration]);
 
+  // Whatever the SVG overlay above does not cover — a globe engine, or a box
+  // too wide for the span guard — is drawn as a native entity instead, so a
+  // "Use view" at world zoom still gets an outline (the engine's own rectangle
+  // is a line, which does not degenerate the way four projected corners do).
   useEffect(() => {
-    if (!open || !bbox) return;
-    return mapControllerRef.current?.showExtent(bbox);
+    const engine = mapControllerRef.current;
+    if (!open || !bbox || !engine) return;
+    if (screenOverlayCovers(engine, open, bbox, MAX_OVERLAY_SPAN_DEG)) return;
+    return engine.showExtent(bbox);
   }, [open, bbox, mapControllerRef, mapReadyGeneration]);
 
   const handleUseView = useCallback(() => {

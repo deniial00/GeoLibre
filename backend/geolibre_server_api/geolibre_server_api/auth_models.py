@@ -121,7 +121,6 @@ class OAuthRefreshToken(Base):
     consumed_at: Mapped[int | None] = mapped_column(Integer, nullable=True)
     successor_digest: Mapped[str | None] = mapped_column(String(64), nullable=True)
 
-
 class PersonalTokenPolicy(Base):
     """Policy metadata for one personal API token.
 

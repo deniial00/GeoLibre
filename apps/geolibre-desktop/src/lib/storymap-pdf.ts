@@ -149,6 +149,106 @@ function decodeEntities(text: string): string {
   });
 }
 
+/** Remove complete script/style blocks without retrying from every opening `<`. */
+function stripRawTextBlocks(text: string): string {
+  const lower = text.toLowerCase();
+  const lastClose: Record<"script" | "style", number> = {
+    script: lower.lastIndexOf("</script>"),
+    style: lower.lastIndexOf("</style>"),
+  };
+  const output: string[] = [];
+  let plainStart = 0;
+  let searchFrom = 0;
+  const hasTagName = (open: number, candidate: "script" | "style"): boolean => {
+    if (!lower.startsWith(`<${candidate}`, open)) return false;
+    const boundary = lower[open + candidate.length + 1];
+    return boundary === ">" || boundary === "/" || /\s/.test(boundary ?? "");
+  };
+
+  for (;;) {
+    const open = lower.indexOf("<", searchFrom);
+    if (open === -1) break;
+    const name = hasTagName(open, "script") ? "script" : hasTagName(open, "style") ? "style" : null;
+    if (name === null || lastClose[name] <= open) {
+      searchFrom = open + 1;
+      continue;
+    }
+
+    const openEnd = lower.indexOf(">", open + name.length + 1);
+    if (openEnd === -1) break;
+    const closeToken = `</${name}>`;
+    const close = lower.indexOf(closeToken, openEnd + 1);
+    if (close === -1) {
+      // The last closing token was swallowed by this malformed opening tag, so
+      // no later block of the same type can be complete.
+      lastClose[name] = -1;
+      searchFrom = open + 1;
+      continue;
+    }
+
+    output.push(text.slice(plainStart, open));
+    plainStart = close + closeToken.length;
+    searchFrom = plainStart;
+  }
+
+  output.push(text.slice(plainStart));
+  return output.join("");
+}
+
+/**
+ * Strip complete HTML-like tags in one pass while respecting quoted `>`.
+ *
+ * A regex that retries at every `<` becomes quadratic when no `>` follows.
+ * When another unquoted `<` appears before a closing `>`, keep the malformed
+ * prefix as text and treat the newer `<` as the start of a possible tag.
+ * A raw `<` inside an attribute is likewise treated as malformed; valid HTML
+ * escapes that character as `&lt;`, which is decoded after tags are stripped.
+ */
+function stripTags(text: string): string {
+  const output: string[] = [];
+  let plainStart = 0;
+  let tagStart = -1;
+  let quote: '"' | "'" | null = null;
+
+  const closesBeforeNextTag = (start: number, delimiter: '"' | "'"): boolean => {
+    for (let index = start; index < text.length; index += 1) {
+      if (text[index] === delimiter) return true;
+      if (text[index] === "<") return false;
+    }
+    return false;
+  };
+
+  for (let index = 0; index < text.length; index += 1) {
+    const character = text[index];
+    if (tagStart === -1) {
+      if (character === "<") tagStart = index;
+      continue;
+    }
+
+    if (quote !== null) {
+      if (character === quote) quote = null;
+      continue;
+    }
+    if (character === '"' || character === "'") {
+      // Only enter quote mode when the delimiter closes before another tag can
+      // begin. This lets malformed attribute quotes degrade locally instead of
+      // consuming unrelated quoted text and well-formed tags later on.
+      if (closesBeforeNextTag(index + 1, character)) quote = character;
+    } else if (character === "<") {
+      output.push(text.slice(plainStart, index));
+      plainStart = index;
+      tagStart = index;
+    } else if (character === ">") {
+      output.push(text.slice(plainStart, tagStart));
+      plainStart = index + 1;
+      tagStart = -1;
+    }
+  }
+
+  output.push(text.slice(plainStart));
+  return output.join("");
+}
+
 /**
  * Reduce an HTML (or plain) chapter description to single-spaced plain text.
  *
@@ -162,16 +262,11 @@ function decodeEntities(text: string): string {
  */
 export function htmlToPlainText(html: string): string {
   return decodeEntities(
-    html
-      // Drop <script>/<style> blocks with their contents first; the generic tag
-      // strip below only removes delimiters and would leave their text behind.
-      .replace(/<(script|style)[^>]*>[\s\S]*?<\/\1>/gi, "")
-      .replace(/<\s*br\s*\/?\s*>/gi, "\n")
-      .replace(/<\/\s*(p|div|li|h[1-6]|tr)\s*>/gi, "\n")
-      // Strip remaining tags, honouring quoted attribute values so a `>` inside
-      // an attribute (e.g. title="a > b") doesn't end the match early and leak
-      // the rest of the tag as text.
-      .replace(/<[^>"']*(?:"[^"]*"[^>"']*|'[^']*'[^>"']*)*>/g, ""),
+    stripTags(
+      stripRawTextBlocks(html)
+        .replace(/<\s*br\s*(?:\/\s*)?>/gi, "\n")
+        .replace(/<\/\s*(p|div|li|h[1-6]|tr)\s*>/gi, "\n"),
+    ),
   )
     .replace(/[ \t]+/g, " ")
     .replace(/\n{3,}/g, "\n\n")

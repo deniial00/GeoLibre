@@ -1,6 +1,6 @@
 export { MapboxCanvas, type MapboxCanvasProps } from "./MapboxCanvas";
 export { ArcgisCanvas, type ArcgisCanvasProps } from "./ArcgisCanvas";
-export { ArcgisEngine, ARCGIS_CAPABILITIES } from "./arcgis-engine";
+export { ArcgisEngine, ARCGIS_CAPABILITIES, ARCGIS_DECK_CAPABILITIES } from "./arcgis-engine";
 export { isArcgisSupportedLayer } from "./arcgis-layers";
 export {
   ARCGIS_BASEMAP_STYLES,
@@ -10,15 +10,20 @@ export {
 } from "./arcgis-basemap";
 export { ARCGIS_SDK_CDN, ARCGIS_SDK_HOST, ARCGIS_SDK_VERSION } from "./arcgis-sdk";
 export { MapboxEngine, MAPBOX_CAPABILITIES } from "./mapbox-engine";
-export { isMapboxSupportedLayer, styleUsesUnsupportedSource } from "./mapbox-layers";
+export {
+  isMapboxSupportedLayer,
+  mapboxUnsupportedStyleSettings,
+  styleUsesUnsupportedSource,
+  type MapboxUnsupportedStyleSetting,
+} from "./mapbox-layers";
 export {
   MapCanvas,
   type MapCanvasIdentifyAllLabels,
   type MapCanvasProps,
   type MapCanvasRasterIdentify,
   type MapCanvasRasterIdentifyResult,
-  type MapDiagnosticEvent,
 } from "./MapCanvas";
+export type { MapDiagnosticEvent } from "./map-diagnostic";
 export {
   FEATURE_SELECTION_EVENT,
   featuresIntersectingPolygon,
@@ -65,6 +70,7 @@ export {
 export {
   MAPLIBRE_CAPABILITIES,
   type BuiltInMapControl,
+  type CameraIdleEvent,
   type FlyToCamera,
   type IdentifiedFeature,
   type ManualPlacementOptions,
@@ -139,6 +145,7 @@ export {
 export {
   isMapboxStyleUrl,
   loadMapboxStyle,
+  MAPBOX_BASEMAP_STYLES,
   mapboxAccessTokenFromStyleUrl,
   redactMapboxStyleUrl,
   resolveMapboxInternalUrl,

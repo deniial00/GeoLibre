@@ -22,6 +22,7 @@
     "noMatches": "لا توجد نتائج مطابقة.",
     "addFailed": "تعذّرت إضافة مصدر البيانات هذا.",
     "builtinBadge": "مضمّن",
+    "configBadge": "كونفيج",
     "newConnection": "اتصال {{kind}} جديد",
     "loadingTables": "جارٍ تحميل الجداول…",
     "files": "الملفات",
@@ -367,6 +368,10 @@
       "kml": {
         "label": "KML / KMZ",
         "description": "حمّل KML أو KMZ مع الأنماط والتراكبات وروابط الشبكة الأصلية على الكرة الأرضية."
+      },
+      "wcs": {
+        "description": "تحميل مجموعة فرعية رقمية بصيغة GeoTIFF من خدمة WCS 1.0.0.",
+        "label": "طبقة WCS"
       }
     },
     "shared": {
@@ -406,6 +411,7 @@
       "loadAria": "تحميل خدمة محفوظة",
       "loadPlaceholder": "تحميل خدمة محفوظة…",
       "builtin": "{{name}} (مضمَّنة)",
+      "config": "{{name}} (كونفيج)",
       "deleteAria": "حذف الخدمة المحفوظة",
       "empty": "لا توجد خدمات محفوظة بعد — املأ النموذج واختر «حفظ الحالية».",
       "name": "الاسم",
@@ -439,7 +445,11 @@
       "kindImagery": "الصور",
       "altitudeOffset": "إزاحة الارتفاع (م)",
       "quickPicks": "اختيارات سريعة",
+      "quickPicksPlaceholder": "اختر أصلًا…",
+      "quickPicksGlobal": "متاح مع كل حساب ion",
+      "quickPicksDepot": "عينات Asset Depot",
       "hint": "تجد معرّفات الأصول ضمن My Assets على ion.cesium.com. يجب أن يكون الأصل مشاركًا مع الرمز المضبوط في الإعدادات.",
+      "depotHint": "لا تُبث عينات Asset Depot إلا بعد إضافتها إلى حسابك من ion.cesium.com ← Asset Depot.",
       "errorAssetId": "أدخل معرّف أصل Cesium Ion (عدد صحيح موجب).",
       "errorAltitude": "أدخل إزاحة الارتفاع كرقم بالأمتار.",
       "tokenMissing": "لم يُضبط أي رمز Cesium Ion. أضف واحدًا من الإعدادات ← متغيرات البيئة (VITE_CESIUM_TOKEN) وإلا فسيفشل تحميل الأصل."
@@ -532,6 +542,7 @@
       "selectType_many": "الاختيار من {{count}} نوعًا من أنواع المعالم",
       "selectType_other": "الاختيار من {{count}} نوع معالم",
       "noTypesFound": "لم يُعثر على أنواع معالم لهذه الخدمة.",
+      "errorNoFeatures": "لم يُرجع نوع المعالم هذا أي معالم.",
       "retrieveError": "تعذر جلب أنواع المعالم من هذه الخدمة."
     },
     "wmts": {
@@ -1050,7 +1061,42 @@
       "modelTooLarge": "يتجاوز هذا النموذج حد {{limit}} ميغابايت للتضمين في مشروع. استضفه على خادم وأضفه عبر عنوان URL بدلًا من ذلك.",
       "modelFileError": "تعذرت قراءة هذا النموذج. اختر ملف glTF 2.0 أو GLB صالحًا."
     },
-    "nonGeographicCoordinates": "الإحداثيات في {{names}} ليست خط طول/عرض، لذا لن يُرسم أي شيء على الخريطة. نظام الإحداثيات مذكور بشكل خاطئ — أعد إسقاط البيانات (أو صحّح ملف .prj) ثم حمّلها مرة أخرى."
+    "nonGeographicCoordinates": "الإحداثيات في {{names}} ليست خط طول/عرض، لذا لن يُرسم أي شيء على الخريطة. نظام الإحداثيات مذكور بشكل خاطئ — أعد إسقاط البيانات (أو صحّح ملف .prj) ثم حمّلها مرة أخرى.",
+    "pmtiles": {
+      "errorUrl": "أدخل عنوان URL صالحًا لـ PMTiles عبر HTTP أو HTTPS.",
+      "errorMlt": "يتطلب ArcGIS بلاطات متجهة بتنسيق MVT وليس MLT."
+    },
+    "lidar": {
+      "errorUrl": "أدخل عنوان URL صالحًا لـ LiDAR عبر HTTP أو HTTPS."
+    },
+    "zarr": {
+      "errorUrl": "أدخل عنوان URL صالحًا لـ Zarr عبر HTTP أو HTTPS.",
+      "errorColorLimits": "يجب أن يكون الحد الأقصى للألوان أكبر من الحد الأدنى."
+    },
+    "raster": {
+      "errorSource": "أدخل رابط GeoTIFF أو اختر ملفًا."
+    },
+    "wcs": {
+      "coverage": "التغطية",
+      "retrieve": "جلب التغطيات",
+      "select": "اختر تغطية",
+      "extent": "استخدام نطاق التغطية",
+      "width": "العرض (بكسل)",
+      "height": "الارتفاع (بكسل)",
+      "hint": "ينزّل GeoTIFF بنظام EPSG:4326 وأبعاد البكسل المحددة. قد تُعاد معاينة القيم. احفظ البيانات النقطية للاحتفاظ بالبيانات المنزّلة.",
+      "errors": {
+        "xml": "أعادت الخدمة XML غير صالح.",
+        "version": "يتطلب هذا المصدر WCS 1.0.0. أعادت الخدمة استجابة غير مدعومة.",
+        "empty": "لا توجد تغطيات مطابقة متاحة.",
+        "format": "لا تعلن التغطية عن دعم إخراج GeoTIFF.",
+        "crs": "يجب أن تدعم التغطية EPSG:4326 للطلبات والإخراج.",
+        "size": "اختر أبعادًا من 1 إلى 4096 بكسل. التنزيلات محدودة بـ 128 MB.",
+        "metadata": "أعادت الخدمة بيانات وصفية أكبر مما يمكن لـ GeoLibre تحميله. استجابات البيانات الوصفية محدودة بـ 32 MB.",
+        "response": "لم تُعد الخدمة ملف GeoTIFF صالحًا.",
+        "bounds": "أدخل مربعًا صالحًا: الغرب/الشرق بين -180 و180، والجنوب/الشمال بين -90 و90، على أن يكون الغرب أصغر من الشرق والجنوب أصغر من الشمال.",
+        "url": "أدخل عنوان URL لخدمة WCS."
+      }
+    }
   },
   "offline": {
     "title": "تنزيل منطقة دون اتصال",
@@ -2114,7 +2160,7 @@
     "only3d": "ثلاثي الأبعاد فقط",
     "noMapbox": "بدون Mapbox",
     "noArcgis": "بدون ArcGIS",
-    "cesiumTokenHint": "أضف رمز Cesium Ion من الإعدادات للحصول على التضاريس وصور Ion"
+    "cesiumTokenHint": "أضف رمز Cesium Ion في <settingsLink>الإعدادات ← متغيرات البيئة</settingsLink> للحصول على التضاريس وصور Ion"
   },
   "renderer": {
     "basemap": "خريطة الأساس",
@@ -2124,6 +2170,7 @@
     "layerCesiumOnly": "تُعرَض على الكرة الأرضية ثلاثية الأبعاد فقط",
     "layerMapboxUnsupported": "لا تُعرَض بمحرّك Mapbox",
     "layerArcgisUnsupported": "لا تُعرَض بمحرّك ArcGIS",
+    "layerArcgisViewUnsupported": "لا تُعرَض في عرض ArcGIS هذا",
     "resetView": "إعادة تعيين العرض",
     "scene3D": "كرة أرضية ثلاثية الأبعاد",
     "scene2D": "خريطة ثنائية الأبعاد",
@@ -2511,6 +2558,55 @@
       }
     }
   },
+  "panel": {
+    "godsEyeView": {
+      "description": "أحداث أرضية مباشرة ومراعية للوقت من خلاصات بيانات عامة.",
+      "globeOnly": "تُعرض خلاصات الكرة الأرضية المباشرة على كرة Cesium. انتقل إلى الكرة الأرضية ثلاثية الأبعاد لعرضها.",
+      "groups": {
+        "movement": "الحركة",
+        "cameras": "الكاميرات",
+        "infrastructure": "البنية التحتية",
+        "events": "الأحداث",
+        "utilities": "الأدوات"
+      },
+      "earthquakes": "الزلازل",
+      "spaceMissions": "المهام الفضائية (30 يومًا)",
+      "satellites": "الأقمار الصناعية",
+      "flights": "الرحلات المباشرة",
+      "militaryFlights": "الرحلات العسكرية",
+      "bikeShare": "مشاركة الدراجات",
+      "transit": "النقل العام المباشر",
+      "streetTraffic": "حركة مرور الشوارع المحاكاة",
+      "mappedAlpr": "كاميرات قراءة لوحات المركبات المرسومة على الخريطة",
+      "cctv": "كاميرات المراقبة العامة",
+      "cctvPopup": {
+        "liveSnapshot": "لقطة مباشرة",
+        "provider": "المزوّد",
+        "attribution": "نَسب المصدر",
+        "privacy": "الخصوصية"
+      },
+      "radio": "محطات الراديو",
+      "datacenters": "مراكز البيانات",
+      "dams": "السدود",
+      "cables": "كابلات الاتصالات البحرية",
+      "osmInfrastructure": "البنية التحتية من OpenStreetMap",
+      "loading": "جارٍ التحديث…",
+      "updateFailed": "فشل التحديث",
+      "noneInView": "لم يُعثر على معالم في العرض الحالي لهذه الطبقة.",
+      "never": "أبدًا",
+      "lastUpdated": "آخر تحديث: {{time}}",
+      "speed": "السرعة",
+      "speedRealTime": "الزمن الحقيقي (1×)",
+      "speedMultiple": "{{factor}}×",
+      "denseSatellites": "كتالوج الأقمار الصناعية الكثيف",
+      "denseLoading": "DENSE ···",
+      "denseFailed": "DENSE !",
+      "denseCount": "DENSE · {{count}}",
+      "dense": "DENSE",
+      "denseError": "تعذر تحميل كتالوج Starlink: {{error}}. حدده لإعادة المحاولة.",
+      "denseDescription": "اعرض مجموعة Starlink الكاملة كنقاط خفيفة (من دون تسميات أو صفوف في جدول السمات)."
+    }
+  },
   "toolbar": {
     "menu": {
       "project": "مشروع",
@@ -2752,7 +2848,8 @@
       "czml": "مشهد CZML ثلاثي الأبعاد ديناميكي",
       "gltfModel": "نموذج ثلاثي الأبعاد (glTF)",
       "postgres": "طبقة PostgreSQL",
-      "iceberg": "طبقة Apache Iceberg"
+      "iceberg": "طبقة Apache Iceberg",
+      "wcs": "طبقة WCS"
     },
     "conversion": {
       "vectorToVector": "متجه إلى متجه",
@@ -3232,6 +3329,8 @@
       "maplibre-gl-esri-wayback": "الصور التاريخية",
       "maplibre-gl-openaerialmap": "OpenAerialMap",
       "maplibre-gl-arcgis-hub": "ArcGIS Hub",
+      "geolibre-osm-downloader": "مُنزِّل OSM",
+      "geolibre-ign-lidar-hd": "IGN LiDAR HD Downloader",
       "geolibre-stac-catalogs": "كتالوجات STAC",
       "geolibre-planet-open-data": "بيانات Planet المفتوحة",
       "maplibre-gl-source-coop": "Source Cooperative",
@@ -3243,6 +3342,7 @@
       "maplibre-gl-huggingface": "Hugging Face",
       "carto-light": "خريطة أساس Carto Light",
       "geolibre-flight-simulator": "محاكي الطيران",
+      "gods-eye-view": "منظور عين الإله",
       "geolibre-route-animation": "تحريك المسار",
       "geolibre-sun": "محاكاة الشمس",
       "maplibre-atmosphere-effects": "التأثيرات الجوية",
@@ -4889,6 +4989,10 @@
       "errorStartSidecar": "تعذّر تشغيل الخدمة المساعدة لـ GeoLibre.",
       "errorStopSidecar": "تعذّر إيقاف الخدمة المساعدة لـ GeoLibre.",
       "noToolsFound": "لم يُعثر على أدوات.",
+      "searchToolsByMeaning": "البحث في الأدوات أو وصف مهمة",
+      "searchingByMeaning": "جارٍ البحث في الفهرس حسب المعنى",
+      "bestMatches": "أفضل النتائج",
+      "otherMatches": "نتائج أخرى",
       "noParameters": "لا تحتوي هذه الأداة على معاملات.",
       "noOutput": "لا يوجد ناتج بعد.",
       "enabled": "مُفعّل",
@@ -7374,6 +7478,11 @@
       "invalidExpression": "تعبير غير صالح",
       "openBuilder": "فتح منشئ التعبيرات",
       "showFeatureId": "عرض صف معرّف المَعلَم",
+      "maxWidth": "عرض النافذة المنبثقة (بكسل)",
+      "maxWidthPlaceholder": "الافتراضي",
+      "imageHeight": "ارتفاع الصورة (بكسل)",
+      "imageHeightPlaceholder": "الافتراضي",
+      "sizeHint": "اترك أيًّا منهما فارغًا لاستخدام القيمة الافتراضية. تحافظ الصورة على نسبة أبعادها، لذا فإن توسيع النافذة المنبثقة هو ما يتيح للصورة الاستفادة من الارتفاع الإضافي.",
       "fields": "الحقول",
       "allFields": "لم يُختَر أي حقل، لذا تظهر جميع الحقول المرئية بالترتيب الوارد في البيانات نفسها.",
       "addField": "إضافة حقل…",
@@ -7746,6 +7855,7 @@
     "viewportStretchNoRange": "قيم نطاق العرض لا تحدد مدى.",
     "viewportStretchMoved": "تحركت الخريطة قبل اكتمال القراءة. طبّق مرة أخرى.",
     "index": "المؤشر",
+    "opacityClasses": "فئات العتامة",
     "classifyToggle": "التصنيف إلى فئات منفصلة",
     "method": "الطريقة",
     "methodEqualInterval": "فترات متساوية",
@@ -8331,5 +8441,77 @@
     "catalogHuc12pp": "نقاط المصب HUC12",
     "catalogNmwdiSt": "مواقع المياه في نيومكسيكو",
     "catalogFlowlines": "خطوط مجاري NHDPlus"
+  },
+  "plugin": {
+    "3d-tiles": {
+      "arcgisSourceUnsupported": "استخدم رابط tileset.json لبيانات 3D Tiles في عرض ArcGIS هذا. تتطلب بلاطات Google Photorealistic وI3S محرك عرض آخر.",
+      "globeGoogleKeyRequired": "تحتاج بلاطات Google Photorealistic 3D Tiles إلى مفتاح Google Maps API في الإعدادات كي تُحمَّل على الكرة الأرضية."
+    },
+    "geolibre-osm-downloader": {
+      "title": "مُنزِّل OSM",
+      "hint": "تنزيل ميزات OpenStreetMap من المنطقة الحالية على الخريطة باستخدام واجهة Overpass العامة.",
+      "attribution": "البيانات © مُساهِمِي OpenStreetMap، متاحة تحت ترخيص ODbL.",
+      "featureType": "نوع الميزة",
+      "presetBuildings": "المباني",
+      "presetRoads": "الطرق",
+      "presetAmenities": "المرافق",
+      "presetWaterways": "القنوات المائية",
+      "presetLanduse": "استخدام الأراضي",
+      "presetCustom": "مُلَصَّق مخصص",
+      "presetAll": "جميع الميزات المُلَصَّقة",
+      "tagKey": "مفتاح الملصق",
+      "tagValue": "قيمة الملصق",
+      "tagKeyPlaceholder": "مثال: متجر",
+      "tagValuePlaceholder": "اختياري، مثال: خبز",
+      "west": "الغرب",
+      "south": "الجنوب",
+      "east": "الشرق",
+      "north": "الشمال",
+      "useMapExtent": "استخدام مدى الخريطة",
+      "download": "تنزيل بيانات OSM",
+      "ready": "اختر منطقة ونوع ميزة.",
+      "exportGeoJson": "حفظ GeoJSON",
+      "mapUnavailable": "مدى الخريطة غير متوفر بعد.",
+      "extentApplied": "تم تطبيق مدى الخريطة.",
+      "downloading": "تنزيل من OpenStreetMap...",
+      "noFeatures": "لم تُعثر على أي ميزات تطابق في هذه المنطقة.",
+      "error": "لم يتم تنزيل بيانات OSM: {{message}}",
+      "added": "تم إضافة {{count}} ميزات إلى الخريطة."
+    },
+    "geolibre-ign-lidar-hd": {
+      "title": "IGN LiDAR HD",
+      "hint": "البحث في تغطية بلاطات IGN LiDAR HD لمنطقة الخريطة الحالية، وإضافة البلاطات إلى الخريطة كسحابات نقاط، أو تنزيل ملفات COPC LAZ الخاصة بها من خوادم IGN.",
+      "attribution": "البيانات © IGN — LiDAR HD، منشورة بموجب Licence Ouverte 2.0.",
+      "west": "الغرب",
+      "south": "الجنوب",
+      "east": "الشرق",
+      "north": "الشمال",
+      "useMapExtent": "استخدام مدى الخريطة",
+      "search": "البحث عن البلاطات",
+      "addToMap": "إضافة إلى الخريطة",
+      "download": "تنزيل",
+      "ready": "اختر منطقة وابحث عن بلاطات LiDAR HD.",
+      "mapUnavailable": "مدى الخريطة غير متوفر بعد.",
+      "extentApplied": "تم تطبيق مدى الخريطة.",
+      "searching": "جارٍ البحث عن بلاطات IGN LiDAR HD…",
+      "noTiles": "لم يتم العثور على أي بلاطات LiDAR HD في هذه المنطقة.",
+      "noDownload": "لا توجد سحابة نقاط منشورة",
+      "layerName": "بلاطات IGN LiDAR HD",
+      "found": "تم العثور على {{count}} بلاطة (بلاطات).",
+      "foundTruncated": "عرض أول {{count}} من أصل {{matched}} بلاطة. ضيّق منطقة البحث لرؤية الباقي.",
+      "addedToMap": "تمت إضافة {{name}} إلى الخريطة.",
+      "alreadyOnMap": "{{name}} موجودة بالفعل على الخريطة.",
+      "unsupportedRenderer": "تتطلب سحابات النقاط محرك العرض MapLibre أو Mapbox.",
+      "addError": "تعذّرت إضافة {{name}} إلى الخريطة: {{message}}",
+      "error": "تعذّر البحث عن بلاطات IGN LiDAR HD: {{message}}",
+      "selectAll": "تحديد الكل",
+      "selectTile": "تحديد {{name}}",
+      "addSelectedToMap": "إضافة المحدد إلى الخريطة",
+      "addSelectedToMapCount": "إضافة {{count}} محدد إلى الخريطة",
+      "addingSelected": "جارٍ إضافة {{count}} بلاطة (بلاطات) إلى الخريطة…",
+      "addedSelectedCount": "تمت إضافة {{count}} بلاطة (بلاطات) إلى الخريطة.",
+      "alreadyOnMapCountPlural": "كانت {{count}} بلاطة (بلاطات) موجودة بالفعل على الخريطة.",
+      "addSelectedFailedCount": "تعذّرت إضافة {{count}} بلاطة (بلاطات)."
+    }
   }
 }

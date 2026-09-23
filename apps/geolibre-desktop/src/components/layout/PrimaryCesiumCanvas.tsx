@@ -1,7 +1,50 @@
-import { CesiumCanvas, type CesiumWidgetControlLabels, type MapEngine } from "@geolibre/map";
-import { useMemo, type RefObject } from "react";
-import { useTranslation } from "react-i18next";
+import {
+  CesiumCanvas,
+  type CesiumWidgetControlLabels,
+  type MapDiagnosticEvent,
+  type MapEngine,
+} from "@geolibre/map";
+import { useMemo, type ComponentType, type ReactElement, type RefObject } from "react";
+import { Trans, useTranslation } from "react-i18next";
 import { useCesiumIonToken } from "../../hooks/useCesiumIonToken";
+import { openSettingsSection } from "./SettingsDialog";
+
+// `Trans` is typed against the catalog's key union; the cast keeps the rich
+// hint text (a button that deep-links into Settings) type-checkable here the
+// same way PrimaryMapboxCanvas and SettingsDialog do.
+const HintTrans = Trans as ComponentType<{
+  i18nKey: string;
+  components: Record<string, ReactElement>;
+}>;
+
+/**
+ * The corner hint shown on a globe with no Cesium Ion token.
+ *
+ * The globe works without one — it draws keyless imagery — so this says what a
+ * token would add rather than hiding the view, and its Settings part opens the
+ * Environment section with the token field focused so setup is one click.
+ * Bottom-end keeps it clear of Cesium's own credit display (bottom-left) and of
+ * the pane's controls and label along the top. Only the link takes pointer
+ * events; the rest must not swallow drags meant for the globe behind it.
+ */
+export function CesiumTokenHint(): ReactElement {
+  return (
+    <div className="pointer-events-none absolute bottom-2 end-2 z-10 max-w-[70%] rounded-md border border-input map-glass px-2 py-1 text-xs text-muted-foreground shadow-sm">
+      <HintTrans
+        i18nKey="mapGrid.cesiumTokenHint"
+        components={{
+          settingsLink: (
+            <button
+              type="button"
+              className="pointer-events-auto underline underline-offset-2 hover:text-foreground"
+              onClick={() => openSettingsSection("environment", { focus: "cesiumToken" })}
+            />
+          ),
+        }}
+      />
+    </div>
+  );
+}
 
 export interface PrimaryCesiumCanvasProps {
   /**
@@ -13,6 +56,8 @@ export interface PrimaryCesiumCanvasProps {
   engineRef: RefObject<MapEngine | null>;
   /** Called once the engine is live, to re-arm anything keyed to map readiness. */
   onEngineReady: () => void;
+  /** Forwards a globe layer that failed to load to the Diagnostics panel. */
+  onMapDiagnosticEvent?: (event: MapDiagnosticEvent) => void;
 }
 
 /**
@@ -30,7 +75,11 @@ export interface PrimaryCesiumCanvasProps {
  * mounted beside it, and the menus gate those on `engine.capabilities` rather
  * than on the renderer's name.
  */
-export function PrimaryCesiumCanvas({ engineRef, onEngineReady }: PrimaryCesiumCanvasProps) {
+export function PrimaryCesiumCanvas({
+  engineRef,
+  onEngineReady,
+  onMapDiagnosticEvent,
+}: PrimaryCesiumCanvasProps) {
   const { t } = useTranslation();
   const ionToken = useCesiumIonToken();
   // Cesium's toolbar widgets render outside React and hardcode English, so the
@@ -69,16 +118,9 @@ export function PrimaryCesiumCanvas({ engineRef, onEngineReady }: PrimaryCesiumC
         onEngineReady={onEngineReady}
         controlLabels={controlLabels}
         popupCloseLabel={t("common.close")}
+        onMapDiagnosticEvent={onMapDiagnosticEvent}
       />
-      {/* The globe works without an Ion token — it draws the project basemap —
-          so say what a token would add rather than hiding the view. Bottom-end
-          keeps it clear of Cesium's own credit display (bottom-left) and of the
-          pane label along the top, matching the globe panes in MapGrid. */}
-      {ionToken ? null : (
-        <div className="pointer-events-none absolute bottom-2 end-2 z-10 max-w-[70%] truncate rounded-md border border-input map-glass px-2 py-1 text-xs text-muted-foreground shadow-sm">
-          {t("mapGrid.cesiumTokenHint")}
-        </div>
-      )}
+      {ionToken ? null : <CesiumTokenHint />}
     </div>
   );
 }

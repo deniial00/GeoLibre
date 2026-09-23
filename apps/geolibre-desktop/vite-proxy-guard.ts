@@ -21,6 +21,71 @@ export const PROXY_MAX_REDIRECT_HOPS = 5;
 export const PROXY_MAX_BODY_BYTES = 50 * 1024 * 1024; // 50 MB
 export const PROXY_FETCH_TIMEOUT_MS = 30_000;
 
+const CELESTRAK_TLE_BASE = "https://celestrak.org/NORAD/elements/gp.php";
+const CELESTRAK_STARLINK_TLE_BASE = "https://celestrak.org/NORAD/elements/supplemental/sup-gp.php";
+const CELESTRAK_CACHE_TTL_MS = 6 * 60 * 60_000;
+const LAUNCH_LIBRARY_API_URL = "https://ll.thespacedevs.com/2.3.0/launches/";
+const LAUNCH_LIBRARY_CACHE_TTL_MS = 15 * 60_000;
+const AIRCRAFT_UPSTREAMS = {
+  opensky: {
+    url: "https://opensky-network.org/api/states/all",
+    cacheTtlMs: 30_000,
+    label: "OpenSky",
+  },
+  military: {
+    url: "https://api.adsb.lol/v2/mil",
+    cacheTtlMs: 15_000,
+    label: "adsb.lol",
+  },
+} as const;
+/** Exported so a test can hold it against the edge relay and the feed registry. */
+export const TRANSIT_UPSTREAMS = {
+  mbta: "https://cdn.mbta.com/realtime/VehiclePositions.pb",
+  "capmetro-austin": "https://data.texas.gov/download/eiei-9rpf/application%2Foctet-stream",
+  "metrotransit-msp": "https://svc.metrotransit.org/mtgtfs/vehiclepositions.pb",
+  "hsl-helsinki": "https://realtime.hsl.fi/realtime/vehicle-positions/v2/hsl",
+  "ovapi-nl": "https://gtfs.ovapi.nl/nl/vehiclePositions.pb",
+  "translink-seq": "https://gtfsrt.api.translink.com.au/api/realtime/seq/VehiclePositions",
+} as const;
+const TRANSIT_CACHE_TTL_MS = 15_000;
+const OVAPI_TRANSIT_CACHE_TTL_MS = 60_000;
+const TRANSIT_MAX_BODY_BYTES = 8 * 1024 * 1024;
+const ADSBDB_AIRCRAFT_BASE = "https://api.adsbdb.com/v0/aircraft/";
+const AUSTIN_CCTV_FRAME_BASE = "https://cctv.austinmobility.io/image/";
+const CALGARY_CCTV_FRAME_BASE = "https://trafficcam.calgary.ca/loc";
+const ONTARIO_CCTV_FRAME_BASE = "https://511on.ca/map/Cctv/";
+const NSW_CCTV_FRAME_BASE = "https://webcams.transport.nsw.gov.au/livetraffic-webcams/cameras/";
+const CALTRANS_CCTV_BASE = "https://cwwp2.dot.ca.gov/data/";
+const NSW_CCTV_USER_AGENT =
+  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";
+const CCTV_CATALOG_URLS = {
+  ontario: "https://511on.ca/api/v2/get/cameras?format=json&lang=en",
+  drivebc: "https://www.drivebc.ca/api/webcams/",
+  nsw: "https://data.livetraffic.com/cameras/traffic-cam.json",
+  "caltrans-3": `${CALTRANS_CCTV_BASE}d3/cctv/cctvStatusD03.json`,
+  "caltrans-4": `${CALTRANS_CCTV_BASE}d4/cctv/cctvStatusD04.json`,
+  "caltrans-7": `${CALTRANS_CCTV_BASE}d7/cctv/cctvStatusD07.json`,
+  "caltrans-11": `${CALTRANS_CCTV_BASE}d11/cctv/cctvStatusD11.json`,
+} as const;
+const OVERPASS_EDGE_URL = "https://tiles.geolibre.app/overpass";
+const OVERPASS_MAX_REQUEST_BYTES = 20_000;
+const CELESTRAK_GROUPS = new Set([
+  "stations",
+  "visual",
+  "gps-ops",
+  "glo-ops",
+  "galileo",
+  "geo",
+  "starlink",
+]);
+const celestrakCache = new Map<string, { body: Buffer; expiresAt: number }>();
+let launchLibraryCache: { body: Buffer; expiresAt: number } | null = null;
+const aircraftCaches = new Map<
+  keyof typeof AIRCRAFT_UPSTREAMS,
+  { body: Buffer; expiresAt: number }
+>();
+const transitCaches = new Map<string, { body: Buffer; expiresAt: number }>();
+
 const REDIRECT_STATUSES = new Set([301, 302, 303, 307, 308]);
 
 /**
@@ -303,7 +368,11 @@ export async function fetchWithGuard(
     if (fetchImpl) {
       // No undici dispatcher on this path — resolve+validate before fetching.
       await assertResolvedPublicHost(new URL(current).hostname, options.lookup);
-      response = await fetchImpl(current, { ...rest, signal, redirect: "manual" });
+      response = await fetchImpl(current, {
+        ...rest,
+        signal,
+        redirect: "manual",
+      });
     } else {
       response = (await undiciFetch(current, {
         ...rest,
@@ -357,6 +426,428 @@ export async function readBodyWithLimit(
     chunks.push(value);
   }
   return Buffer.concat(chunks.map((c) => Buffer.from(c)));
+}
+
+/**
+ * Fixed CelesTrak TLE relay for the development server.
+ *
+ * Unlike the generic proxy, this route identifies GeoLibre to CelesTrak and
+ * caches each allowlisted group for six hours, matching CelesTrak's retrieval
+ * guidance and the upstream God's Eye View server.
+ */
+export async function proxyCelestrakRequestGuarded(
+  req: IncomingMessage,
+  res: ServerResponse,
+  proxyPath: string,
+): Promise<void> {
+  const requestUrl = new URL(req.url ?? "", `http://localhost${proxyPath}`);
+  const group = decodeURIComponent(requestUrl.pathname.replace(/^\//, ""));
+  if (!CELESTRAK_GROUPS.has(group)) {
+    res.statusCode = 400;
+    res.setHeader("content-type", "text/plain");
+    res.end("Invalid CelesTrak group");
+    return;
+  }
+
+  let entry = celestrakCache.get(group);
+  if (!entry || entry.expiresAt <= Date.now()) {
+    const starlink = group === "starlink";
+    const upstream = new URL(starlink ? CELESTRAK_STARLINK_TLE_BASE : CELESTRAK_TLE_BASE);
+    upstream.searchParams.set(starlink ? "FILE" : "GROUP", group);
+    upstream.searchParams.set("FORMAT", "tle");
+    const response = await fetchWithGuard(upstream.toString(), {
+      headers: {
+        accept: "text/plain",
+        "user-agent": "GeoLibre-CelesTrak-Proxy/1.0 (+https://geolibre.org)",
+      },
+    });
+    if (!response.ok) {
+      res.statusCode = response.status;
+      res.setHeader("content-type", "text/plain");
+      res.end(`CelesTrak returned HTTP ${response.status}`);
+      return;
+    }
+    const body = await readBodyWithLimit(response);
+    if (!/^1 /m.test(body.toString("utf8"))) {
+      res.statusCode = 502;
+      res.setHeader("content-type", "text/plain");
+      res.end("CelesTrak returned no TLE records");
+      return;
+    }
+    entry = { body, expiresAt: Date.now() + CELESTRAK_CACHE_TTL_MS };
+    celestrakCache.set(group, entry);
+  }
+
+  res.statusCode = 200;
+  res.setHeader("access-control-allow-origin", "*");
+  res.setHeader("cache-control", "public, max-age=21600");
+  res.setHeader("content-type", "text/plain; charset=utf-8");
+  res.setHeader("content-length", String(entry.body.byteLength));
+  res.end(entry.body);
+}
+
+/** Fixed, cached Launch Library 2 relay for local development. */
+export async function proxyLaunchLibraryRequestGuarded(res: ServerResponse): Promise<void> {
+  let entry = launchLibraryCache;
+  if (!entry || entry.expiresAt <= Date.now()) {
+    const now = new Date();
+    const upstream = new URL(LAUNCH_LIBRARY_API_URL);
+    upstream.searchParams.set("net__gte", new Date(now.getTime() - 30 * 86_400_000).toISOString());
+    upstream.searchParams.set("net__lte", now.toISOString());
+    upstream.searchParams.set("limit", "100");
+    upstream.searchParams.set("mode", "detailed");
+    const response = await fetchWithGuard(upstream.toString(), {
+      headers: {
+        accept: "application/json",
+        "user-agent": "GeoLibre-Launch-Library-Proxy/1.0 (+https://geolibre.org)",
+      },
+    });
+    if (!response.ok) {
+      res.statusCode = response.status;
+      res.setHeader("content-type", "text/plain");
+      res.end(`Launch Library 2 returned HTTP ${response.status}`);
+      return;
+    }
+    const body = await readBodyWithLimit(response, 12 * 1024 * 1024);
+    const parsed = JSON.parse(body.toString("utf8")) as { results?: unknown };
+    if (!Array.isArray(parsed.results)) {
+      res.statusCode = 502;
+      res.setHeader("content-type", "text/plain");
+      res.end("Launch Library 2 returned a malformed response");
+      return;
+    }
+    entry = { body, expiresAt: Date.now() + LAUNCH_LIBRARY_CACHE_TTL_MS };
+    launchLibraryCache = entry;
+  }
+
+  res.statusCode = 200;
+  res.setHeader("access-control-allow-origin", "*");
+  res.setHeader("cache-control", "public, max-age=900");
+  res.setHeader("content-type", "application/json; charset=utf-8");
+  res.setHeader("content-length", String(entry.body.byteLength));
+  res.end(entry.body);
+}
+
+/** Fixed, short-lived aircraft feed relay for local development. */
+export async function proxyAircraftRequestGuarded(
+  kind: keyof typeof AIRCRAFT_UPSTREAMS,
+  res: ServerResponse,
+): Promise<void> {
+  const config = AIRCRAFT_UPSTREAMS[kind];
+  let entry = aircraftCaches.get(kind);
+  if (!entry || entry.expiresAt <= Date.now()) {
+    const response = await fetchWithGuard(config.url, {
+      headers: {
+        accept: "application/json",
+        "user-agent": "GeoLibre-Aircraft-Proxy/1.0 (+https://geolibre.org)",
+      },
+    });
+    if (!response.ok) {
+      res.statusCode = response.status;
+      res.setHeader("content-type", "text/plain");
+      res.end(`${config.label} returned HTTP ${response.status}`);
+      return;
+    }
+    const body = await readBodyWithLimit(response, 25 * 1024 * 1024);
+    const parsed = JSON.parse(body.toString("utf8")) as {
+      states?: unknown;
+      ac?: unknown;
+    };
+    if (kind === "opensky" ? !Array.isArray(parsed.states) : !Array.isArray(parsed.ac)) {
+      res.statusCode = 502;
+      res.setHeader("content-type", "text/plain");
+      res.end(`${config.label} returned a malformed response`);
+      return;
+    }
+    entry = { body, expiresAt: Date.now() + config.cacheTtlMs };
+    aircraftCaches.set(kind, entry);
+  }
+
+  res.statusCode = 200;
+  res.setHeader("access-control-allow-origin", "*");
+  res.setHeader("cache-control", `public, max-age=${Math.floor(config.cacheTtlMs / 1000)}`);
+  res.setHeader("content-type", "application/json; charset=utf-8");
+  res.setHeader("content-length", String(entry.body.byteLength));
+  res.end(entry.body);
+}
+
+/**
+ * Fixed, bounded GTFS-Realtime relays for local development.
+ *
+ * Status codes mirror `handleTransitFeed` in the edge worker — 404 for an
+ * unregistered provider, 502 for any upstream failure — so tooling that reads
+ * them sees the same shape in dev and production.
+ */
+export async function proxyTransitRequestGuarded(
+  feedId: string,
+  res: ServerResponse,
+): Promise<void> {
+  if (!Object.hasOwn(TRANSIT_UPSTREAMS, feedId)) {
+    res.statusCode = 404;
+    res.setHeader("content-type", "text/plain");
+    res.end("Unknown transit provider");
+    return;
+  }
+  let entry = transitCaches.get(feedId);
+  if (!entry || entry.expiresAt <= Date.now()) {
+    const upstream = TRANSIT_UPSTREAMS[feedId as keyof typeof TRANSIT_UPSTREAMS];
+    const response = await fetchWithGuard(upstream, {
+      headers: {
+        accept: "application/x-protobuf,application/octet-stream",
+        "user-agent": "GeoLibre-Transit-Proxy/1.0 (+https://geolibre.org)",
+      },
+    });
+    if (!response.ok) {
+      res.statusCode = 502;
+      res.setHeader("content-type", "text/plain");
+      res.end(`Transit provider returned HTTP ${response.status}`);
+      return;
+    }
+    const body = await readBodyWithLimit(response, TRANSIT_MAX_BODY_BYTES);
+    if (body.byteLength === 0) {
+      res.statusCode = 502;
+      res.setHeader("content-type", "text/plain");
+      res.end("Transit provider returned an empty response");
+      return;
+    }
+    const cacheTtlMs = feedId === "ovapi-nl" ? OVAPI_TRANSIT_CACHE_TTL_MS : TRANSIT_CACHE_TTL_MS;
+    entry = { body, expiresAt: Date.now() + cacheTtlMs };
+    transitCaches.set(feedId, entry);
+  }
+  res.statusCode = 200;
+  res.setHeader("access-control-allow-origin", "*");
+  res.setHeader(
+    "cache-control",
+    feedId === "ovapi-nl" ? "public, max-age=60" : "public, max-age=15",
+  );
+  res.setHeader("content-type", "application/x-protobuf");
+  res.setHeader("content-length", String(entry.body.byteLength));
+  res.end(entry.body);
+}
+
+/** Normalize ADSBDB's ordinary not-found response so it stays out of diagnostics. */
+export async function proxyAdsbdbAircraftRequestGuarded(
+  icao: string,
+  res: ServerResponse,
+): Promise<void> {
+  if (!/^[0-9a-f]{6}$/i.test(icao)) {
+    res.statusCode = 400;
+    res.end("Invalid ICAO code");
+    return;
+  }
+  const response = await fetchWithGuard(`${ADSBDB_AIRCRAFT_BASE}${icao.toLowerCase()}`, {
+    headers: { accept: "application/json" },
+  });
+  res.setHeader("access-control-allow-origin", "*");
+  res.setHeader("content-type", "application/json; charset=utf-8");
+  if (response.status === 404) {
+    res.statusCode = 200;
+    res.setHeader("cache-control", "public, max-age=3600");
+    res.end('{"response":{"aircraft":null}}');
+    return;
+  }
+  const body = await readBodyWithLimit(response, 1024 * 1024);
+  res.statusCode = response.status;
+  res.setHeader("cache-control", response.ok ? "public, max-age=86400" : "no-store");
+  res.setHeader("content-length", String(body.byteLength));
+  res.end(body);
+}
+
+/** Fixed, bounded image relay for Austin's public traffic-camera snapshots. */
+export async function proxyAustinCctvFrameRequestGuarded(
+  frameId: string,
+  res: ServerResponse,
+): Promise<void> {
+  if (!/^\d{1,4}$/.test(frameId)) {
+    res.statusCode = 400;
+    res.end("Invalid Austin camera id");
+    return;
+  }
+  await proxyCctvFrameRequestGuarded(`${AUSTIN_CCTV_FRAME_BASE}${frameId}.jpg`, res);
+}
+
+/** Fixed, bounded image relay for Calgary's public traffic-camera snapshots. */
+export async function proxyCalgaryCctvFrameRequestGuarded(
+  frameId: string,
+  res: ServerResponse,
+): Promise<void> {
+  if (!/^\d{1,4}$/.test(frameId)) {
+    res.statusCode = 400;
+    res.end("Invalid Calgary camera id");
+    return;
+  }
+  await proxyCctvFrameRequestGuarded(`${CALGARY_CCTV_FRAME_BASE}${frameId}.jpg`, res);
+}
+
+/** Fixed, bounded image relay for Ontario 511's public traffic snapshots. */
+export async function proxyOntarioCctvFrameRequestGuarded(
+  frameId: string,
+  res: ServerResponse,
+): Promise<void> {
+  if (!/^[A-Za-z0-9_.-]{1,64}$/.test(frameId)) {
+    res.statusCode = 400;
+    res.end("Invalid Ontario camera id");
+    return;
+  }
+  await proxyCctvFrameRequestGuarded(
+    `${ONTARIO_CCTV_FRAME_BASE}${encodeURIComponent(frameId)}`,
+    res,
+  );
+}
+
+async function proxyCctvFrameRequestGuarded(
+  upstream: string,
+  res: ServerResponse,
+  extraHeaders: Record<string, string> = {},
+): Promise<void> {
+  const response = await fetchWithGuard(upstream, {
+    headers: { accept: "image/jpeg,image/*", ...extraHeaders },
+  });
+  const contentType = response.headers.get("content-type")?.split(";", 1)[0].trim() ?? "";
+  if (!response.ok || !["image/jpeg", "image/png"].includes(contentType)) {
+    await response.body?.cancel().catch(() => undefined);
+    res.statusCode = 502;
+    res.end("CCTV frame request failed");
+    return;
+  }
+  const body = await readBodyWithLimit(response, 5 * 1024 * 1024);
+  res.statusCode = 200;
+  res.setHeader("access-control-allow-origin", "*");
+  res.setHeader("cache-control", "public, max-age=30");
+  res.setHeader("content-type", contentType);
+  res.setHeader("content-length", String(body.byteLength));
+  res.end(body);
+}
+
+/** Fixed image relay for NSW frames whose host rejects non-browser clients. */
+export async function proxyNswCctvFrameRequestGuarded(
+  frameId: string,
+  res: ServerResponse,
+): Promise<void> {
+  if (!/^[a-z0-9_.&-]{1,100}\.(?:jpe?g)$/i.test(frameId)) {
+    res.statusCode = 400;
+    res.end("Invalid NSW camera id");
+    return;
+  }
+  await proxyCctvFrameRequestGuarded(`${NSW_CCTV_FRAME_BASE}${encodeURIComponent(frameId)}`, res, {
+    "user-agent": NSW_CCTV_USER_AGENT,
+  });
+}
+
+/** Fixed, bounded image relay for Caltrans public traffic-camera snapshots. */
+export async function proxyCaltransCctvFrameRequestGuarded(
+  district: string,
+  slug: string,
+  res: ServerResponse,
+): Promise<void> {
+  if (!/^(?:3|4|7|11)$/.test(district) || !/^[a-z0-9-]{1,100}$/i.test(slug)) {
+    res.statusCode = 400;
+    res.end("Invalid Caltrans camera id");
+    return;
+  }
+  await proxyCctvFrameRequestGuarded(
+    `${CALTRANS_CCTV_BASE}d${district}/cctv/image/${slug}/${slug}.jpg`,
+    res,
+  );
+}
+
+/** Fixed, bounded JSON relay for public camera catalogs without browser CORS. */
+export async function proxyCctvCatalogRequestGuarded(
+  provider: string,
+  res: ServerResponse,
+): Promise<void> {
+  if (!Object.hasOwn(CCTV_CATALOG_URLS, provider)) {
+    res.statusCode = 400;
+    res.end("Invalid CCTV catalog provider");
+    return;
+  }
+  const url = CCTV_CATALOG_URLS[provider as keyof typeof CCTV_CATALOG_URLS];
+  const response = await fetchWithGuard(url, {
+    headers: { accept: "application/json" },
+  });
+  if (!response.ok) {
+    await response.body?.cancel().catch(() => undefined);
+    res.statusCode = 502;
+    res.end("CCTV catalog request failed");
+    return;
+  }
+  const body = await readBodyWithLimit(response, 4 * 1024 * 1024);
+  try {
+    const payload = JSON.parse(body.toString("utf8")) as
+      | { features?: unknown; data?: unknown }
+      | unknown[];
+    const features =
+      payload && typeof payload === "object" && !Array.isArray(payload) ? payload.features : null;
+    const valid =
+      provider === "nsw"
+        ? Array.isArray(features)
+        : provider.startsWith("caltrans-")
+          ? !Array.isArray(payload) && Array.isArray(payload.data)
+          : Array.isArray(payload);
+    if (!valid) throw new Error();
+  } catch {
+    res.statusCode = 502;
+    res.end("CCTV catalog returned malformed JSON");
+    return;
+  }
+  res.statusCode = 200;
+  res.setHeader("access-control-allow-origin", "*");
+  res.setHeader("cache-control", "public, max-age=900");
+  res.setHeader("content-type", "application/json; charset=utf-8");
+  res.setHeader("content-length", String(body.byteLength));
+  res.end(body);
+}
+
+/**
+ * Same-origin Overpass relay for Vite development.
+ *
+ * A dev server may be opened through a LAN or Tailscale hostname that the
+ * public edge relay deliberately does not trust as a browser Origin. Relay the
+ * unchanged, bounded body server-side to that fixed endpoint; the edge worker
+ * remains the authority that validates the restricted Overpass grammar.
+ */
+export async function proxyOverpassRequestGuarded(
+  req: IncomingMessage,
+  res: ServerResponse,
+): Promise<void> {
+  if (req.method !== "POST") {
+    res.statusCode = 405;
+    res.setHeader("allow", "POST");
+    res.end("Method Not Allowed");
+    return;
+  }
+  const chunks: Buffer[] = [];
+  let size = 0;
+  for await (const chunk of req) {
+    const bytes = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+    size += bytes.byteLength;
+    if (size > OVERPASS_MAX_REQUEST_BYTES) {
+      res.statusCode = 413;
+      res.end("Payload Too Large");
+      return;
+    }
+    chunks.push(bytes);
+  }
+  const body = Buffer.concat(chunks);
+  const response = await fetchWithGuard(
+    OVERPASS_EDGE_URL,
+    {
+      method: "POST",
+      headers: {
+        "content-type": "application/x-www-form-urlencoded;charset=UTF-8",
+        // Do not forward a private-network Origin to the public edge gate.
+        origin: "https://web.geolibre.app",
+      },
+      body,
+    },
+    { timeoutMs: 70_000 },
+  );
+  const responseBody = await readBodyWithLimit(response);
+  res.statusCode = response.status;
+  res.setHeader("content-type", response.headers.get("content-type") ?? "application/json");
+  res.setHeader("cache-control", "no-store");
+  res.setHeader("content-length", String(responseBody.byteLength));
+  res.end(responseBody);
 }
 
 /**

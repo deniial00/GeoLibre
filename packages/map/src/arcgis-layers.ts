@@ -1,3 +1,4 @@
+import { cogSourceUrl, cogRenderSignature } from "./cog-imagery";
 import {
   compileLayerFilters,
   DEFAULT_LAYER_STYLE,
@@ -158,7 +159,18 @@ interface ArcgisPlanBase {
 
 export type ArcgisLayerPlan = ArcgisPlanBase &
   (
+    | {
+        kind: "archive";
+        format: "pmtiles" | "protocol";
+        url: string;
+        tileType: "vector" | "raster";
+        sourceId: string;
+        styleLayers: unknown[];
+        tileOptions: Record<string, unknown>;
+      }
+    | { kind: "external-deck" }
     | { kind: "geojson"; parts: ArcgisGeoJsonPart[] }
+    | { kind: "cog" | "zarr"; source: GeoLibreLayer; renderSignature: string }
     | {
         kind: "web-tile";
         urlTemplate: string;
@@ -196,6 +208,8 @@ export type ArcgisLayerPlan = ArcgisPlanBase &
   );
 
 export interface CompileArcgisLayerOptions {
+  /** Whether a primary flat map or local scene hosts the shared deck overlay. */
+  deckOverlay?: boolean;
   /** Zoom the per-feature expressions are evaluated at. */
   zoom?: number;
   /**
@@ -1113,7 +1127,7 @@ function bounds(layer: GeoLibreLayer): [number, number, number, number] | undefi
  */
 export function isArcgisPluginLayer(layer: GeoLibreLayer): boolean {
   if (layer.metadata.externalNativeLayer !== true) return false;
-  if (layer.geojson) return false;
+  if (layer.geojson || (layer.type === "cog" && cogSourceUrl(layer))) return false;
   const { url, urls, tiles, data } = layer.source as {
     url?: unknown;
     urls?: unknown;
@@ -1128,6 +1142,15 @@ export function isArcgisPluginLayer(layer: GeoLibreLayer): boolean {
   );
 }
 
+function isArcgisExternalDeckLayer(layer: GeoLibreLayer): boolean {
+  return (
+    (layer.type === "deckgl-viz" && layer.metadata.sourceKind === "deckgl-viz") ||
+    (layer.type === "lidar" && layer.metadata.sourceKind === "lidar-url") ||
+    (layer.type === "duckdb-query" && layer.metadata.sourceKind === "duckdb-query") ||
+    (layer.type === "3d-tiles" && layer.metadata.sourceKind === "3d-tiles-url")
+  );
+}
+
 /** Store layers are immutable records, so the answer is memoized per object. */
 const supportedLayerCache = new WeakMap<GeoLibreLayer, boolean>();
 
@@ -1135,7 +1158,8 @@ const supportedLayerCache = new WeakMap<GeoLibreLayer, boolean>();
  * Whether the ArcGIS engine can draw a layer. The layer panels badge the rest
  * before the engine's error banner would report them.
  */
-export function isArcgisSupportedLayer(layer: GeoLibreLayer): boolean {
+export function isArcgisSupportedLayer(layer: GeoLibreLayer, deckOverlay = true): boolean {
+  if (isArcgisExternalDeckLayer(layer)) return deckOverlay;
   const cached = supportedLayerCache.get(layer);
   if (cached !== undefined) return cached;
   let supported = true;
@@ -1152,6 +1176,35 @@ export function isArcgisSupportedLayer(layer: GeoLibreLayer): boolean {
 }
 
 const ARCGIS_SERVICE = /\/(FeatureServer|MapServer|ImageServer)(?:\/\d+)?\/?(?:\?|$)/i;
+
+const zarrSignatures = new WeakMap<GeoLibreLayer["source"], string>();
+const zarrManifestIds = new WeakMap<object, number>();
+let nextZarrManifestId = 0;
+
+/** Store sources and kerchunk manifests are immutable; compare manifests by identity. */
+function zarrRenderSignature(source: GeoLibreLayer["source"]): string {
+  const cached = zarrSignatures.get(source);
+  if (cached !== undefined) return cached;
+  const {
+    selector: _selector,
+    clim: _clim,
+    colormap: _colormap,
+    kerchunkRefs,
+    ...gridSource
+  } = source;
+  let refs = kerchunkRefs;
+  if (kerchunkRefs && typeof kerchunkRefs === "object") {
+    let id = zarrManifestIds.get(kerchunkRefs);
+    if (id === undefined) {
+      id = ++nextZarrManifestId;
+      zarrManifestIds.set(kerchunkRefs, id);
+    }
+    refs = ["manifest", id];
+  }
+  const signature = JSON.stringify({ ...gridSource, kerchunkRefs: refs });
+  zarrSignatures.set(source, signature);
+  return signature;
+}
 
 /**
  * Compile one store layer. Throws for a layer the SDK has no translation for,
@@ -1173,6 +1226,26 @@ export function compileArcgisLayer(
     ...(bounds(layer) ? { bounds: bounds(layer) } : {}),
     zoomDependent: false,
   };
+  if (isArcgisExternalDeckLayer(layer)) {
+    if (options.deckOverlay === false)
+      throw new Error("deck.gl layers require a flat ArcGIS map or local scene");
+    return { ...base, kind: "external-deck" };
+  }
+  if (layer.type === "zarr") {
+    if (!layer.source.url || !layer.source.variable)
+      throw new Error("Zarr requires a source and variable");
+    // Time slices refresh native tiles in place, retaining metadata and byte caches.
+    return {
+      ...base,
+      kind: "zarr",
+      source: layer,
+      renderSignature: zarrRenderSignature(layer.source),
+    };
+  }
+  if (layer.type === "cog") {
+    if (!cogSourceUrl(layer)) throw new Error("The COG layer has no readable source");
+    return { ...base, kind: "cog", source: layer, renderSignature: cogRenderSignature(layer) };
+  }
   // Vector tiles from an ArcGIS vector tile service carry a resolved style;
   // the SDK's VectorTileLayer accepts a Mapbox style document directly, so the
   // Mapbox compiler's plan (sources plus style layers) becomes its style.
@@ -1231,8 +1304,47 @@ export function compileArcgisLayer(
         : "map-image";
     return { ...base, kind, url: serviceUrl };
   }
-  if (layer.type === "pmtiles" || layer.type === "mbtiles")
-    throw new Error(`${layer.type} archives are not supported by the ArcGIS renderer`);
+  if (layer.type === "pmtiles" || layer.type === "mbtiles") {
+    const archiveUrl = layer.type === "pmtiles" ? url : tiles[0];
+    if (!archiveUrl) throw new Error("Tile archive has no readable source");
+    if (layer.source.encoding === "mlt")
+      throw new Error("ArcGIS requires MVT vector tiles, not MLT");
+    const tileType =
+      layer.source.type === "raster" || layer.source.tileType === "raster" ? "raster" : "vector";
+    let styleLayers: unknown[] = [];
+    let sourceId = layer.id;
+    const tileOptions = {
+      ...(typeof layer.source.minzoom === "number" ? { minzoom: layer.source.minzoom } : {}),
+      ...(typeof layer.source.maxzoom === "number" ? { maxzoom: layer.source.maxzoom } : {}),
+      ...(base.bounds ? { bounds: base.bounds } : {}),
+    };
+    if (tileType === "vector") {
+      const vector = compileMapboxLayer({
+        ...layer,
+        type: "vector-tiles",
+        opacity: 1,
+        visible: true,
+        source: {
+          ...layer.source,
+          type: "vector",
+          url: undefined,
+          tiles: ["https://geolibre.invalid/{z}/{x}/{y}.pbf"],
+        },
+      });
+      sourceId = vector.sourceId;
+      styleLayers = vector.layers.filter((spec) => spec.type !== "symbol");
+    }
+    return {
+      ...base,
+      kind: "archive",
+      format: layer.type === "pmtiles" ? "pmtiles" : "protocol",
+      url: archiveUrl,
+      tileType,
+      sourceId,
+      styleLayers,
+      tileOptions,
+    };
+  }
   if (layer.type === "wms" && tiles.length) {
     const [template] = proxyWmsTiles(layer.type, tiles);
     return { ...base, kind: "wms", ...wmsLayerFromTemplate(template) };

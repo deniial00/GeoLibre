@@ -112,7 +112,6 @@ def iso_ts(epoch_seconds: int) -> str:
 # Password and token primitives
 # ---------------------------------------------------------------------------
 
-
 def password_hash(password: str, salt: bytes | None = None) -> str:
     """Hash a password with scrypt, optionally reusing a caller-provided salt."""
     if not password:
@@ -141,7 +140,6 @@ def token_digest(token: str) -> str:
 def base64url_sha256(value: str) -> str:
     digest = hashlib.sha256(value.encode("ascii")).digest()
     return base64.urlsafe_b64encode(digest).rstrip(b"=").decode("ascii")
-
 
 def account_json(account: Account) -> dict:
     """Serialize an account with the API's camelCase field names."""
@@ -468,12 +466,12 @@ def optional_principal(
             credential_id=oauth_session.id,
             session_id=oauth_session.id,
         )
-
     token_row = session.get(Token, digest)
     if token_row is None:
         raise HTTPException(
             401, "invalid or expired token", headers=bearer_challenge("invalid_token")
         )
+
     policy = session.scalar(
         select(PersonalTokenPolicy).where(PersonalTokenPolicy.token_digest == digest)
     )
@@ -492,6 +490,7 @@ def optional_principal(
         raise HTTPException(
             401, "invalid or expired token", headers=bearer_challenge("invalid_token")
         )
+
     touch_policy(session, digest, now_ts)
     return AuthPrincipal(
         account=account,
@@ -566,7 +565,6 @@ def cleanup_expired_security_rows(session: Session, now_ts: int, *, batch_size: 
 
     if changed:
         session.commit()
-
 
 def required_principal(
     principal: AuthPrincipal | None = Depends(optional_principal),
@@ -906,7 +904,6 @@ class TokenIssueRequest(BaseModel):
     values is enforced in the routes, not by Pydantic, so the error
     vocabulary matches the contract.
     """
-
     username: str = Field(max_length=39)
     password: str = Field(max_length=1024)
     name: str | None = Field(default=None, max_length=100)
@@ -942,6 +939,7 @@ def build_identity_router() -> APIRouter:
             raise HTTPException(422, "password must be at least 8 characters")
         if session.scalar(select(Account.id).where(Account.username == username)):
             raise HTTPException(409, "username already exists")
+
         account = Account(
             id=str(uuid.uuid4()),
             username=username,

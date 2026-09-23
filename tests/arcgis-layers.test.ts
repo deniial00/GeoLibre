@@ -509,12 +509,16 @@ describe("ArcGIS raster, service and media compilation", () => {
       ]);
     }
   });
-  it("rejects archives, custom protocols and plugin-owned mirrors", () => {
+  it("rejects MLT archives, custom protocols and plugin-owned mirrors", () => {
     const base = geojsonLayer({ geojson: undefined });
     assert.throws(
       () =>
-        compileArcgisLayer({ ...base, type: "pmtiles", source: { url: "https://x/a.pmtiles" } }),
-      /not supported/,
+        compileArcgisLayer({
+          ...base,
+          type: "pmtiles",
+          source: { url: "https://x/a.pmtiles", encoding: "mlt" },
+        }),
+      /MVT/,
     );
     assert.throws(
       () =>
@@ -947,4 +951,25 @@ describe("ArcGIS native point styles and altitude", () => {
       coordinates: [10, 20, 30],
     });
   });
+});
+
+it("leaves deck visualizations to the overlay and badges views without a host", () => {
+  const layer = geojsonLayer({ type: "deckgl-viz", metadata: { sourceKind: "deckgl-viz" } });
+  assert.equal(compileArcgisLayer(layer, { scene: true, deckOverlay: true }).kind, "external-deck");
+  assert.throws(() => compileArcgisLayer(layer, { deckOverlay: false }), /local scene/);
+  assert.equal(isArcgisSupportedLayer(layer, true), true);
+  assert.equal(isArcgisSupportedLayer(layer, false), false);
+});
+
+it("accepts adapted plugin layers only when an ArcGIS deck overlay is available", () => {
+  for (const [type, sourceKind] of [
+    ["lidar", "lidar-url"],
+    ["duckdb-query", "duckdb-query"],
+    ["3d-tiles", "3d-tiles-url"],
+  ] as const) {
+    const layer = geojsonLayer({ type, metadata: { sourceKind } });
+    assert.equal(compileArcgisLayer(layer, { deckOverlay: true }).kind, "external-deck");
+    assert.equal(isArcgisSupportedLayer(layer, false), false);
+    assert.throws(() => compileArcgisLayer(layer, { deckOverlay: false }), /flat ArcGIS/);
+  }
 });

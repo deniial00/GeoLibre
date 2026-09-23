@@ -11,7 +11,22 @@ import { bundledPlugins } from "./vite-plugins/bundled-plugins";
 import { copyCesiumAssets } from "./vite-plugins/copy-cesium-assets";
 import { copyRtlText } from "./vite-plugins/copy-rtl-text";
 import { copyVectorOps } from "./vite-plugins/copy-vector-ops";
-import { proxyBinaryRequestGuarded } from "./vite-proxy-guard";
+import {
+  proxyAircraftRequestGuarded,
+  proxyAdsbdbAircraftRequestGuarded,
+  proxyBinaryRequestGuarded,
+  proxyAustinCctvFrameRequestGuarded,
+  proxyCalgaryCctvFrameRequestGuarded,
+  proxyCaltransCctvFrameRequestGuarded,
+  proxyCctvCatalogRequestGuarded,
+  proxyCelestrakRequestGuarded,
+  proxyLaunchLibraryRequestGuarded,
+  proxyOverpassRequestGuarded,
+  proxyTransitRequestGuarded,
+  proxyOntarioCctvFrameRequestGuarded,
+  proxyNswCctvFrameRequestGuarded,
+} from "./vite-proxy-guard";
+import { fastPathProxyPlugin } from "./vite-fast-path-proxy";
 
 const GEOAGENT_BROWSER_BUNDLE = "maplibre-gl-geoagent/dist/browser-";
 import { ARCGIS_SDK_HOST, ARCGIS_SDK_VERSION } from "../../packages/map/src/arcgis-sdk";
@@ -240,6 +255,7 @@ const BUILD_ENV_KEYS = [
   "VITE_GEOCODER_ENDPOINT",
   "VITE_GEOCODER_PROVIDER",
   "VITE_GEOCODER_REVERSE_ENDPOINT",
+  "VITE_GEOLENS_DEFAULT_URL",
   "VITE_GEOLIBRE_AI_MODEL",
   "VITE_GEOLIBRE_AI_URL",
   "VITE_GEOLIBRE_AUTH0_CLIENT_ID",
@@ -504,6 +520,19 @@ const WMS_PROXY_PATH = "/__geolibre_wms_proxy";
 const WFS_PROXY_PATH = "/__geolibre_wfs_proxy";
 const CSW_PROXY_PATH = "/__geolibre_csw_proxy";
 const GPX_PROXY_PATH = "/__geolibre_gpx_proxy";
+const CELESTRAK_PROXY_PATH = "/__geolibre_celestrak";
+const LAUNCH_LIBRARY_PROXY_PATH = "/launch-library/recent";
+const OPEN_SKY_PROXY_PATH = "/opensky/states";
+const ADSB_LOL_MILITARY_PROXY_PATH = "/adsb-lol/military";
+const ADSBDB_AIRCRAFT_PROXY_PATH = "/adsbdb/aircraft";
+const TRANSIT_PROXY_PATH = "/transit/vehicles";
+const AUSTIN_CCTV_FRAME_PROXY_PATH = "/cctv/austin";
+const CALGARY_CCTV_FRAME_PROXY_PATH = "/cctv/calgary";
+const CCTV_CATALOG_PROXY_PATH = "/cctv/catalog";
+const ONTARIO_CCTV_FRAME_PROXY_PATH = "/cctv/ontario";
+const NSW_CCTV_FRAME_PROXY_PATH = "/cctv/nsw";
+const CALTRANS_CCTV_FRAME_PROXY_PATH = "/cctv/caltrans";
+const OVERPASS_PROXY_PATH = "/overpass";
 const RASTER_PROXY_PATH = "/__geolibre_raster_proxy";
 const DUCKDB_WORKER_PATH_PART = "/@duckdb/duckdb-wasm/dist/";
 const DUCKDB_WORKER_SOURCE_MAP_RE =
@@ -661,6 +690,162 @@ function wmsProxyPlugin(): Plugin {
           res.statusCode = 502;
           res.setHeader("content-type", "text/plain");
           res.end(message);
+        }
+      });
+      server.middlewares.use(CELESTRAK_PROXY_PATH, async (req, res) => {
+        try {
+          await proxyCelestrakRequestGuarded(req, res, CELESTRAK_PROXY_PATH);
+        } catch {
+          res.statusCode = 502;
+          res.setHeader("content-type", "text/plain");
+          res.end("CelesTrak proxy request failed");
+        }
+      });
+      server.middlewares.use(LAUNCH_LIBRARY_PROXY_PATH, async (_req, res) => {
+        try {
+          await proxyLaunchLibraryRequestGuarded(res);
+        } catch {
+          res.statusCode = 502;
+          res.setHeader("content-type", "text/plain");
+          res.end("Launch Library 2 proxy request failed");
+        }
+      });
+      server.middlewares.use(OPEN_SKY_PROXY_PATH, async (_req, res) => {
+        try {
+          await proxyAircraftRequestGuarded("opensky", res);
+        } catch {
+          res.statusCode = 502;
+          res.setHeader("content-type", "text/plain");
+          res.end("OpenSky proxy request failed");
+        }
+      });
+      server.middlewares.use(ADSB_LOL_MILITARY_PROXY_PATH, async (_req, res) => {
+        try {
+          await proxyAircraftRequestGuarded("military", res);
+        } catch {
+          res.statusCode = 502;
+          res.setHeader("content-type", "text/plain");
+          res.end("adsb.lol proxy request failed");
+        }
+      });
+      server.middlewares.use(ADSBDB_AIRCRAFT_PROXY_PATH, async (req, res) => {
+        try {
+          const requestUrl = new URL(
+            req.url ?? "",
+            `http://localhost${ADSBDB_AIRCRAFT_PROXY_PATH}`,
+          );
+          const icao = decodeURIComponent(requestUrl.pathname.replace(/^\//, ""));
+          await proxyAdsbdbAircraftRequestGuarded(icao, res);
+        } catch {
+          res.statusCode = 502;
+          res.setHeader("content-type", "text/plain");
+          res.end("ADSBDB proxy request failed");
+        }
+      });
+      server.middlewares.use(TRANSIT_PROXY_PATH, async (req, res) => {
+        try {
+          const requestUrl = new URL(req.url ?? "", `http://localhost${TRANSIT_PROXY_PATH}`);
+          const feedId = decodeURIComponent(requestUrl.pathname.replace(/^\//, ""));
+          await proxyTransitRequestGuarded(feedId, res);
+        } catch {
+          res.statusCode = 502;
+          res.setHeader("content-type", "text/plain");
+          res.end("Transit proxy request failed");
+        }
+      });
+      server.middlewares.use(CALGARY_CCTV_FRAME_PROXY_PATH, async (req, res) => {
+        try {
+          const requestUrl = new URL(
+            req.url ?? "",
+            `http://localhost${CALGARY_CCTV_FRAME_PROXY_PATH}`,
+          );
+          const frameId = decodeURIComponent(requestUrl.pathname).match(/^\/(\d{1,4})\.jpg$/)?.[1];
+          await proxyCalgaryCctvFrameRequestGuarded(frameId ?? "", res);
+        } catch {
+          res.statusCode = 502;
+          res.setHeader("content-type", "text/plain");
+          res.end("Calgary CCTV frame request failed");
+        }
+      });
+      server.middlewares.use(AUSTIN_CCTV_FRAME_PROXY_PATH, async (req, res) => {
+        try {
+          const requestUrl = new URL(
+            req.url ?? "",
+            `http://localhost${AUSTIN_CCTV_FRAME_PROXY_PATH}`,
+          );
+          const frameId = decodeURIComponent(requestUrl.pathname).match(/^\/(\d{1,4})\.jpg$/)?.[1];
+          await proxyAustinCctvFrameRequestGuarded(frameId ?? "", res);
+        } catch {
+          res.statusCode = 502;
+          res.setHeader("content-type", "text/plain");
+          res.end("Austin CCTV frame request failed");
+        }
+      });
+      server.middlewares.use(CCTV_CATALOG_PROXY_PATH, async (req, res) => {
+        try {
+          const requestUrl = new URL(req.url ?? "", `http://localhost${CCTV_CATALOG_PROXY_PATH}`);
+          const provider = decodeURIComponent(requestUrl.pathname).match(
+            /^\/(ontario|drivebc|nsw|caltrans-(?:3|4|7|11))\.json$/,
+          )?.[1];
+          await proxyCctvCatalogRequestGuarded(provider ?? "", res);
+        } catch {
+          res.statusCode = 502;
+          res.setHeader("content-type", "text/plain");
+          res.end("CCTV catalog request failed");
+        }
+      });
+      server.middlewares.use(ONTARIO_CCTV_FRAME_PROXY_PATH, async (req, res) => {
+        try {
+          const requestUrl = new URL(
+            req.url ?? "",
+            `http://localhost${ONTARIO_CCTV_FRAME_PROXY_PATH}`,
+          );
+          const frameId = decodeURIComponent(requestUrl.pathname).match(
+            /^\/([A-Za-z0-9_.-]{1,64})$/,
+          )?.[1];
+          await proxyOntarioCctvFrameRequestGuarded(frameId ?? "", res);
+        } catch {
+          res.statusCode = 502;
+          res.setHeader("content-type", "text/plain");
+          res.end("Ontario CCTV frame request failed");
+        }
+      });
+      server.middlewares.use(NSW_CCTV_FRAME_PROXY_PATH, async (req, res) => {
+        try {
+          const requestUrl = new URL(req.url ?? "", `http://localhost${NSW_CCTV_FRAME_PROXY_PATH}`);
+          const frameId = decodeURIComponent(requestUrl.pathname).match(
+            /^\/([a-z0-9_.&-]{1,100}\.(?:jpe?g))$/i,
+          )?.[1];
+          await proxyNswCctvFrameRequestGuarded(frameId ?? "", res);
+        } catch {
+          res.statusCode = 502;
+          res.setHeader("content-type", "text/plain");
+          res.end("NSW CCTV frame request failed");
+        }
+      });
+      server.middlewares.use(CALTRANS_CCTV_FRAME_PROXY_PATH, async (req, res) => {
+        try {
+          const requestUrl = new URL(
+            req.url ?? "",
+            `http://localhost${CALTRANS_CCTV_FRAME_PROXY_PATH}`,
+          );
+          const match = decodeURIComponent(requestUrl.pathname).match(
+            /^\/(3|4|7|11)\/([a-z0-9-]{1,100})\.jpg$/i,
+          );
+          await proxyCaltransCctvFrameRequestGuarded(match?.[1] ?? "", match?.[2] ?? "", res);
+        } catch {
+          res.statusCode = 502;
+          res.setHeader("content-type", "text/plain");
+          res.end("Caltrans CCTV frame request failed");
+        }
+      });
+      server.middlewares.use(OVERPASS_PROXY_PATH, async (req, res) => {
+        try {
+          await proxyOverpassRequestGuarded(req, res);
+        } catch {
+          res.statusCode = 502;
+          res.setHeader("content-type", "text/plain");
+          res.end("Overpass proxy request failed");
         }
       });
       server.middlewares.use(RASTER_PROXY_PATH, async (req, res) => {
@@ -1038,7 +1223,9 @@ function pwaPlugin(): Plugin[] {
       // Precache the app shell: HTML plus the JS/CSS/fonts that boot the map.
       // The heavy lazily-fetched chunks/binaries are runtime-cached instead.
       globPatterns: ["**/*.{js,css,html,woff,woff2}"],
-      globIgnores: HEAVY_PRECACHE_IGNORES,
+      // Deployment configuration changes independently of the application build.
+      // Never pin it to a build revision in the service worker.
+      globIgnores: [...HEAVY_PRECACHE_IGNORES, "**/geolibre-runtime-config.js"],
       // deck.gl/vendor shell chunks can run a few MB; allow them into the
       // precache. MapLibre and the huge binaries are globIgnored above.
       maximumFileSizeToCacheInBytes: 4 * 1024 * 1024,
@@ -1163,6 +1350,7 @@ export default defineConfig({
     copyCesiumAssets(path.resolve(__dirname, "public/cesium")),
     react(),
     wmsProxyPlugin(),
+    fastPathProxyPlugin(),
     selectiveJsMinifyPlugin(),
     removeJupyterLiteFromTauriDistPlugin(),
     ...pwaPlugin(),

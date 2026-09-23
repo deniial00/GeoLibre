@@ -42,6 +42,8 @@ import {
   maplibreNasaEarthdataPlugin,
   maplibreNationalMapPlugin,
   maplibreOpenAerialMapPlugin,
+  maplibreOsmDownloaderPlugin,
+  maplibreIgnLidarHdPlugin,
   maplibreArcGisHubPlugin,
   maplibreCkanPlugin,
   maplibreSocrataPlugin,
@@ -50,6 +52,7 @@ import {
   maplibreNaturalEarthPlugin,
   maplibreHuggingFacePlugin,
   maplibreGeoLensPlugin,
+  setGeoLensDefaultServerUrl,
   maplibreVantorPlugin,
   maplibrePlanetOpenDataPlugin,
   maplibrePortolanPlugin,
@@ -73,6 +76,7 @@ import {
   maplibreSunPlugin,
   maplibreRouteAnimationPlugin,
   flightSimulatorPlugin,
+  godsEyeViewPlugin,
   maplibreSwipePlugin,
   SWIPE_PLUGIN_ID,
   maplibreTimelapsePlugin,
@@ -100,6 +104,7 @@ import {
   closeFloatingPanel,
   getOpenFloatingPanels,
 } from "@geolibre/plugins";
+import { readDeploymentEnvValue } from "../lib/deployment-env";
 import { CesiumEngine, getPrimaryCesiumControlHost, type MapEngine } from "@geolibre/map";
 import type {
   GeoLibreCogLayerOptions,
@@ -150,6 +155,7 @@ import { createPluginLocaleApi } from "../lib/plugin-locale";
 import { setTimeSliderOpenedByBinding, shouldCloseTimeSliderDock } from "../lib/time-slider-dock";
 import { createWmsTileUrl, normalizeWmsVersion } from "../components/layout/add-data/helpers";
 import { createExternalNativeStoreLayer } from "../lib/external-native-layer";
+import { createPluginLayerGroupActions } from "../lib/plugin-layer-groups";
 import { createPluginLayerQueries } from "../lib/plugin-layer-queries";
 import { mergeStringLists } from "../lib/string-lists";
 import {
@@ -195,6 +201,7 @@ interface TauriRuntimeWindow extends Window {
 }
 
 const manager = new PluginManager();
+setGeoLensDefaultServerUrl(readDeploymentEnvValue("VITE_GEOLENS_DEFAULT_URL"));
 manager.registerAll([
   maplibreLayerControlPlugin,
   maplibreGeoEditorPlugin,
@@ -214,6 +221,8 @@ manager.registerAll([
   maplibrePortolanPlugin,
   maplibreEarthdataGisPlugin,
   maplibreOpenAerialMapPlugin,
+  maplibreOsmDownloaderPlugin,
+  maplibreIgnLidarHdPlugin,
   maplibreArcGisHubPlugin,
   maplibreSocrataPlugin,
   maplibreCkanPlugin,
@@ -249,6 +258,7 @@ manager.registerAll([
   maplibreSunPlugin,
   maplibreRouteAnimationPlugin,
   flightSimulatorPlugin,
+  godsEyeViewPlugin,
   // Last visible entry of the Plugins menu; the ids below are skipped by
   // PluginsMenu and surface elsewhere.
   maplibreSamGeoPlugin,
@@ -1092,11 +1102,7 @@ export function createAppAPI(mapControllerRef?: RefObject<MapEngine | null>) {
       return !manager.isActive(pluginId);
     },
     queryOvertureFeatures,
-    addLayerGroup: (name?: string, layerIds?: string[]) =>
-      useAppStore.getState().addLayerGroup(name, layerIds),
-    moveLayersToGroup: (layerIds: string[], groupId: string | null) =>
-      useAppStore.getState().moveLayersToGroup(layerIds, groupId),
-    removeLayerGroup: (id: string) => useAppStore.getState().removeLayerGroup(id),
+    ...createPluginLayerGroupActions(),
     fitBounds: (bounds: [number, number, number, number]) =>
       mapControllerRef?.current?.fitBounds(bounds),
     getViewBounds: () => mapControllerRef?.current?.getViewBounds() ?? null,
@@ -1104,6 +1110,14 @@ export function createAppAPI(mapControllerRef?: RefObject<MapEngine | null>) {
     readRasterWindow: (layerId: string, options: GeoLibreRasterWindowOptions) =>
       readRasterWindow(layerId, options),
     getMapRenderer: () => useAppStore.getState().primaryRenderer,
+    getArcgisView: () => {
+      const engine = mapControllerRef?.current;
+      return engine?.kind === "arcgis" &&
+        "getView" in engine &&
+        typeof engine.getView === "function"
+        ? engine.getView()
+        : null;
+    },
     getMapboxMap: () => {
       const engine = mapControllerRef?.current;
       return engine?.kind === "mapbox" &&

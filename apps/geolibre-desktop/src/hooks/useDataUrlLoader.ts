@@ -1,9 +1,15 @@
 import { useAppStore, type GeoLibreLayer } from "@geolibre/core";
 import { applyMapboxStyleImport, parseMapboxStyle } from "@geolibre/map";
-import { addPMTilesLayerFromUrl, addRasterToMap, addVectorLayerFromUrl } from "@geolibre/plugins";
+import {
+  addLidarLayerFromUrl,
+  addPMTilesLayerFromUrl,
+  addRasterToMap,
+  addVectorLayerFromUrl,
+} from "@geolibre/plugins";
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   dataUrlParameters,
+  type DataTypeHint,
   fetchRemoteData,
   fetchRemoteStyle,
   mapboxStyleForDataLayer,
@@ -32,11 +38,16 @@ function layerPointsAt(layer: GeoLibreLayer, url: string): boolean {
 export async function loadDataUrl(
   mapAppAPI: ReturnType<typeof createAppAPI>,
   dataUrl: string,
-  options: { styleUrl?: string | null; signal?: AbortSignal; fit?: boolean } = {},
+  options: {
+    styleUrl?: string | null;
+    dataType?: DataTypeHint | null;
+    signal?: AbortSignal;
+    fit?: boolean;
+  } = {},
 ): Promise<DataUrlLoadResult> {
   const fit = options.fit ?? true;
   const [remote, rawStyle] = await Promise.all([
-    fetchRemoteData(dataUrl, { signal: options.signal }),
+    fetchRemoteData(dataUrl, { signal: options.signal, dataType: options.dataType }),
     options.styleUrl ? fetchRemoteStyle(options.styleUrl, { signal: options.signal }) : null,
   ]);
   if (options.signal?.aborted) throw new DOMException("The operation was aborted", "AbortError");
@@ -54,6 +65,17 @@ export async function loadDataUrl(
       zoomTo: fit,
       ...(rasterStyle ? { state: rasterStyle } : {}),
     });
+    if (options.signal?.aborted) {
+      store.removeLayer(id);
+      throw new DOMException("The operation was aborted", "AbortError");
+    }
+    layerIds.push(id);
+  } else if (remote.kind === "lidar") {
+    if (rawStyle !== null) {
+      throw new Error("A style cannot be applied to a LiDAR point cloud.");
+    }
+    const id = await addLidarLayerFromUrl(mapAppAPI, remote.url, { fit });
+    if (!id) throw new Error(`Could not add ${remote.name} to the map.`);
     if (options.signal?.aborted) {
       store.removeLayer(id);
       throw new DOMException("The operation was aborted", "AbortError");
@@ -146,6 +168,7 @@ export function useDataUrlLoader(
         const [entry] = params;
         return loadDataUrl(mapAppAPI, entry.dataUrl, {
           styleUrl: entry.styleUrl,
+          dataType: entry.dataType,
           signal: controller.signal,
         });
       }
@@ -154,6 +177,7 @@ export function useDataUrlLoader(
         for (const entry of params) {
           const result = await loadDataUrl(mapAppAPI, entry.dataUrl, {
             styleUrl: entry.styleUrl,
+            dataType: entry.dataType,
             signal: controller.signal,
             fit: false,
           });

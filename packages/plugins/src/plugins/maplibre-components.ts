@@ -1,3 +1,4 @@
+import { readNativeZarrDimensions, registerZarrStore } from "@geolibre/map/zarr-source";
 import { adaptMapboxPMTilesControl } from "./mapbox-pmtiles-control";
 import {
   clearExternalNativePaintBridge,
@@ -12,6 +13,8 @@ import {
 } from "@geolibre/core";
 import {
   createPMTilesArchiveLayers,
+  createArcgisPMTilesArchiveLayers,
+  readRemotePMTilesInfo,
   pmtilesIdsForSourceLayers,
   type PMTilesStoreLayerOptions,
 } from "@geolibre/map/pmtiles-layer";
@@ -91,6 +94,12 @@ import {
 } from "./map-projection-utils";
 import { ensureSharedDeckOverlay, setSharedDeckLayers } from "./shared-deck-overlay";
 import { attachTerrainMeasure, measurePanelElement, type TerrainMapLike } from "./terrain-measure";
+import {
+  MEASURE_FILL_COLOR,
+  MEASURE_LINE_COLOR,
+  MEASURE_LINE_WIDTH,
+  syncLidarMeasureMirror,
+} from "./lidar-measure-mirror";
 import { INTERNAL_HELPER_LAYER_PATTERNS } from "./internal-layers";
 import { savedRasterState } from "./raster-layer-sync";
 import type { SwipeRasterSnapshot } from "./swipe-raster-mirror";
@@ -197,8 +206,11 @@ const splattingControlPosition: GeoLibreMapControlPosition = "top-left";
 const FLATGEOBUF_SAMPLE_URL = "https://flatgeobuf.org/test/data/UScounties.fgb";
 const BUILDING_COUNT_H3_PMTILES_SAMPLE_URL =
   "https://data.source.coop/giswqs/opengeos/building_count_h3.pmtiles";
+// Overture keeps only the newest release in this bucket, so a pinned sample
+// URL goes 404 on the release after the one it names. Refresh it along with
+// the `maplibre-gl-overture-maps` bump that follows a new Overture release.
 const PMTILES_SAMPLE_URL =
-  "https://overturemaps-extras-us-west-2.s3.us-west-2.amazonaws.com/tiles/2026-07-22.0/buildings.pmtiles";
+  "https://overturemaps-extras-us-west-2.s3.us-west-2.amazonaws.com/tiles/2026-08-19.0/buildings.pmtiles";
 const TILEZEN_PMTILES_SAMPLE_URL =
   "https://r2-public.protomaps.com/protomaps-sample-datasets/tilezen.pmtiles";
 const ZARR_SAMPLE_URL =
@@ -334,6 +346,12 @@ const MEASURE_OPTIONS = {
   className: "geolibre-measure-control",
   collapsed: false,
   fontColor: "hsl(var(--popover-foreground))",
+  // Spelled out (they match the control's own defaults) because the LiDAR
+  // measure mirror has to redraw this geometry in deck.gl with the same paint
+  // — see lidar-measure-mirror.ts.
+  lineColor: MEASURE_LINE_COLOR,
+  lineWidth: MEASURE_LINE_WIDTH,
+  fillColor: MEASURE_FILL_COLOR,
   maxHeight: 520,
   panelWidth: 260,
   position: measureControlPosition,
@@ -802,6 +820,9 @@ let geoTiffRasterStoreUnsubscribe: (() => void) | null = null;
 let pmtilesStoreUnsubscribe: (() => void) | null = null;
 let stacSearchStoreUnsubscribe: (() => void) | null = null;
 let zarrStoreUnsubscribe: (() => void) | null = null;
+const arcgisZarrTemporalUnsubscribes = new Map<string, () => void>();
+const restoredArcgisZarrLayerIds = new Set<string>();
+let restoredArcgisZarrStoreUnsubscribe: (() => void) | null = null;
 let lidarStoreUnsubscribe: (() => void) | null = null;
 let splattingStoreUnsubscribe: (() => void) | null = null;
 
@@ -824,7 +845,10 @@ interface PendingLidarRestore {
   beforeLayerId: string | null;
 }
 const pendingLidarRestores = new Map<string, PendingLidarRestore[]>();
-let lidarRestoreInFlight = false;
+// The currently-running restoreLidarLayers() call, if any — a promise rather
+// than a boolean so a concurrent caller can wait for it and retry instead of
+// bailing out and silently dropping its own layer. See restoreLidarLayers.
+let lidarRestoreInFlightPromise: Promise<void> | null = null;
 
 let pluginActive = false;
 let componentsControlRevision = 0;
@@ -1817,6 +1841,41 @@ export async function addPMTilesLayerFromUrl(
   url: string,
   options: { fit?: boolean } = {},
 ): Promise<boolean> {
+  let address: URL;
+  try {
+    address = new URL(url);
+    if (!["https:", "http:"].includes(address.protocol)) throw new Error("Unsupported protocol");
+  } catch {
+    throw new Error(
+      app.translate?.("addData.pmtiles.errorUrl", "Enter a valid HTTP(S) PMTiles URL") ??
+        "Enter a valid HTTP(S) PMTiles URL",
+    );
+  }
+  const normalizedUrl = address.href;
+  if (app.getMapRenderer?.() === "arcgis") {
+    const info = await readRemotePMTilesInfo(normalizedUrl);
+    if (info.encoding === "mlt")
+      throw new Error(
+        app.translate?.("addData.pmtiles.errorMlt", "ArcGIS requires MVT vector tiles, not MLT") ??
+          "ArcGIS requires MVT vector tiles, not MLT",
+      );
+    const encodedName = address.pathname.split("/").pop() || "PMTiles";
+    let name = encodedName;
+    try {
+      name = decodeURIComponent(encodedName);
+    } catch {
+      // A valid URL can still contain a malformed percent escape in its path.
+    }
+    const layers = createArcgisPMTilesArchiveLayers({
+      id: crypto.randomUUID(),
+      name,
+      url: normalizedUrl,
+      ...info,
+    });
+    addPMTilesArchive(layers, name);
+    if (options.fit !== false && info.bounds) app.fitBounds?.(info.bounds);
+    return true;
+  }
   const { PMTilesLayerControl: PMTilesLayerControlClass } = await getComponentsConstructors();
 
   pmtilesControl ??= createPMTilesControl(PMTilesLayerControlClass, app);
@@ -1869,9 +1928,9 @@ export async function addPMTilesLayerFromUrl(
   cameraEvents?.on("movestart", onMoveStart);
   cameraEvents?.on("moveend", onMoveEnd);
   const control = pmtilesControl;
-  const endAdd = beginProgrammaticPMTilesAdd(url);
+  const endAdd = beginProgrammaticPMTilesAdd(normalizedUrl);
   try {
-    await control.addLayer(url);
+    await control.addLayer(normalizedUrl);
   } finally {
     endAdd();
     // Preserve a host user's camera interaction that happened while the archive
@@ -2321,6 +2380,21 @@ export async function addCloudNetcdfLayer(
   app: GeoLibreAppAPI,
   options: CloudNetcdfLayerOptions,
 ): Promise<void> {
+  if (app.getMapRenderer?.() === "arcgis") {
+    const refs =
+      options.refs ?? (await loadKerchunkReference(options.url, { headers: options.headers }));
+    await addNativeArcgisZarrLayer(
+      {
+        ...options,
+        store: new KerchunkReferenceStore(refs, {
+          headers: options.headers,
+          sourceUrl: options.url,
+        }),
+      },
+      refs,
+    );
+    return;
+  }
   const { ZarrLayerControl: ZarrLayerControlClass } = await getComponentsConstructors();
 
   zarrControl ??= createZarrControl(ZarrLayerControlClass);
@@ -2344,7 +2418,10 @@ export async function addCloudNetcdfLayer(
 
   const refs =
     options.refs ?? (await loadKerchunkReference(options.url, { headers: options.headers }));
-  const store = new KerchunkReferenceStore(refs, { headers: options.headers });
+  const store = new KerchunkReferenceStore(refs, {
+    headers: options.headers,
+    sourceUrl: options.url,
+  });
 
   // The control is a module-level singleton and may have been torn down (set to
   // null on plugin deactivation) during the await above.
@@ -2521,7 +2598,72 @@ export async function addZarrRasterLayer(
     throw new Error("A Zarr variable is required (pass options.variable).");
   }
 
+  if (app.getMapRenderer?.() === "arcgis")
+    return addNativeArcgisZarrLayer({ ...options, url, variable });
   return queueZarrAdd(() => addZarrLayerExclusively(app, options, url, variable));
+}
+
+async function addNativeArcgisZarrLayer(
+  options: ZarrRasterLayerOptions,
+  refs?: KerchunkRefs,
+): Promise<string> {
+  const id = crypto.randomUUID();
+  const layer = createZarrStoreLayer(id, {
+    id,
+    url: options.url,
+    variable: options.variable,
+    name: options.name,
+    selector: options.selector,
+    clim: options.clim ?? [0, 1],
+    colormap: resolveZarrColormap(options.colormap) ?? interpolateRampColors("viridis", 256),
+    opacity: options.opacity ?? 1,
+    crs: options.crs,
+    proj4: options.proj4,
+    bounds: options.bounds,
+  });
+  layer.source = {
+    ...layer.source,
+    // Local NetCDF refs inline the entire decoded raster. Keep those in the
+    // session store so saving a project cannot embed megabytes of base64 data.
+    ...(refs && !options.url.startsWith("local:") ? { kerchunkRefs: refs } : {}),
+    headers: options.headers,
+    spatialDimensions: options.spatialDimensions,
+  };
+  if (options.store) {
+    const dispose = registerZarrStore(id, options.store);
+    const unsubscribe = useAppStore.subscribe((state, previous) => {
+      if (state.layers === previous.layers) return;
+      if (!state.layers.some((layer) => layer.id === id)) {
+        dispose();
+        unsubscribe();
+      }
+    });
+  }
+  useAppStore.getState().addLayer(layer, options.beforeLayerId);
+  trackRestoredArcgisZarrLayer(id);
+  void registerZarrTemporalAdapter(id, options.url, {
+    refs,
+    headers: options.headers,
+    ...(options.readTimeAttributes ? { readAttributes: options.readTimeAttributes } : {}),
+  }).then((registered) => {
+    if (!registered) restoredArcgisZarrLayerIds.delete(id);
+  });
+  return id;
+}
+
+function trackRestoredArcgisZarrLayer(layerId: string): void {
+  restoredArcgisZarrLayerIds.add(layerId);
+  if (restoredArcgisZarrStoreUnsubscribe) return;
+  restoredArcgisZarrStoreUnsubscribe = useAppStore.subscribe((state, previous) => {
+    if (state.layers === previous.layers) return;
+    const currentIds = new Set(state.layers.map((layer) => layer.id));
+    for (const id of restoredArcgisZarrLayerIds) {
+      if (!currentIds.has(id)) restoredArcgisZarrLayerIds.delete(id);
+    }
+    if (restoredArcgisZarrLayerIds.size) return;
+    restoredArcgisZarrStoreUnsubscribe?.();
+    restoredArcgisZarrStoreUnsubscribe = null;
+  });
 }
 
 // One add at a time: see the queue comment on queueZarrAdd.
@@ -2665,9 +2807,12 @@ export async function setZarrLayerSelector(
   const instance = zarrControl?.getLayersMap().get(layerId) as
     | { setSelector?: (selector: Record<string, number | string>) => Promise<void> | void }
     | undefined;
-  if (!instance || typeof instance.setSelector !== "function") return false;
+  const native =
+    useAppStore.getState().primaryRenderer === "arcgis" &&
+    useAppStore.getState().layers.some((layer) => layer.id === layerId && layer.type === "zarr");
+  if (!native && (!instance || typeof instance.setSelector !== "function")) return false;
 
-  await instance.setSelector(selector);
+  await instance?.setSelector?.(selector);
 
   const store = useAppStore.getState();
   const layer = store.layers.find((item) => item.id === layerId);
@@ -2793,6 +2938,10 @@ const ZARR_DIMENSION_ATTEMPTS = 24;
 async function readZarrDimensionValues(
   layerId: string,
 ): Promise<Record<string, (number | string)[]> | null> {
+  if (useAppStore.getState().primaryRenderer === "arcgis") {
+    const layer = useAppStore.getState().layers.find((layer) => layer.id === layerId);
+    return layer ? readNativeZarrDimensions(layer) : null;
+  }
   for (let attempt = 0; attempt < ZARR_DIMENSION_ATTEMPTS; attempt += 1) {
     const instance = zarrControl?.getLayersMap().get(layerId) as
       | { dimensionValues?: Record<string, (number | string)[]> }
@@ -2857,15 +3006,15 @@ function registerZarrTemporalAdapter(
   layerId: string,
   url: string | undefined,
   context: ZarrTemporalContext = {},
-): void {
+): Promise<boolean> {
   const { headers, refs } = context;
   // A folder the panel opened is not something the caller could have passed
   // context for, so fall back to the reader filed under this layer's own url.
   const readAttributes =
     context.readAttributes ?? localZarrTimeAttributesReader(url ?? "") ?? undefined;
-  void (async () => {
+  return (async () => {
     const dimensionValues = await readZarrDimensionValues(layerId);
-    if (!dimensionValues) return;
+    if (!dimensionValues) return true;
     const dimension = pickTimeDimension(dimensionValues) ?? "time";
     // Either source of attributes replaces the HTTP metadata walk, which for
     // these layers would only produce a run of failed requests.
@@ -2878,19 +3027,58 @@ function registerZarrTemporalAdapter(
       ...(headers ? { headers } : {}),
       ...(attributes !== undefined ? { attributes } : {}),
     });
-    if (!axis) return;
+    if (!axis) return true;
     // The layer may have been removed while the axis was being resolved.
-    if (!zarrControl?.getLayersMap().has(layerId)) return;
+    if (!useAppStore.getState().layers.some((layer) => layer.id === layerId)) return true;
+    if (
+      useAppStore.getState().primaryRenderer !== "arcgis" &&
+      !zarrControl?.getLayersMap().has(layerId)
+    )
+      return true;
     registerTemporalLayer(layerId, {
       dimension: axis.dimension,
       getTimeValues: () => axis.values,
       setTime: async (date) => {
         const index = nearestTimeIndex(axis.values, date.getTime());
         if (index < 0) return;
-        await setZarrLayerSelector(layerId, { [axis.dimension]: index });
+        const current = useAppStore.getState().layers.find((layer) => layer.id === layerId);
+        await setZarrLayerSelector(layerId, {
+          ...((current?.source.selector as Record<string, number | string>) ?? {}),
+          [axis.dimension]: index,
+        });
       },
     });
-  })();
+    if (useAppStore.getState().primaryRenderer === "arcgis") {
+      // Native layers have no Zarr control to own their temporal cleanup.
+      arcgisZarrTemporalUnsubscribes.get(layerId)?.();
+      const unsubscribe = useAppStore.subscribe((state, previous) => {
+        if (state.layers === previous.layers) return;
+        if (state.layers.some((layer) => layer.id === layerId)) return;
+        unregisterTemporalLayer(layerId);
+        unsubscribe();
+        arcgisZarrTemporalUnsubscribes.delete(layerId);
+      });
+      arcgisZarrTemporalUnsubscribes.set(layerId, unsubscribe);
+    }
+    return true;
+  })().catch((error) => {
+    console.warn("[zarr] Could not register the time axis", error);
+    return false;
+  });
+}
+
+export function restoreArcgisZarrLayers(): void {
+  for (const layer of useAppStore.getState().layers) {
+    if (layer.type !== "zarr") continue;
+    if (restoredArcgisZarrLayerIds.has(layer.id)) continue;
+    trackRestoredArcgisZarrLayer(layer.id);
+    void registerZarrTemporalAdapter(layer.id, String(layer.source.url), {
+      headers: layer.source.headers as Record<string, string> | undefined,
+      refs: layer.source.kerchunkRefs as KerchunkRefs | undefined,
+    }).then((registered) => {
+      if (!registered) restoredArcgisZarrLayerIds.delete(layer.id);
+    });
+  }
 }
 
 // The control takes an explicit list of hex colors; the public option also
@@ -2907,6 +3095,142 @@ function resolveZarrColormap(colormap: string | string[] | undefined): string[] 
 
 export function openLidarLayerPanel(app: GeoLibreAppAPI): void {
   void openStandaloneLidarControl(app);
+}
+
+/**
+ * Stream a remote LAS/LAZ/COPC file (or an EPT `ept.json`) into the shared
+ * LiDAR control without revealing its panel, as the `?data=` deep link does.
+ * The control's `load` handler adds the store layer, so this resolves once the
+ * layer exists.
+ *
+ * @param app - The GeoLibre app API.
+ * @param url - The point cloud URL.
+ * @param options - `fit: false` keeps the camera still, for a batch the caller frames.
+ * @returns The store layer id of the loaded point cloud, or null when the LiDAR
+ *   control could not be mounted.
+ * @throws When `url` is not an HTTP(S) URL, or the point cloud fails to load.
+ */
+export async function addLidarLayerFromUrl(
+  app: GeoLibreAppAPI,
+  url: string,
+  options: { fit?: boolean } = {},
+): Promise<string | null> {
+  let protocol: string | null = null;
+  try {
+    protocol = new URL(url).protocol;
+  } catch {
+    // Reported below with the same message as a non-web scheme.
+  }
+  if (protocol !== "https:" && protocol !== "http:") {
+    throw new Error(
+      app.translate?.("addData.lidar.errorUrl", "Enter a valid HTTP or HTTPS LiDAR URL.") ??
+        "Enter a valid HTTP or HTTPS LiDAR URL.",
+    );
+  }
+  const load = async () => {
+    const opened = await openStandaloneLidarControl(app, { reveal: false });
+    if (!opened || !lidarControl) return null;
+    const info = await lidarControl.loadPointCloud(url);
+    // maplibre-gl-lidar emits `load` synchronously before loadPointCloud
+    // resolves, so the load handler has already added the store layer. Fail
+    // loudly if an upgrade breaks that, rather than hand back a dangling id.
+    if (!useAppStore.getState().layers.some((layer) => layer.id === info.id)) {
+      throw new Error(`The LiDAR control did not create a layer for ${url}.`);
+    }
+    return info.id;
+  };
+  return (options.fit ?? true) ? load() : withLidarAutoZoomSuppressed(app, load);
+}
+
+/** Safety net for {@link waitForPendingLidarRestores}: how long to wait for
+ * queued restores to settle before giving up regardless. */
+const PENDING_LIDAR_RESTORE_TIMEOUT_MS = 60_000;
+
+/** Resolves once every currently-queued {@link pendingLidarRestores} entry has
+ * been consumed by a `load` (or dropped by a `loaderror`) — i.e. once every
+ * `restoreLidarLayers` call in flight has actually finished loading its point
+ * cloud, not just issued the request. Falls back to a fixed timeout so a
+ * leaked entry (a load that never fires either event) cannot wedge a caller
+ * forever. */
+function waitForPendingLidarRestores(): Promise<void> {
+  if (pendingLidarRestores.size === 0) return Promise.resolve();
+  return new Promise((resolve) => {
+    const start = Date.now();
+    const check = () => {
+      if (
+        pendingLidarRestores.size === 0 ||
+        Date.now() - start > PENDING_LIDAR_RESTORE_TIMEOUT_MS
+      ) {
+        resolve();
+        return;
+      }
+      setTimeout(check, 250);
+    };
+    check();
+  });
+}
+
+// Nesting guard for withLidarAutoZoomSuppressed: two overlapping callers (e.g.
+// clicking "Add to map" on two different tiles before the first one settles)
+// must not stomp on each other's snapshot of the pre-suppression value. Only
+// the first caller in (depth 0 -> 1) records what autoZoom was, and only the
+// last caller out (depth 1 -> 0) restores it — see that function for the bug
+// this fixes.
+let lidarAutoZoomSuppressionDepth = 0;
+let lidarAutoZoomOriginalValue = true;
+
+/**
+ * Runs `fn` with the shared LiDAR control's `autoZoom` temporarily disabled,
+ * so a point cloud loaded through `fn` does not fly the camera to it.
+ * `autoZoom` is a constructor-only option with no public runtime setter, so
+ * this reaches into the control's private `_options` the same way
+ * maplibre-gl-lidar's own `restoreFromUrl` does internally when it needs to
+ * load several point clouds without flying to each one in turn. If a future
+ * upgrade removes that private field, the cast below quietly no-ops (runs
+ * `fn` unsuppressed) instead of throwing — see docs/maintenance.md for the
+ * other upstream internals this app already mirrors by hand.
+ *
+ * `fn` (via `restoreLidarLayers`) only awaits the request being *issued*, not
+ * the point cloud finishing loading, so this also waits for every restore
+ * queued during `fn` to actually finish before re-enabling autoZoom —
+ * otherwise a still-loading point cloud (typical for a bulk "add several
+ * tiles" action, where the earliest ones load before the loop even finishes
+ * issuing the rest) fires its `load` event, and hence its fly-to, after
+ * autoZoom was already switched back on.
+ *
+ * Calls can overlap (two "Add to map" clicks in quick succession each run
+ * this independently), so a plain snapshot/restore of `options.autoZoom`
+ * would corrupt the shared value: whichever call happened to finish last
+ * would stomp the flag with *its own* snapshot, which — if that snapshot was
+ * taken while another call had already forced it to `false` — could leave
+ * autoZoom stuck disabled for the rest of the session (or, in the opposite
+ * ordering, re-enable it while a sibling call's point cloud is still
+ * loading). The depth counter above fixes this: only the outermost call
+ * captures and restores the real original value.
+ */
+export async function withLidarAutoZoomSuppressed<T>(
+  app: GeoLibreAppAPI,
+  fn: () => Promise<T>,
+): Promise<T> {
+  await openStandaloneLidarControl(app, { reveal: false });
+  const options = (lidarControl as unknown as { _options?: { autoZoom?: boolean } } | null)
+    ?._options;
+  if (!options || !("autoZoom" in options)) return fn();
+  if (lidarAutoZoomSuppressionDepth === 0) {
+    lidarAutoZoomOriginalValue = options.autoZoom ?? true;
+  }
+  lidarAutoZoomSuppressionDepth++;
+  options.autoZoom = false;
+  try {
+    const result = await fn();
+    await waitForPendingLidarRestores();
+    return result;
+  } finally {
+    lidarAutoZoomSuppressionDepth = Math.max(0, lidarAutoZoomSuppressionDepth - 1);
+    if (lidarAutoZoomSuppressionDepth === 0) {
+      options.autoZoom = lidarAutoZoomOriginalValue;
+    }
+  }
 }
 
 export function openSplattingLayerPanel(app: GeoLibreAppAPI): void {
@@ -3033,6 +3357,22 @@ async function openStandaloneSearchControl(app: GeoLibreAppAPI): Promise<boolean
   return true;
 }
 
+/**
+ * Re-point the LiDAR measure mirror at whatever the two singletons currently
+ * are. Called from every path that mounts or tears down either control, so the
+ * mirror follows the Measure panel and the LiDAR panel being opened, closed, or
+ * rebuilt for another renderer (see `lidar-measure-mirror.ts`).
+ */
+function refreshLidarMeasureMirror(app: GeoLibreAppAPI): void {
+  syncLidarMeasureMirror({
+    // The LiDAR panel runs on both 2D engines, and the mirror only needs the
+    // source and event surface both maps share.
+    map: app.getMap?.() ?? app.getMapboxMap?.() ?? null,
+    overlay: lidarControl?.getDeckOverlay() ?? null,
+    control: measureControl,
+  });
+}
+
 async function openStandaloneMeasureControl(app: GeoLibreAppAPI): Promise<boolean> {
   const { MeasureControl: MeasureControlClass } = await getComponentsConstructors();
 
@@ -3057,6 +3397,7 @@ async function openStandaloneMeasureControl(app: GeoLibreAppAPI): Promise<boolea
     );
     makeMeasurePanelResizable(measureControl);
   }
+  refreshLidarMeasureMirror(app);
 
   setTimeout(() => {
     // Guard against a teardown that nulled measureControl between addMapControl
@@ -3358,6 +3699,11 @@ async function openStandaloneLidarControl(
   // clouds, so it passes `reveal: false` to keep the panel out of the user's
   // way; a freshly created control is hidden so it does not pop open on load.
   const reveal = options.reveal ?? true;
+  if (
+    app.getMapRenderer?.() === "arcgis" &&
+    !(await import("./arcgis-deck/control-adapter")).installArcgisDeckControls(app)
+  )
+    return false;
   const { LidarControl: LidarControlClass, LidarLayerAdapter: LidarLayerAdapterClass } =
     await getComponentsConstructors();
 
@@ -3375,6 +3721,7 @@ async function openStandaloneLidarControl(
 
   ensureMercatorProjection(app.getMap?.() ?? app.getMapboxMap?.());
   startLidarThemeSync();
+  refreshLidarMeasureMirror(app);
 
   setTimeout(() => {
     if (reveal) {
@@ -3415,9 +3762,19 @@ function isLidarRestorePending(layer: GeoLibreLayer): boolean {
  * Layers panel but renders nothing. The loaded cloud is reattached to the saved
  * layer in {@link createLidarLoadHandler}, preserving its visibility, opacity,
  * style, name, and position.
+ *
+ * Concurrent callers (e.g. two "Add to map" clicks in quick succession) must
+ * not silently drop each other's layer: if a restore is already running, this
+ * waits for it to finish and then re-runs itself, so a layer added to the
+ * store after the first run's `pending` snapshot was taken still gets picked
+ * up on the retry instead of `addTileToMap` reporting it as added while it
+ * never actually streams.
  */
 export async function restoreLidarLayers(app: GeoLibreAppAPI): Promise<void> {
-  if (lidarRestoreInFlight) return;
+  if (lidarRestoreInFlightPromise) {
+    await lidarRestoreInFlightPromise.catch(() => {});
+    return restoreLidarLayers(app);
+  }
 
   const pending = useAppStore
     .getState()
@@ -3429,8 +3786,7 @@ export async function restoreLidarLayers(app: GeoLibreAppAPI): Promise<void> {
     );
   if (pending.length === 0) return;
 
-  lidarRestoreInFlight = true;
-  try {
+  const run = (async () => {
     const opened = await openStandaloneLidarControl(app, { reveal: false });
     if (!opened || !lidarControl) return;
     // The deck.gl point-cloud overlay only renders under the Mercator
@@ -3472,8 +3828,13 @@ export async function restoreLidarLayers(app: GeoLibreAppAPI): Promise<void> {
         console.warn("[lidar] failed to restore point cloud", url, error);
       });
     }
+  })();
+
+  lidarRestoreInFlightPromise = run;
+  try {
+    await run;
   } finally {
-    lidarRestoreInFlight = false;
+    if (lidarRestoreInFlightPromise === run) lidarRestoreInFlightPromise = null;
   }
 }
 
@@ -3915,6 +4276,13 @@ function createLidarControl(
     ...LIDAR_OPTIONS,
     theme: resolveDocumentTheme(),
   });
+  if (app.getMapRenderer?.() === "arcgis") {
+    // The SDK owns terrain; do not install the plugin's MapLibre DEM source.
+    control.setTerrain = (enabled: boolean) => {
+      app.setTerrainEnabled?.(enabled);
+    };
+    control.getTerrain = () => app.isTerrainEnabled?.() ?? false;
+  }
   lidarLayerAdapter = new LidarLayerAdapterClass(control);
   const onUnload = createLidarUnloadHandler();
   const onLoad = createLidarLoadHandler();
@@ -3930,7 +4298,7 @@ function createLidarControl(
     lidarStoreUnsubscribe = null;
     stopLidarThemeSync();
     pendingLidarRestores.clear();
-    lidarRestoreInFlight = false;
+    lidarRestoreInFlightPromise = null;
     // Stopping a renderer emits unload for every streamed cloud. Preserve
     // project records during teardown so the next engine can restore them.
     control.off("unload", onUnload);
@@ -3945,6 +4313,8 @@ function createLidarControl(
       lidarControlMounted = false;
       lidarLayerAdapter = null;
     }
+    // The overlay the measure mirror was drawing into is gone with the control.
+    refreshLidarMeasureMirror(app);
   };
   control.on("collapse", () => hideLidarControl(control));
   control.on("load", handleLoad);
@@ -4575,6 +4945,7 @@ function teardownMeasureControl(app: GeoLibreAppAPI): void {
   }
   measureControl = null;
   measureControlMounted = false;
+  refreshLidarMeasureMirror(app);
   setMeasurePanelVisible(false);
 }
 
@@ -4705,7 +5076,7 @@ function teardownLidarControl(app: GeoLibreAppAPI): void {
   // Clear restore bookkeeping so a teardown mid-restore (project reload, map
   // re-init) cannot strand the in-flight guard and block later restores.
   pendingLidarRestores.clear();
-  lidarRestoreInFlight = false;
+  lidarRestoreInFlightPromise = null;
   lidarStoreUnsubscribe?.();
   lidarStoreUnsubscribe = null;
   lidarLayerAdapter?.destroy();

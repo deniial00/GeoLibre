@@ -76,6 +76,36 @@ suite.
   `e2e/blend-modes.spec.ts` asserts real pixels. Run both on a bump.
 
   See [Adding a blend mode](#adding-a-blend-mode) before extending the list.
+- **`DEFAULT_MARKER_OFFSET_Y`**
+  (`apps/geolibre-desktop/src/components/storymap/storymap-engine.ts`) mirrors the
+  `-14` px vertical offset `maplibregl.Marker` applies to its default pin.
+  `createStoryMapMarker` (also reused by Field Collection's capture marker in
+  `apps/geolibre-desktop/src/lib/field-collection-map.ts`) positions that pin by
+  hand on every engine (Mapbox, Cesium, ArcGIS, and MapLibre alike), so if a bump changes the default pin's
+  anchor or offset, story markers drift off their coordinate with no error.
+  Compare with `defaultMarker.ts`/`marker.ts` upstream and play a story on a
+  non-MapLibre renderer.
+
+### `@deck.gl/mapbox` and `@deck.gl/maplibre`
+
+`bridgeArcgisDeckControl` (`packages/plugins/src/plugins/arcgis-deck/control-adapter.ts`)
+reads each overlay's private `_props` field so ArcGIS can transfer its initial
+layers into a native `ArcgisDeckOverlay` without mounting the MapLibre control.
+The cast hides upstream changes from TypeScript. After either deck.gl package is
+bumped, run `tests/arcgis-control-adapters.test.ts` and confirm the overlay still
+exposes `_props` with the initial `DeckProps` object.
+
+### `@loaders.gl/tiles` (via `@deck.gl/geo-layers`) — tile cache cap
+
+`applyThreeDTilesTilesetMemoryLimit` (`packages/plugins/src/plugins/arcgis-i3s-tiles.ts`)
+works around `Tileset3D` trimming its tile cache against a `maximumMemoryUsage`
+field it never copies from the load options, so the cap stays at 32 MB and
+every camera move evicts the tiles just drawn (issue #2560). The same PR turned
+`memoryAdjustedScreenSpaceError` off because it ratchets the level of detail
+down once that cache fills. After bumping deck.gl or loaders.gl, run
+`tests/arcgis-i3s-tiles.test.ts`: its real-`Tileset3D` case fails if the field
+is renamed or no longer starts at 32 MB. If upstream starts honouring the
+option, the helper can go.
 
 ### `@maplibre/maplibre-gl-style-spec`
 
@@ -169,6 +199,22 @@ black — it declines the stack.
   real archive, through the real `layeradd` handler into the store, and fails if
   the id scheme moves or the selection stops reaching the handler.
 
+- **The MeasureControl's `_panel` and `_sourceId`**
+  (`packages/plugins/src/plugins/terrain-measure.ts`, via `measurePanelElement`
+  and `measureSourceId`) are private members that only the control knows: the
+  panel carries GeoLibre's Terrain (3D)/heading sections and the resize styling,
+  and the source id is how `lidar-measure-mirror.ts` finds the geometry it
+  redraws above a LiDAR point cloud (#2533). Both readers warn and fall back to
+  doing nothing on a rename, so after a bump check the console for
+  "MeasureControl: …not found" and confirm the Terrain section still appears and
+  a measured line still shows inside a point cloud.
+- **The measure paint** (`MEASURE_LINE_COLOR`/`MEASURE_LINE_WIDTH`/
+  `MEASURE_FILL_COLOR`, `packages/plugins/src/plugins/lidar-measure-mirror.ts`)
+  is passed to the control explicitly rather than left to its defaults, because
+  the deck.gl mirror has to repaint the same geometry in the same colour. Change
+  one form and change the RGBA twin beside it;
+  `tests/lidar-measure-mirror.test.ts` asserts the pair agrees.
+
 ### `maplibre-gl-basemap-control` (`packages/plugins/package.json`)
 
 `BASEMAP_PANEL_SELECTOR` / `BASEMAP_ROW_SELECTOR` / `BASEMAP_ROW_ID_ATTR`
@@ -202,6 +248,75 @@ rendered from it, not written into the copy.
 format/reader/size rules those panels share — a per-panel copy would miss this
 check, so add new browse panels against that module rather than duplicating it
 (`source-coop-api.ts` re-exports it under its own names for compatibility).
+
+### `maplibre-gl-lidar` (`packages/plugins/package.json`) — half checked by the compiler
+
+The space-effects engine raises the MapLibre canvas to `z-index: 4` so its
+starfield canvases can sit underneath. That package renders point clouds into an
+**overlaid** deck.gl canvas which it parks in the canvas container, directly
+after the map canvas, tagged `DECK_CANVAS_CLASS`
+(`maplibre-gl-lidar-canvas`). `effectsOverlayCss()`
+(`packages/plugins/src/plugins/maplibre-effects.ts`) hands that wrapper the
+canvas's own z-index. Drop the rule and the wrapper falls below the raised
+canvas, hiding the point cloud outright; drop the re-parenting upstream and the
+wrapper goes back to covering the Measure/Colorbar/Legend/HTML/Bookmark panels
+(#2530).
+
+`lidar-measure-mirror.ts` draws the Measure tool's line/polygon into that same
+overlay (`LidarControl.getDeckOverlay()`) with `depthTest: false`, the trick the
+plugin's own cross-section line uses to sit above the points. Two things there
+are not compiler checked: deck paints its layers in insertion order, so the
+mirror re-appends itself on any frame where it is no longer the overlay's last
+layer (streaming adds a chunk layer whenever the viewport pulls in new nodes),
+and the geometry is read from the MapLibre/Mapbox `geojson` source's `_data`
+field, since neither library exposes a public reader. Losing either costs only
+the mirror — the measured line goes back to being hidden inside the cloud, which
+is what #2533 was.
+
+The **class** is imported from the package rather than copied, so a rename
+fails `npm run typecheck`. Keep it that way: the package is side-effect-free, so
+the import tree-shakes to the string and does not pull deck.gl into this
+eagerly loaded plugin. The **placement** is not visible to the compiler, so
+`e2e/lidar-canvas-stacking.spec.ts` mounts the real control and asserts the
+resulting DOM order and z-indices — run it on a bump
+(`npx playwright test e2e/lidar-canvas-stacking.spec.ts --project=features`).
+
+The `?data=` LiDAR deep link leans on two more things the compiler cannot see.
+`isStreamedLidarUrl` (`apps/geolibre-desktop/src/lib/data-url.ts`) copies the
+routing at the top of `LidarControl.loadPointCloud` (an `/ept.json` suffix or a
+`.copc.` anywhere in the URL streams; anything else downloads whole) so that only
+whole downloads get the size check. If upstream changes that routing, update the
+copy, or a streamed file gets a needless size check and a downloaded one skips
+it. `addLidarLayerFromUrl` also relies on `load` firing, and adding the store
+layer, before `loadPointCloud` resolves; it throws if not.
+`tests/lidar-url-layer.test.ts` pins the GeoLibre side of both. Re-read
+`loadPointCloud` on a bump.
+
+### `maplibre-gl-raster` — stretch and gamma curves
+
+`buildContinuousColormapRgba`
+(`packages/plugins/src/plugins/raster-symbology.ts`) mirrors the render
+pipeline's value adjustments **by hand**, inverted. Value-range opacity paints
+its alpha into the injected 256-wide colormap texture, so it has to map a
+texture column back to a data value — and the renderer samples that texture
+*after* rescale, the stretch curve and gamma. The mirror therefore applies each
+curve's **inverse**, in the reverse of the renderer's order — gamma first, then
+the stretch:
+
+- gamma — renderer `pow(x, 1 / max(gamma, 0.0001))`, mirror
+  `pow(t, max(gamma, 0.0001))`
+- `sqrt` stretch — renderer `sqrt(x)`, mirror `t * t`
+- `log` stretch — renderer `log(1 + 99x) / log(1 + 99)`, mirror
+  `(100^t - 1) / 99`
+
+None of it is exported: the curves live in the package's `pushAdjustments` /
+shader modules, and the strength constant (99) is a hard-coded prop. If
+upstream reorders the pipeline, changes a curve, or retunes the log strength,
+nothing fails to build — opacity thresholds just drift off the values the user
+typed, and only under a non-default stretch or gamma. On a bump, re-read that
+package's `pushAdjustments` for the forward curves and their order (its own
+`inverseStretch` helper, used for the histogram ticks, is a second copy of the
+two stretch inverses above) and run `tests/raster-symbology.test.ts`.
 
 ### `maplibre-gl-raster` — checked by the compiler
 
@@ -360,7 +475,12 @@ manual check, not a Dependabot event:
   every module the engine loads. `tests/arcgis-renderer.test.ts` only checks the
   assembly against fakes; probe the real CDN (`curl -sI` each URL returns 200)
   and mount a pane in a browser — a moved module rejects the whole load and the
-  pane shows the error banner.
+  pane shows the error banner. Also check the deck adapter's lazy imports in
+  `packages/plugins/src/plugins/arcgis-deck/overlay.ts`:
+  `layers/Layer`, `views/2d/layers/BaseLayerViewGL2D`, and
+  `views/3d/webgl/RenderNode`. Mount a deck.gl layer in both a 2D MapView and a
+  local SceneView after a version bump; those imports are outside the engine's
+  module registry.
 - **The legacy widgets.** `widgets/Zoom`, `Compass`, `ScaleBar`, `Fullscreen`
   and `Locate` back the built-in controls. Esri deprecated them in 4.32 in
   favour of web components and still ships them in 5.x with a console warning

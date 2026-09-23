@@ -11,6 +11,7 @@ import {
 } from "../constants";
 import {
   fetchWmsCapabilities,
+  isServiceFormUrl,
   normalizeWmsVersion,
   serviceRequestErrorMessage,
   wmsVersionFromEndpoint,
@@ -18,6 +19,7 @@ import {
 } from "../helpers";
 import { routeWmsLayerThroughNativeProtocol } from "../../../../lib/xyz-url";
 import { isHttpWmsUrl } from "../../../../lib/native-wms-url";
+import { isTauri } from "../../../../lib/tauri-io";
 import { ServiceLibrarySection } from "../ServiceLibrarySection";
 import { serviceFieldBoolean, serviceFieldString, type ServiceFields } from "../service-library";
 import { AddDataSourceForm, SampleDataSelect, useAddDataSource } from "../shared";
@@ -127,7 +129,10 @@ export function WmsSource({
 
   const handleRetrieveLayers = async () => {
     const endpoint = wmsEndpoint.trim();
-    if (!isHttpWmsUrl(endpoint)) {
+    // Relative endpoints are a web-origin deployment feature: in the desktop
+    // app they would resolve against the app origin, and the native HTTP path
+    // needs an absolute URL, so require http(s) there with the translated error.
+    if (!isServiceFormUrl(endpoint) || (isTauri() && !isHttpWmsUrl(endpoint))) {
       setRetrieveError(t("addData.wms.errorUrl"));
       return;
     }
@@ -208,7 +213,9 @@ export function WmsSource({
 
   const handleSubmit = source.runSubmit(() => {
     const name = source.layerName.trim() || t("addData.wms.defaultName");
-    if (!isHttpWmsUrl(wmsEndpoint.trim())) throw new Error(t("addData.wms.errorUrl"));
+    if (!isServiceFormUrl(wmsEndpoint.trim()) || (isTauri() && !isHttpWmsUrl(wmsEndpoint.trim()))) {
+      throw new Error(t("addData.wms.errorUrl"));
+    }
     if (!wmsLayers.trim()) {
       throw new Error(t("addData.wms.errorLayers"));
     }

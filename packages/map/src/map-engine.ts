@@ -57,8 +57,8 @@ export interface MapEngine {
 
   // ------------------------------------------------------------------- camera
 
-  /** Place the camera at `view` immediately, without animation. */
-  applyView(view: MapViewState): void;
+  /** Place the camera at `view` without animation, resolving after asynchronous engines settle. */
+  applyView(view: MapViewState): void | Promise<void>;
   /** Animate the camera to `view` with a short ease. */
   easeToView(view: MapViewState): void;
   /** The camera's current position, in the store's engine-neutral shape. */
@@ -166,7 +166,17 @@ export interface MapEngine {
   getRenderSurface(): MapRenderSurface | null;
   getRenderStatus(): { pending: string[]; errors: string[] };
   captureImage(): Promise<Blob>;
-  onCameraIdle(listener: () => void): () => void;
+  /** Subscribe to primary-button map clicks in geographic coordinates. */
+  onMapClick(listener: (lngLat: [number, number]) => void): () => void;
+  /** Whether the camera is currently moving or animating. */
+  isCameraMoving(): boolean;
+  /** Subscribe to camera changes while the view is moving. */
+  onCameraMove(listener: () => void): () => void;
+  /**
+   * Subscribe to the camera settling. `storyCamera` marks a settle that ends a
+   * story chapter or chapter-preview move, which is scripted, not navigation.
+   */
+  onCameraIdle(listener: (event?: CameraIdleEvent) => void): () => void;
   stopCamera(): void;
   suspendNavigation(): () => void;
 
@@ -270,6 +280,34 @@ export interface MapEngineCapabilities {
    * built-in on-map controls have somewhere to mount.
    */
   readonly domControls: boolean;
+  /**
+   * Straight screen-space geometry pinned through
+   * {@link MapRenderSurface.project} tracks the map closely enough to draw an
+   * overlay with, so a panel renders its own SVG outline instead of asking for
+   * a native one through {@link MapEngine.showExtent}.
+   *
+   * Both 2D engines qualify — including in globe projection, where a
+   * four-corner box is already the accepted approximation — and the SVG is what
+   * the extract panels want, because it sits above the interleaved deck.gl
+   * raster overlay that a style layer would end up underneath. The globe
+   * engines do not: a box wide enough to wrap past the limb has corners that
+   * project to nothing, so they draw the extent natively instead.
+   */
+  readonly screenOverlays: boolean;
+  /**
+   * The engine draws flat when the project asks for a `mercator` projection, so
+   * globe-only features read `preferences.map.projection` to decide whether
+   * they apply. Without it the engine is a globe whatever that preference says,
+   * because it has no flat mode the preference maps onto.
+   */
+  readonly flatProjection: boolean;
+  /**
+   * {@link MapEngine.setTerrainCogSource} can install a custom DEM — a COG URL,
+   * a local file, or a raster layer already on the map — as the elevation
+   * source. Without it the engine only has its own default terrain, so the
+   * Terrain source controls are hidden rather than left to fail quietly.
+   */
+  readonly terrainSource: boolean;
 }
 
 /**
@@ -290,6 +328,9 @@ export const MAPLIBRE_CAPABILITIES: MapEngineCapabilities = Object.freeze({
   picking: true,
   onMapDrawing: true,
   domControls: true,
+  screenOverlays: true,
+  flatProjection: true,
+  terrainSource: true,
 });
 
 /** One feature returned by {@link MapEngine.identifyFeatures}. */
@@ -326,6 +367,11 @@ export interface ManualPlacementOptions {
  * reports them: `west < east` always, and a span across the antimeridian
  * carries `east > 180` instead of inverting the pair.
  */
+/** Details of a camera-idle notification; engines that can't tell omit it. */
+export interface CameraIdleEvent {
+  storyCamera: boolean;
+}
+
 export type MapExtent = [west: number, south: number, east: number, north: number];
 
 export interface MapRenderSurface {
@@ -333,7 +379,8 @@ export interface MapRenderSurface {
   getContainer(): HTMLElement;
   getBearing(): number;
   project(location: [number, number]): { x: number; y: number };
-  unproject(point: [number, number]): { lng: number; lat: number };
+  /** Convert a canvas point to degrees, or return `null` when it has no map location. */
+  unproject(point: [number, number]): { lng: number; lat: number } | null;
   redraw(): void;
 }
 

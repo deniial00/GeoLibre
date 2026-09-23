@@ -10,9 +10,11 @@
  *    differentiator over plain OGC/STAC (fuzzy + optional semantic ranking).
  *  - **Vector tiles** — signed XYZ MVT at
  *    `/api/tiles/{table_path}/{z}/{x}/{y}.pbf?sig&exp&scope`. The `{table_path}`
- *    is `data.{scope}` and doubles as the MVT source-layer name. Tiles need a
- *    short-lived HMAC token from `/api/tiles/token/{dataset_id}/` — so a static
- *    URL is not enough; the caller must re-mint before `expires_in` elapses.
+ *    is `data.{table}` and doubles as the MVT source-layer name, where `{table}`
+ *    is the scope minus any `:{partition}` suffix (see {@link tileTableName}).
+ *    Tiles need a short-lived HMAC token from `/api/tiles/token/{dataset_id}/`
+ *    — so a static URL is not enough; the caller must re-mint before
+ *    `expires_in` elapses.
  *  - **OGC API Features** — `GET /api/collections/{id}/items` is a plain
  *    (paginated) GeoJSON `FeatureCollection`, the fallback for a full-feature
  *    load.
@@ -69,7 +71,11 @@ export interface GeoLensTileToken {
   sig: string;
   /** Absolute expiry, unix seconds. */
   exp: number;
-  /** Table name without the `data.` prefix; also the tile scope param. */
+  /**
+   * The tile `scope` param, verbatim. It is the table name without the `data.`
+   * prefix, and since GeoLens 1.20 may carry a `:{partition}` suffix that must
+   * not reach the URL path (see {@link tileTableName}).
+   */
   scope: string;
   /** Seconds until `exp` at mint time — schedule the refresh off this. */
   expiresIn: number;
@@ -79,7 +85,7 @@ export interface GeoLensTileToken {
 export interface GeoLensVectorTiles {
   /** `{z}/{x}/{y}` MVT template with the signature query appended. */
   tiles: string;
-  /** MapLibre `source-layer`, i.e. `data.{scope}`. */
+  /** MapLibre `source-layer`, i.e. `data.{table}` (the scope without a partition). */
   sourceLayer: string;
 }
 
@@ -175,15 +181,39 @@ export function createGeoLensHostFetch(
 
 /** Only http(s) URLs may ever reach the map or a token mint. */
 const HTTP_URL_RE = /^https?:\/\//i;
+const EXPLICIT_SCHEME_RE = /^[a-z][a-z0-9+.-]*:\/\//i;
+
+function isLoopbackHostname(hostname: string): boolean {
+  const normalized = hostname.toLowerCase();
+  return (
+    normalized === "localhost" ||
+    normalized === "127.0.0.1" ||
+    normalized === "::1" ||
+    normalized === "[::1]"
+  );
+}
 
 /**
  * Normalize a user-entered server URL: trim, default the scheme to https, and
- * drop a trailing slash so path joins never double up. Returns "" for blank.
+ * drop a trailing slash so path joins never double up. Remote servers must use
+ * HTTPS; HTTP is accepted only for loopback development. Returns "" for blank
+ * or unsafe/invalid URLs.
  */
 export function normalizeBaseUrl(raw: string): string {
   const trimmed = (raw ?? "").trim();
   if (!trimmed) return "";
-  const withScheme = HTTP_URL_RE.test(trimmed) ? trimmed : `https://${trimmed}`;
+  const withScheme = EXPLICIT_SCHEME_RE.test(trimmed) ? trimmed : `https://${trimmed}`;
+  try {
+    const parsed = new URL(withScheme);
+    if (
+      parsed.protocol !== "https:" &&
+      !(parsed.protocol === "http:" && isLoopbackHostname(parsed.hostname))
+    ) {
+      return "";
+    }
+  } catch {
+    return "";
+  }
   return withScheme.replace(/\/+$/, "");
 }
 
@@ -399,16 +429,38 @@ export async function mintTileToken(
 }
 
 /**
+ * Reduce a tile token's `scope` to the table name that belongs in the URL path.
+ *
+ * GeoLens 1.20 started partitioning dataset tables and mints scopes of the form
+ * `{table}:{partition}` (e.g. `nyc_subway_lines_mta:p0`). The partition selector
+ * belongs in the `scope` query parameter only: the path segment is a real
+ * PostgreSQL identifier, and a `:` in it makes the tile service reject the
+ * request with `400 Invalid table name`. The MVT layer the server emits is named
+ * after the stripped table too, so the source-layer has to match.
+ *
+ * A pre-1.20 scope has no colon and passes through unchanged.
+ *
+ * @param scope - The `scope` value from a {@link GeoLensTileToken}.
+ * @returns The table name without any partition suffix.
+ */
+export function tileTableName(scope: string): string {
+  const colon = scope.indexOf(":");
+  return colon === -1 ? scope : scope.slice(0, colon);
+}
+
+/**
  * Build the signed `{z}/{x}/{y}` MVT template and its source-layer from a token.
  * The `{z}/{x}/{y}` braces are MapLibre placeholders and stay literal; only the
- * query values are encoded.
+ * query values are encoded. The path carries the bare table name (see
+ * {@link tileTableName}) while `scope` keeps the token's value verbatim, since
+ * that is what the signature was minted over.
  */
 export function vectorTileTemplate(
   options: GeoLensClientOptions,
   token: GeoLensTileToken,
   columns?: Iterable<string>,
 ): GeoLensVectorTiles {
-  const table = `data.${token.scope}`;
+  const table = `data.${tileTableName(token.scope)}`;
   const params = new URLSearchParams({
     sig: token.sig,
     exp: String(token.exp),

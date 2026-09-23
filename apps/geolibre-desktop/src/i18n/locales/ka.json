@@ -22,6 +22,7 @@
     "noMatches": "დამთხვევა არ არის.",
     "addFailed": "ამ მონაცემთა წყაროს დამატება ვერ მოხერხდა.",
     "builtinBadge": "ჩაშენებული",
+    "configBadge": "კონფიგ",
     "newConnection": "ახალი {{kind}} კავშირი",
     "loadingTables": "ცხრილები იტვირთება…",
     "files": "ფაილები",
@@ -359,6 +360,10 @@
       "kml": {
         "label": "KML / KMZ",
         "description": "ჩატვირთეთ KML ან KMZ გლობუსზე ორიგინალური სტილებით, გადაფარვებითა და ქსელური ბმულებით."
+      },
+      "wcs": {
+        "description": "ჩატვირთეთ რიცხვითი GeoTIFF-ის ქვესიმრავლე WCS 1.0.0 სერვისიდან.",
+        "label": "WCS შრე"
       }
     },
     "shared": {
@@ -398,6 +403,7 @@
       "loadAria": "შენახული სერვისის ჩატვირთვა",
       "loadPlaceholder": "შენახული სერვისის ჩატვირთვა…",
       "builtin": "{{name}} (ჩაშენებული)",
+      "config": "{{name}} (კონფიგ)",
       "deleteAria": "შენახული სერვისის წაშლა",
       "empty": "ჯერ არ არის შენახული სერვისები — შეავსეთ ფორმა და აირჩიეთ „მიმდინარის შენახვა“.",
       "name": "სახელი",
@@ -423,7 +429,11 @@
       "kindImagery": "სურათები",
       "altitudeOffset": "სიმაღლის წანაცვლება (მ)",
       "quickPicks": "სწრაფი არჩევანი",
+      "quickPicksPlaceholder": "აირჩიეთ აქტივი…",
+      "quickPicksGlobal": "ხელმისაწვდომია ყველა ion ანგარიშზე",
+      "quickPicksDepot": "Asset Depot-ის ნიმუშები",
       "hint": "აქტივების id-ები იხილეთ „My Assets“ განყოფილებაში ion.cesium.com-ზე. აქტივი გაზიარებული უნდა იყოს პარამეტრებში მითითებულ token-თან.",
+      "depotHint": "Asset Depot-ის ნიმუშები გადაიცემა მხოლოდ მას შემდეგ, რაც მათ დაამატებთ თქვენს ანგარიშზე ion.cesium.com → Asset Depot.",
       "errorAssetId": "შეიყვანეთ Cesium Ion-ის აქტივის id (დადებითი მთელი რიცხვი).",
       "errorAltitude": "შეიყვანეთ სიმაღლის წანაცვლება რიცხვად, მეტრებში.",
       "tokenMissing": "Cesium Ion-ის token არ არის მითითებული. დაამატეთ იგი პარამეტრები → გარემოს ცვლადები (VITE_CESIUM_TOKEN) განყოფილებაში, წინააღმდეგ შემთხვევაში აქტივი ვერ ჩაიტვირთება."
@@ -508,6 +518,7 @@
       "selectType_one": "აირჩიეთ {{count}} ობიექტის ტიპიდან",
       "selectType_other": "აირჩიეთ {{count}} ობიექტის ტიპიდან",
       "noTypesFound": "ამ სერვისისთვის ობიექტის ტიპები ვერ მოიძებნა.",
+      "errorNoFeatures": "ობიექტის ამ ტიპმა არცერთი ობიექტი არ დააბრუნა.",
       "retrieveError": "ამ სერვისიდან ობიექტის ტიპების მიღება ვერ მოხერხდა."
     },
     "wmts": {
@@ -966,7 +977,42 @@
       "modelTooLarge": "ეს მოდელი აჭარბებს პროექტში ჩასაშენებელ {{limit}} მბ ლიმიტს. განათავსეთ იგი სერვერზე და დაამატეთ URL-ით.",
       "modelFileError": "ამ მოდელის წაკითხვა ვერ მოხერხდა. აირჩიეთ ვალიდური glTF 2.0 ან GLB ფაილი."
     },
-    "nonGeographicCoordinates": "{{names}}-ის კოორდინატები არ არის გრძედი/განედი, ამიტომ რუკაზე არაფერი დაიხატება. CRS არასწორადაა მითითებული — გადააპროექტეთ მონაცემები (ან შეასწორეთ .prj) და ხელახლა ჩატვირთეთ."
+    "nonGeographicCoordinates": "{{names}}-ის კოორდინატები არ არის გრძედი/განედი, ამიტომ რუკაზე არაფერი დაიხატება. CRS არასწორადაა მითითებული — გადააპროექტეთ მონაცემები (ან შეასწორეთ .prj) და ხელახლა ჩატვირთეთ.",
+    "pmtiles": {
+      "errorUrl": "შეიყვანეთ PMTiles-ის სწორი HTTP ან HTTPS URL.",
+      "errorMlt": "ArcGIS საჭიროებს MVT ვექტორულ ფილებს და არა MLT-ს."
+    },
+    "lidar": {
+      "errorUrl": "შეიყვანეთ LiDAR-ის სწორი HTTP ან HTTPS URL."
+    },
+    "zarr": {
+      "errorUrl": "შეიყვანეთ Zarr-ის სწორი HTTP ან HTTPS URL.",
+      "errorColorLimits": "ფერის მაქსიმალური ზღვარი მინიმალურზე მეტი უნდა იყოს."
+    },
+    "raster": {
+      "errorSource": "შეიყვანეთ GeoTIFF URL ან აირჩიეთ ფაილი."
+    },
+    "wcs": {
+      "coverage": "დაფარვა",
+      "retrieve": "დაფარვების მიღება",
+      "select": "აირჩიეთ დაფარვა",
+      "extent": "დაფარვის საზღვრების გამოყენება",
+      "width": "სიგანე (პიქსელი)",
+      "height": "სიმაღლე (პიქსელი)",
+      "hint": "ჩამოტვირთავს GeoTIFF-ს EPSG:4326-ში არჩეული პიქსელური ზომებით. მნიშვნელობები შეიძლება გადაითვალოს. მონაცემების შესანარჩუნებლად შეინახეთ რასტრი.",
+      "errors": {
+        "xml": "სერვისმა არასწორი XML დააბრუნა.",
+        "version": "ამ წყაროს სჭირდება WCS 1.0.0. სერვისმა მხარდაუჭერელი პასუხი დააბრუნა.",
+        "empty": "შესაბამისი დაფარვები ხელმისაწვდომი არ არის.",
+        "format": "დაფარვა GeoTIFF ფორმატში გამოტანას არ აცხადებს.",
+        "crs": "დაფარვას უნდა ჰქონდეს EPSG:4326-ის მხარდაჭერა მოთხოვნებისა და გამოტანისთვის.",
+        "size": "აირჩიეთ ზომები 1-დან 4096 პიქსელამდე. ჩამოტვირთვის ზღვარია 128 MB.",
+        "metadata": "სერვისმა დააბრუნა იმაზე მეტი მეტამონაცემი, ვიდრე GeoLibre-ს ჩატვირთვა შეუძლია. მეტამონაცემების პასუხის ზღვარია 32 MB.",
+        "response": "სერვისმა სწორი GeoTIFF არ დააბრუნა.",
+        "bounds": "შეიყვანეთ სწორი მართკუთხედი: დასავლეთი/აღმოსავლეთი -180-დან 180-მდე, სამხრეთი/ჩრდილოეთი -90-დან 90-მდე, სადაც დასავლეთი < აღმოსავლეთი და სამხრეთი < ჩრდილოეთი.",
+        "url": "შეიყვანეთ WCS სერვისის URL."
+      }
+    }
   },
   "offline": {
     "title": "ოფლაინ ტერიტორიის ჩამოტვირთვა",
@@ -1931,7 +1977,7 @@
     "only3d": "მხოლოდ 3D",
     "noMapbox": "Mapbox-ის გარეშე",
     "noArcgis": "ArcGIS-ის გარეშე",
-    "cesiumTokenHint": "რელიეფისა და Ion-ის სურათებისთვის დაამატეთ Cesium Ion-ის token პარამეტრებში"
+    "cesiumTokenHint": "რელიეფისა და Ion-ის სურათებისთვის დაამატეთ Cesium Ion-ის token <settingsLink>პარამეტრები → გარემოს ცვლადები</settingsLink> განყოფილებაში"
   },
   "renderer": {
     "basemap": "საბაზისო რუკა",
@@ -1941,6 +1987,7 @@
     "layerCesiumOnly": "ისახება მხოლოდ 3D გლობუსზე",
     "layerMapboxUnsupported": "Mapbox-ის ძრავით არ ისახება",
     "layerArcgisUnsupported": "ArcGIS-ის ძრავით არ ისახება",
+    "layerArcgisViewUnsupported": "ArcGIS-ის ამ ხედში არ ისახება",
     "resetView": "ხედის საწყისზე დაბრუნება",
     "scene3D": "3D გლობუსი",
     "scene2D": "2D რუკა",
@@ -2320,6 +2367,55 @@
       }
     }
   },
+  "panel": {
+    "godsEyeView": {
+      "description": "დროის მქონე ცოცხალი დედამიწის მოვლენები საჯარო მონაცემთა არხებიდან.",
+      "globeOnly": "ცოცხალი მონაცემები Cesium-ის გლობუსზე გამოისახება. სანახავად გადადით 3D გლობუსზე.",
+      "groups": {
+        "movement": "მოძრაობა",
+        "cameras": "კამერები",
+        "infrastructure": "ინფრასტრუქტურა",
+        "events": "მოვლენები",
+        "utilities": "ხელსაწყოები"
+      },
+      "earthquakes": "მიწისძვრები",
+      "spaceMissions": "კოსმოსური მისიები (30 დღე)",
+      "satellites": "თანამგზავრები",
+      "flights": "ფრენები რეალურ დროში",
+      "militaryFlights": "სამხედრო ფრენები",
+      "bikeShare": "ველოსიპედების გაზიარება",
+      "transit": "საზოგადოებრივი ტრანსპორტი რეალურ დროში",
+      "streetTraffic": "სიმულირებული საგზაო მოძრაობა",
+      "mappedAlpr": "რუკაზე დატანილი სანომრე ნიშნების კამერები",
+      "cctv": "საზოგადოებრივი სათვალთვალო კამერები",
+      "cctvPopup": {
+        "liveSnapshot": "პირდაპირი სურათი",
+        "provider": "მომწოდებელი",
+        "attribution": "ატრიბუცია",
+        "privacy": "კონფიდენციალურობა"
+      },
+      "radio": "რადიოსადგურები",
+      "datacenters": "მონაცემთა ცენტრები",
+      "dams": "კაშხლები",
+      "cables": "წყალქვეშა კაბელები",
+      "osmInfrastructure": "OSM ინფრასტრუქტურა",
+      "loading": "ახლდება…",
+      "updateFailed": "განახლება ვერ მოხერხდა",
+      "noneInView": "ამ შრისთვის მიმდინარე ხედში ობიექტები არ მოიძებნა.",
+      "never": "არასდროს",
+      "lastUpdated": "ბოლო განახლება: {{time}}",
+      "speed": "სიჩქარე",
+      "speedRealTime": "რეალური დრო (1×)",
+      "speedMultiple": "{{factor}}×",
+      "denseSatellites": "თანამგზავრების მკვრივი კატალოგი",
+      "denseLoading": "DENSE ···",
+      "denseFailed": "DENSE !",
+      "denseCount": "DENSE · {{count}}",
+      "dense": "DENSE",
+      "denseError": "Starlink-ის კატალოგი ვერ ჩაიტვირთა: {{error}}. ხელახლა საცდელად აირჩიეთ.",
+      "denseDescription": "აჩვენეთ Starlink-ის სრული თანავარსკვლავედი მსუბუქი წერტილების სახით (წარწერებისა და ცხრილის მწკრივების გარეშე)."
+    }
+  },
   "toolbar": {
     "menu": {
       "project": "პროექტი",
@@ -2561,7 +2657,8 @@
       "czml": "CZML დინამიკური 3D სცენა",
       "gltfModel": "3D მოდელი (glTF)",
       "postgres": "PostgreSQL შრე",
-      "iceberg": "Apache Iceberg შრე"
+      "iceberg": "Apache Iceberg შრე",
+      "wcs": "WCS შრე"
     },
     "conversion": {
       "vectorToVector": "ვექტორიდან ვექტორში",
@@ -3029,6 +3126,8 @@
       "maplibre-gl-esri-wayback": "ისტორიული სურათები",
       "maplibre-gl-openaerialmap": "OpenAerialMap",
       "maplibre-gl-arcgis-hub": "ArcGIS Hub",
+      "geolibre-osm-downloader": "OSM ჩამომტვირთველი",
+      "geolibre-ign-lidar-hd": "IGN LiDAR HD Downloader",
       "geolibre-stac-catalogs": "STAC კატალოგები",
       "geolibre-planet-open-data": "Planet-ის ღია მონაცემები",
       "maplibre-gl-source-coop": "Source Cooperative",
@@ -3040,6 +3139,7 @@
       "maplibre-gl-huggingface": "Hugging Face",
       "carto-light": "Carto Light ბაზური რუკა",
       "geolibre-flight-simulator": "ფრენის სიმულატორი",
+      "gods-eye-view": "ღვთის ხედვა",
       "geolibre-route-animation": "მარშრუტის ანიმაცია",
       "geolibre-sun": "მზის სიმულაცია",
       "maplibre-atmosphere-effects": "ატმოსფერული ეფექტები",
@@ -4598,6 +4698,10 @@
       "errorStartSidecar": "GeoLibre-ის sidecar-ის გაშვება ვერ მოხერხდა.",
       "errorStopSidecar": "GeoLibre-ის sidecar-ის გაჩერება ვერ მოხერხდა.",
       "noToolsFound": "ხელსაწყოები ვერ მოიძებნა.",
+      "searchToolsByMeaning": "ხელსაწყოების ძიება ან ამოცანის აღწერა",
+      "searchingByMeaning": "კატალოგის ძიება მნიშვნელობით",
+      "bestMatches": "საუკეთესო შესატყვისები",
+      "otherMatches": "სხვა შესატყვისები",
       "noParameters": "ამ ხელსაწყოს პარამეტრები არ აქვს.",
       "noOutput": "შედეგი ჯერ არ არის.",
       "enabled": "ჩართული",
@@ -7055,6 +7159,11 @@
       "invalidExpression": "არასწორი გამოსახულება",
       "openBuilder": "გამოსახულების კონსტრუქტორის გახსნა",
       "showFeatureId": "ობიექტის იდენტიფიკატორის სტრიქონის ჩვენება",
+      "maxWidth": "ამომხტომი ფანჯრის სიგანე (პქს)",
+      "maxWidthPlaceholder": "ნაგულისხმევი",
+      "imageHeight": "სურათის სიმაღლე (პქს)",
+      "imageHeightPlaceholder": "ნაგულისხმევი",
+      "sizeHint": "დატოვეთ ცარიელი ნაგულისხმევი მნიშვნელობისთვის. სურათი ინარჩუნებს პროპორციებს, ამიტომ ფოტო დამატებით სიმაღლეს მხოლოდ მაშინ გამოიყენებს, როცა ამომხტომ ფანჯარას გააფართოებთ.",
       "fields": "ველები",
       "allFields": "ველები არჩეული არ არის, ამიტომ ჩანს ყველა ხილული ველი თავად მონაცემების თანმიმდევრობით.",
       "addField": "ველის დამატება…",
@@ -7423,6 +7532,7 @@
     "viewportStretchNoRange": "ხედის მნიშვნელობები დიაპაზონს არ განსაზღვრავს.",
     "viewportStretchMoved": "რუკა გადაადგილდა წაკითხვის დასრულებამდე. გამოიყენეთ თავიდან.",
     "index": "ინდექსი",
+    "opacityClasses": "გაუმჭვირვალობის კლასები",
     "classifyToggle": "დისკრეტულ კლასებად დაყოფა",
     "method": "მეთოდი",
     "methodEqualInterval": "თანაბარი ინტერვალი",
@@ -7984,5 +8094,77 @@
     "catalogHuc12pp": "HUC12 ჩამონადენის წერტილები",
     "catalogNmwdiSt": "ნიუ-მექსიკოს წყლის პუნქტები",
     "catalogFlowlines": "NHDPlus ნაკადის ხაზები"
+  },
+  "plugin": {
+    "3d-tiles": {
+      "arcgisSourceUnsupported": "ArcGIS-ის ამ ხედში გამოიყენეთ 3D Tiles-ის tileset.json URL. Google Photorealistic და I3S ფილებისთვის საჭიროა სხვა რენდერის ძრავა.",
+      "globeGoogleKeyRequired": "გლობუსზე Google Photorealistic 3D Tiles-ის ჩასატვირთად საჭიროა Google Maps API-ის გასაღები პარამეტრებში."
+    },
+    "geolibre-osm-downloader": {
+      "title": "OSM ჩამოტვირთვა",
+      "hint": "OpenStreetMap ობიექტების ჩამოტვირთვა მიმდინარე რუკის არეალიდან საჯარო Overpass API-ს მეშვეობით.",
+      "attribution": "მონაცემები © OpenStreetMap მონაწილეები, ხელმისაწვდომია ODbL-ის ფარგლებში.",
+      "featureType": "ობიექტის ტიპი",
+      "presetBuildings": "შენობები",
+      "presetRoads": "გზები",
+      "presetAmenities": "სერვისები",
+      "presetWaterways": "წყლის ობიექტები",
+      "presetLanduse": "მიწის გამოყენება",
+      "presetCustom": "მორგებული ტეგი",
+      "presetAll": "ყველა მონიშნული ობიექტი",
+      "tagKey": "ტეგის გასაღები",
+      "tagValue": "ტეგის მნიშვნელობა",
+      "tagKeyPlaceholder": "მაგ. shop",
+      "tagValuePlaceholder": "არასავალდებულო, მაგ. bakery",
+      "west": "დასავლეთი",
+      "south": "სამხრეთი",
+      "east": "აღმოსავლეთი",
+      "north": "ჩრდილოეთი",
+      "useMapExtent": "რუკის არეალის გამოყენება",
+      "download": "OSM მონაცემების ჩამოტვირთვა",
+      "ready": "აირჩიეთ არეალი და ობიექტის ტიპი.",
+      "exportGeoJson": "GeoJSON-ის შენახვა",
+      "mapUnavailable": "რუკის არეალი ჯერ არ არის ხელმისაწვდომი.",
+      "extentApplied": "რუკის არეალი გამოყენებულია.",
+      "downloading": "OpenStreetMap-დან ჩამოტვირთვა…",
+      "noFeatures": "ამ არეალში შესაბამისი ობიექტები ვერ მოიძებნა.",
+      "error": "OSM მონაცემების ჩამოტვირთვა ვერ მოხერხდა: {{message}}",
+      "added": "{{count}} ობიექტი დაემატა რუკას."
+    },
+    "geolibre-ign-lidar-hd": {
+      "title": "IGN LiDAR HD",
+      "hint": "მოძებნეთ IGN LiDAR HD ფილების დაფარვა მიმდინარე რუკის არეალისთვის, დაამატეთ ფილები რუკას წერტილოვანი ღრუბლების სახით, ან ჩამოტვირთეთ მათი COPC LAZ ფაილები IGN-ის სერვერებიდან.",
+      "attribution": "მონაცემები © IGN — LiDAR HD, გამოქვეყნებულია Licence Ouverte 2.0-ის ფარგლებში.",
+      "west": "დასავლეთი",
+      "south": "სამხრეთი",
+      "east": "აღმოსავლეთი",
+      "north": "ჩრდილოეთი",
+      "useMapExtent": "რუკის არეალის გამოყენება",
+      "search": "ფილების ძებნა",
+      "addToMap": "რუკაზე დამატება",
+      "download": "ჩამოტვირთვა",
+      "ready": "აირჩიეთ არეალი და მოძებნეთ LiDAR HD ფილები.",
+      "mapUnavailable": "რუკის არეალი ჯერ არ არის ხელმისაწვდომი.",
+      "extentApplied": "რუკის არეალი გამოყენებულია.",
+      "searching": "მიმდინარეობს IGN LiDAR HD ფილების ძებნა…",
+      "noTiles": "ამ არეალში LiDAR HD ფილები ვერ მოიძებნა.",
+      "noDownload": "წერტილოვანი ღრუბელი გამოქვეყნებული არ არის",
+      "layerName": "IGN LiDAR HD ფილები",
+      "found": "მოიძებნა {{count}} ფილი.",
+      "foundTruncated": "ნაჩვენებია პირველი {{count}} ფილი {{matched}}-დან. დანარჩენის სანახავად შეავიწროვეთ საძიებო არეალი.",
+      "addedToMap": "{{name}} დაემატა რუკას.",
+      "alreadyOnMap": "{{name}} უკვე არის რუკაზე.",
+      "unsupportedRenderer": "წერტილოვან ღრუბლებს სჭირდება MapLibre ან Mapbox რენდერერი.",
+      "addError": "{{name}}-ის რუკაზე დამატება ვერ მოხერხდა: {{message}}",
+      "error": "IGN LiDAR HD ფილების ძებნა ვერ მოხერხდა: {{message}}",
+      "selectAll": "ყველას მონიშვნა",
+      "selectTile": "{{name}}-ის მონიშვნა",
+      "addSelectedToMap": "მონიშნულის რუკაზე დამატება",
+      "addSelectedToMapCount": "მონიშნული {{count}}-ის რუკაზე დამატება",
+      "addingSelected": "მიმდინარეობს {{count}} ფილის რუკაზე დამატება…",
+      "addedSelectedCount": "{{count}} ფილი დაემატა რუკას.",
+      "alreadyOnMapCountPlural": "{{count}} ფილი უკვე იყო რუკაზე.",
+      "addSelectedFailedCount": "{{count}} ფილის დამატება ვერ მოხერხდა."
+    }
   }
 }

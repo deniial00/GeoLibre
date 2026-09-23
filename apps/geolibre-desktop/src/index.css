@@ -1859,6 +1859,25 @@ body,
   color-scheme: dark;
 }
 
+/* The God's Eye View panel is plain DOM like the graticule panel above, so
+   theme its native speed select (and its dropdown popup) from the tokens. */
+.geolibre-gods-eye-view-panel select {
+  background: hsl(var(--background));
+  border: 1px solid hsl(var(--border));
+  border-radius: 4px;
+  color: hsl(var(--foreground));
+  padding: 2px 4px;
+}
+
+.geolibre-gods-eye-view-panel select option {
+  background: hsl(var(--background));
+  color: hsl(var(--foreground));
+}
+
+.dark .geolibre-gods-eye-view-panel select {
+  color-scheme: dark;
+}
+
 /* The NLDI panel uses native selects. Theme their option popups explicitly so
    dropdown text remains visible when the app theme differs from the OS theme. */
 .geolibre-usgs-nldi-panel select option {
@@ -2340,7 +2359,7 @@ body,
   color: #1f2a37;
 }
 
-.geolibre-identify-popup .maplibregl-popup-content {
+.geolibre-identify-popup :is(.maplibregl-popup-content, .mapboxgl-popup-content) {
   background: hsl(var(--popover));
   border: 1px solid hsl(var(--border));
   box-shadow:
@@ -2371,9 +2390,100 @@ body,
   flex: 1 1 auto;
   min-height: 0;
   max-height: min(560px, calc(100vh - 184px));
-  overflow-y: scroll;
+  overflow-y: auto;
   scrollbar-gutter: stable;
   scrollbar-width: thin;
+}
+
+/* Image fields need the popup width, not the narrow value column used by text
+   attributes. The popup can be resized and the image opens at its native size
+   in a new tab, while ordinary identify popups retain their compact layout. */
+.geolibre-identify-popup-root:has(.geolibre-popup-image) {
+  width: min(420px, calc(100vw - 48px));
+  max-width: min(85vw, 900px);
+  resize: both;
+}
+
+/* Cesium supplies its own absolutely positioned popup shell. Make that the
+   sole resize surface and let its contents track both dimensions, avoiding a
+   second nested handle that only resizes the child. */
+/* `!important` because the popup root may carry an inline width from an
+   author's `LayerPopupConfig.maxWidth`; here the resizable shell owns the
+   width and the root has to fill it, or the drag handle would resize a box
+   whose contents stayed pinned. */
+.geolibre-identify-image-popup > div,
+.geolibre-identify-image-popup .geolibre-identify-popup-root {
+  width: 100% !important;
+  height: 100%;
+  max-width: none !important;
+  max-height: none;
+}
+
+.geolibre-identify-image-popup .geolibre-identify-popup-root {
+  resize: none;
+}
+
+.geolibre-identify-image-popup .geolibre-identify-popup-rows {
+  display: flex;
+  flex-direction: column;
+  max-height: none;
+}
+
+.geolibre-identify-popup-image-row {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.geolibre-identify-image-popup .geolibre-identify-popup-image-row {
+  flex: 1 1 auto;
+  min-height: 180px;
+}
+
+.geolibre-identify-image-popup .geolibre-popup-image-cell,
+.geolibre-identify-image-popup .geolibre-popup-image-link {
+  height: 100%;
+}
+
+.geolibre-popup-image-link {
+  display: block;
+  width: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  cursor: zoom-in;
+}
+
+/* `--geolibre-popup-image-height` is the per-layer override a popup config can
+   publish (LayerPopupConfig.imageHeight, applied by applyPopupImageHeight in
+   @geolibre/map); with none set the thumbnail keeps the height it always had. */
+.geolibre-popup-image {
+  display: block;
+  width: 100%;
+  height: 100%;
+  max-height: var(--geolibre-popup-image-height, min(50vh, 420px));
+  object-fit: contain;
+  background: hsl(var(--muted));
+}
+
+/* The thumbnail an `auto` field draws for an inline base64 image. Its own
+   default is smaller than a configured `image` field's, because it shows up
+   unasked for in geotagged-photo and field-collection layers. */
+.geolibre-popup-inline-image {
+  max-height: var(--geolibre-popup-image-height, 10rem);
+  max-width: 100%;
+}
+
+.geolibre-identify-image-popup .geolibre-popup-image {
+  max-height: none;
+}
+
+/* Fill the backdrop for a photo big enough to stand it, but stop at twice the
+   source's own resolution: the pinned traffic cameras only serve 320x260
+   stills, and blowing one up to the viewport is just a bigger blur. The caps
+   come from the viewer, which sets them once the image reports a natural size. */
+.geolibre-popup-image-viewer-img {
+  max-width: min(calc(100vw - 4rem), var(--geolibre-popup-image-max-w, 100vw));
+  max-height: min(calc(100vh - 4rem), var(--geolibre-popup-image-max-h, 100vh));
+  object-fit: contain;
 }
 
 /* The attribute-table toolbar wraps into several rows on portrait phones. Its
@@ -2419,7 +2529,7 @@ body,
    it and give it a real square target. `right: auto` first so the logical
    inset wins over MapLibre's own physical `right: 0` in both directions — the
    popup content mirrors with the UI in a right-to-left locale. */
-.geolibre-identify-popup .maplibregl-popup-close-button {
+.geolibre-identify-popup :is(.maplibregl-popup-close-button, .mapboxgl-popup-close-button) {
   /* `right: auto` must precede the logical inset: within one block the two
      resolve in source order, so declaring it after would win in LTR and leave
      the button unpositioned. */
@@ -2437,20 +2547,32 @@ body,
   width: 1.25rem;
 }
 
-.geolibre-identify-popup .maplibregl-popup-close-button:hover {
+.geolibre-identify-popup :is(.maplibregl-popup-close-button, .mapboxgl-popup-close-button):hover {
   background: hsl(var(--accent));
   color: hsl(var(--accent-foreground));
 }
 
-.geolibre-identify-popup.maplibregl-popup-anchor-top .maplibregl-popup-tip,
-.geolibre-identify-popup.maplibregl-popup-anchor-top-left .maplibregl-popup-tip,
-.geolibre-identify-popup.maplibregl-popup-anchor-top-right .maplibregl-popup-tip {
+.geolibre-identify-popup:is(.maplibregl-popup-anchor-top, .mapboxgl-popup-anchor-top)
+  :is(.maplibregl-popup-tip, .mapboxgl-popup-tip),
+.geolibre-identify-popup:is(.maplibregl-popup-anchor-top-left, .mapboxgl-popup-anchor-top-left)
+  :is(.maplibregl-popup-tip, .mapboxgl-popup-tip),
+.geolibre-identify-popup:is(.maplibregl-popup-anchor-top-right, .mapboxgl-popup-anchor-top-right)
+  :is(.maplibregl-popup-tip, .mapboxgl-popup-tip) {
   border-bottom-color: hsl(var(--popover));
 }
 
-.geolibre-identify-popup.maplibregl-popup-anchor-bottom .maplibregl-popup-tip,
-.geolibre-identify-popup.maplibregl-popup-anchor-bottom-left .maplibregl-popup-tip,
-.geolibre-identify-popup.maplibregl-popup-anchor-bottom-right .maplibregl-popup-tip {
+.geolibre-identify-popup:is(.maplibregl-popup-anchor-bottom, .mapboxgl-popup-anchor-bottom)
+  :is(.maplibregl-popup-tip, .mapboxgl-popup-tip),
+.geolibre-identify-popup:is(
+    .maplibregl-popup-anchor-bottom-left,
+    .mapboxgl-popup-anchor-bottom-left
+  )
+  :is(.maplibregl-popup-tip, .mapboxgl-popup-tip),
+.geolibre-identify-popup:is(
+    .maplibregl-popup-anchor-bottom-right,
+    .mapboxgl-popup-anchor-bottom-right
+  )
+  :is(.maplibregl-popup-tip, .mapboxgl-popup-tip) {
   border-top-color: hsl(var(--popover));
 }
 
@@ -2464,7 +2586,7 @@ body,
   z-index: 5;
 }
 
-.geolibre-hover-tooltip .maplibregl-popup-content {
+.geolibre-hover-tooltip :is(.maplibregl-popup-content, .mapboxgl-popup-content) {
   background: hsl(var(--popover));
   border: 1px solid hsl(var(--border));
   border-radius: 0.375rem;
@@ -2475,23 +2597,34 @@ body,
   padding: 0.375rem 0.5rem;
 }
 
-.geolibre-hover-tooltip.maplibregl-popup-anchor-top .maplibregl-popup-tip,
-.geolibre-hover-tooltip.maplibregl-popup-anchor-top-left .maplibregl-popup-tip,
-.geolibre-hover-tooltip.maplibregl-popup-anchor-top-right .maplibregl-popup-tip {
+.geolibre-hover-tooltip:is(.maplibregl-popup-anchor-top, .mapboxgl-popup-anchor-top)
+  :is(.maplibregl-popup-tip, .mapboxgl-popup-tip),
+.geolibre-hover-tooltip:is(.maplibregl-popup-anchor-top-left, .mapboxgl-popup-anchor-top-left)
+  :is(.maplibregl-popup-tip, .mapboxgl-popup-tip),
+.geolibre-hover-tooltip:is(.maplibregl-popup-anchor-top-right, .mapboxgl-popup-anchor-top-right)
+  :is(.maplibregl-popup-tip, .mapboxgl-popup-tip) {
   border-bottom-color: hsl(var(--popover));
 }
 
-.geolibre-hover-tooltip.maplibregl-popup-anchor-bottom .maplibregl-popup-tip,
-.geolibre-hover-tooltip.maplibregl-popup-anchor-bottom-left .maplibregl-popup-tip,
-.geolibre-hover-tooltip.maplibregl-popup-anchor-bottom-right .maplibregl-popup-tip {
+.geolibre-hover-tooltip:is(.maplibregl-popup-anchor-bottom, .mapboxgl-popup-anchor-bottom)
+  :is(.maplibregl-popup-tip, .mapboxgl-popup-tip),
+.geolibre-hover-tooltip:is(.maplibregl-popup-anchor-bottom-left, .mapboxgl-popup-anchor-bottom-left)
+  :is(.maplibregl-popup-tip, .mapboxgl-popup-tip),
+.geolibre-hover-tooltip:is(
+    .maplibregl-popup-anchor-bottom-right,
+    .mapboxgl-popup-anchor-bottom-right
+  )
+  :is(.maplibregl-popup-tip, .mapboxgl-popup-tip) {
   border-top-color: hsl(var(--popover));
 }
 
-.geolibre-hover-tooltip.maplibregl-popup-anchor-left .maplibregl-popup-tip {
+.geolibre-hover-tooltip:is(.maplibregl-popup-anchor-left, .mapboxgl-popup-anchor-left)
+  :is(.maplibregl-popup-tip, .mapboxgl-popup-tip) {
   border-right-color: hsl(var(--popover));
 }
 
-.geolibre-hover-tooltip.maplibregl-popup-anchor-right .maplibregl-popup-tip {
+.geolibre-hover-tooltip:is(.maplibregl-popup-anchor-right, .mapboxgl-popup-anchor-right)
+  :is(.maplibregl-popup-tip, .mapboxgl-popup-tip) {
   border-left-color: hsl(var(--popover));
 }
 
@@ -2525,7 +2658,7 @@ body,
     width: calc(100vw - 20px) !important;
   }
 
-  .geolibre-identify-popup .maplibregl-popup-content {
+  .geolibre-identify-popup :is(.maplibregl-popup-content, .mapboxgl-popup-content) {
     max-width: calc(100vw - 24px);
   }
 }
@@ -2540,11 +2673,13 @@ body,
   }
 }
 
-.geolibre-identify-popup.maplibregl-popup-anchor-left .maplibregl-popup-tip {
+.geolibre-identify-popup:is(.maplibregl-popup-anchor-left, .mapboxgl-popup-anchor-left)
+  :is(.maplibregl-popup-tip, .mapboxgl-popup-tip) {
   border-right-color: hsl(var(--popover));
 }
 
-.geolibre-identify-popup.maplibregl-popup-anchor-right .maplibregl-popup-tip {
+.geolibre-identify-popup:is(.maplibregl-popup-anchor-right, .mapboxgl-popup-anchor-right)
+  :is(.maplibregl-popup-tip, .mapboxgl-popup-tip) {
   border-left-color: hsl(var(--popover));
 }
 
@@ -2613,7 +2748,7 @@ body,
 
 /* Geotagged-photo popup: a resizable box whose photo scales to fill it, so the
    user can drag the corner to see more detail. */
-.geolibre-photo-popup-root .maplibregl-popup-content {
+.geolibre-photo-popup-root :is(.maplibregl-popup-content, .mapboxgl-popup-content) {
   background: hsl(var(--popover));
   border: 1px solid hsl(var(--border));
   border-radius: 0.5rem;
@@ -2624,33 +2759,47 @@ body,
   padding: 0.5rem;
 }
 
-.geolibre-photo-popup-root .maplibregl-popup-close-button {
+.geolibre-photo-popup-root :is(.maplibregl-popup-close-button, .mapboxgl-popup-close-button) {
   color: hsl(var(--muted-foreground));
   padding-right: 0.25rem;
 }
 
-.geolibre-photo-popup-root .maplibregl-popup-close-button:hover {
+.geolibre-photo-popup-root :is(.maplibregl-popup-close-button, .mapboxgl-popup-close-button):hover {
   background: transparent;
   color: hsl(var(--popover-foreground));
 }
 
-.geolibre-photo-popup-root.maplibregl-popup-anchor-top .maplibregl-popup-tip,
-.geolibre-photo-popup-root.maplibregl-popup-anchor-top-left .maplibregl-popup-tip,
-.geolibre-photo-popup-root.maplibregl-popup-anchor-top-right .maplibregl-popup-tip {
+.geolibre-photo-popup-root:is(.maplibregl-popup-anchor-top, .mapboxgl-popup-anchor-top)
+  :is(.maplibregl-popup-tip, .mapboxgl-popup-tip),
+.geolibre-photo-popup-root:is(.maplibregl-popup-anchor-top-left, .mapboxgl-popup-anchor-top-left)
+  :is(.maplibregl-popup-tip, .mapboxgl-popup-tip),
+.geolibre-photo-popup-root:is(.maplibregl-popup-anchor-top-right, .mapboxgl-popup-anchor-top-right)
+  :is(.maplibregl-popup-tip, .mapboxgl-popup-tip) {
   border-bottom-color: hsl(var(--popover));
 }
 
-.geolibre-photo-popup-root.maplibregl-popup-anchor-bottom .maplibregl-popup-tip,
-.geolibre-photo-popup-root.maplibregl-popup-anchor-bottom-left .maplibregl-popup-tip,
-.geolibre-photo-popup-root.maplibregl-popup-anchor-bottom-right .maplibregl-popup-tip {
+.geolibre-photo-popup-root:is(.maplibregl-popup-anchor-bottom, .mapboxgl-popup-anchor-bottom)
+  :is(.maplibregl-popup-tip, .mapboxgl-popup-tip),
+.geolibre-photo-popup-root:is(
+    .maplibregl-popup-anchor-bottom-left,
+    .mapboxgl-popup-anchor-bottom-left
+  )
+  :is(.maplibregl-popup-tip, .mapboxgl-popup-tip),
+.geolibre-photo-popup-root:is(
+    .maplibregl-popup-anchor-bottom-right,
+    .mapboxgl-popup-anchor-bottom-right
+  )
+  :is(.maplibregl-popup-tip, .mapboxgl-popup-tip) {
   border-top-color: hsl(var(--popover));
 }
 
-.geolibre-photo-popup-root.maplibregl-popup-anchor-left .maplibregl-popup-tip {
+.geolibre-photo-popup-root:is(.maplibregl-popup-anchor-left, .mapboxgl-popup-anchor-left)
+  :is(.maplibregl-popup-tip, .mapboxgl-popup-tip) {
   border-right-color: hsl(var(--popover));
 }
 
-.geolibre-photo-popup-root.maplibregl-popup-anchor-right .maplibregl-popup-tip {
+.geolibre-photo-popup-root:is(.maplibregl-popup-anchor-right, .mapboxgl-popup-anchor-right)
+  :is(.maplibregl-popup-tip, .mapboxgl-popup-tip) {
   border-left-color: hsl(var(--popover));
 }
 

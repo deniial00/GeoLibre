@@ -22,6 +22,7 @@
     "noMatches": "一致する項目がありません。",
     "addFailed": "このデータソースを追加できませんでした。",
     "builtinBadge": "ビルトイン",
+    "configBadge": "コンフィグ",
     "newConnection": "新しい{{kind}}接続",
     "loadingTables": "テーブルを読み込んでいます…",
     "files": "ファイル",
@@ -357,6 +358,10 @@
       "kml": {
         "label": "KML / KMZ",
         "description": "元のスタイル、オーバーレイ、ネットワークリンクを保持して KML または KMZ を地球儀に読み込みます。"
+      },
+      "wcs": {
+        "description": "WCS 1.0.0サービスから数値GeoTIFFのサブセットを読み込みます。",
+        "label": "WCSレイヤー"
       }
     },
     "shared": {
@@ -396,6 +401,7 @@
       "loadAria": "保存済みサービスを読み込む",
       "loadPlaceholder": "保存済みサービスを読み込む…",
       "builtin": "{{name}} (ビルトイン)",
+      "config": "{{name}} (コンフィグ)",
       "deleteAria": "保存済みサービスを削除",
       "empty": "保存済みサービスはまだありません。フォームに入力して「現在の設定を保存」を選択してください。",
       "name": "名前",
@@ -419,7 +425,11 @@
       "kindImagery": "画像",
       "altitudeOffset": "高度オフセット (m)",
       "quickPicks": "クイック選択",
+      "quickPicksPlaceholder": "アセットを選択…",
+      "quickPicksGlobal": "すべての ion アカウントで利用可能",
+      "quickPicksDepot": "Asset Depot のサンプル",
       "hint": "アセットIDは ion.cesium.com の「My Assets」で確認できます。アセットは設定で構成したトークンと共有されている必要があります。",
+      "depotHint": "Asset Depot のサンプルは、ion.cesium.com → Asset Depot でアカウントに追加してから配信されます。",
       "errorAssetId": "Cesium IonのアセットID（正の整数）を入力してください。",
       "errorAltitude": "高度オフセットをメートル単位の数値で入力してください。",
       "tokenMissing": "Cesium Ionトークンが設定されていません。設定 → 環境変数 (VITE_CESIUM_TOKEN) で追加しないと、アセットを読み込めません。"
@@ -502,6 +512,7 @@
       "retrievedTypes": "取得したフィーチャタイプ",
       "selectType_other": "{{count}}件のフィーチャタイプから選択",
       "noTypesFound": "このサービスにはフィーチャタイプが見つかりませんでした。",
+      "errorNoFeatures": "このフィーチャタイプはフィーチャを返しませんでした。",
       "retrieveError": "このサービスからフィーチャタイプを取得できませんでした。"
     },
     "wmts": {
@@ -945,7 +956,42 @@
       "modelTooLarge": "このモデルはプロジェクトに埋め込める上限の {{limit}} MB を超えています。サーバーにホストしてURLで追加してください。",
       "modelFileError": "このモデルを読み込めませんでした。有効なglTF 2.0またはGLBファイルを選択してください。"
     },
-    "nonGeographicCoordinates": "{{names}} の座標は経緯度ではないため、地図には何も描画されません。CRS が誤って記録されています — データを再投影する（または .prj を修正する）と読み込み直してください。"
+    "nonGeographicCoordinates": "{{names}} の座標は経緯度ではないため、地図には何も描画されません。CRS が誤って記録されています — データを再投影する（または .prj を修正する）と読み込み直してください。",
+    "pmtiles": {
+      "errorUrl": "有効なHTTPまたはHTTPSのPMTiles URLを入力してください。",
+      "errorMlt": "ArcGISにはMLTではなくMVTベクタータイルが必要です。"
+    },
+    "lidar": {
+      "errorUrl": "有効なHTTPまたはHTTPSのLiDAR URLを入力してください。"
+    },
+    "zarr": {
+      "errorUrl": "有効なHTTPまたはHTTPSのZarr URLを入力してください。",
+      "errorColorLimits": "色の上限値は下限値より大きくしてください。"
+    },
+    "raster": {
+      "errorSource": "GeoTIFF の URL を入力するか、ファイルを選択してください。"
+    },
+    "wcs": {
+      "coverage": "カバレッジ",
+      "retrieve": "カバレッジを取得",
+      "select": "カバレッジを選択",
+      "extent": "カバレッジの範囲を使用",
+      "width": "幅（ピクセル）",
+      "height": "高さ（ピクセル）",
+      "hint": "指定したピクセル数でEPSG:4326のGeoTIFFをダウンロードします。値はリサンプリングされる場合があります。ダウンロードしたデータを保持するにはラスターを保存してください。",
+      "errors": {
+        "xml": "サービスが無効なXMLを返しました。",
+        "version": "このデータソースにはWCS 1.0.0が必要です。サービスが未対応の応答を返しました。",
+        "empty": "一致するカバレッジはありません。",
+        "format": "カバレッジはGeoTIFF出力を提供していません。",
+        "crs": "カバレッジはリクエストと出力の両方でEPSG:4326をサポートする必要があります。",
+        "size": "1〜4096ピクセルの寸法を選択してください。ダウンロードは128 MBまでです。",
+        "metadata": "サービスが GeoLibre で読み込める量を超えるメタデータを返しました。メタデータの応答は 32 MB までです。",
+        "response": "サービスが有効なGeoTIFFを返しませんでした。",
+        "bounds": "有効な範囲を入力してください: 西/東は−180〜180、南/北は−90〜90で、西<東かつ南<北とします。",
+        "url": "WCSサービスのURLを入力してください。"
+      }
+    }
   },
   "offline": {
     "title": "オフラインエリアをダウンロード",
@@ -1885,7 +1931,7 @@
     "only3d": "3Dのみ",
     "noMapbox": "Mapbox非対応",
     "noArcgis": "ArcGIS非対応",
-    "cesiumTokenHint": "地形とIon衛星画像を使うには、設定でCesium Ionトークンを追加してください"
+    "cesiumTokenHint": "地形とIon衛星画像を使うには、<settingsLink>設定 → 環境変数</settingsLink>でCesium Ionトークンを追加してください"
   },
   "renderer": {
     "basemap": "ベースマップ",
@@ -1895,6 +1941,7 @@
     "layerCesiumOnly": "3D地球儀でのみ描画されます",
     "layerMapboxUnsupported": "Mapboxエンジンでは描画されません",
     "layerArcgisUnsupported": "ArcGISエンジンでは描画されません",
+    "layerArcgisViewUnsupported": "この ArcGIS ビューでは描画されません",
     "resetView": "表示をリセット",
     "scene3D": "3D地球儀",
     "scene2D": "2D地図",
@@ -2272,6 +2319,55 @@
       }
     }
   },
+  "panel": {
+    "godsEyeView": {
+      "description": "公開データフィードから、時間情報を持つ地球上の事象をライブ表示します。",
+      "globeOnly": "ライブ地球フィードは Cesium 地球儀に描画されます。表示するには 3D 地球儀に切り替えてください。",
+      "groups": {
+        "movement": "移動",
+        "cameras": "カメラ",
+        "infrastructure": "インフラ",
+        "events": "イベント",
+        "utilities": "ユーティリティ"
+      },
+      "earthquakes": "地震",
+      "spaceMissions": "宇宙ミッション（30日）",
+      "satellites": "衛星",
+      "flights": "ライブフライト",
+      "militaryFlights": "軍用機",
+      "bikeShare": "シェアサイクル",
+      "transit": "リアルタイム公共交通",
+      "streetTraffic": "シミュレーション道路交通",
+      "mappedAlpr": "マッピング済みナンバープレート認識カメラ",
+      "cctv": "公共CCTVカメラ",
+      "cctvPopup": {
+        "liveSnapshot": "ライブ画像",
+        "provider": "提供元",
+        "attribution": "帰属表示",
+        "privacy": "プライバシー"
+      },
+      "radio": "ラジオ局",
+      "datacenters": "データセンター",
+      "dams": "ダム",
+      "cables": "海底ケーブル",
+      "osmInfrastructure": "OSM インフラ",
+      "loading": "更新中…",
+      "updateFailed": "更新に失敗しました",
+      "noneInView": "このレイヤーには現在のビューにフィーチャが見つかりません。",
+      "never": "未更新",
+      "lastUpdated": "最終更新: {{time}}",
+      "speed": "速度",
+      "speedRealTime": "リアルタイム (1×)",
+      "speedMultiple": "{{factor}}×",
+      "denseSatellites": "高密度衛星カタログ",
+      "denseLoading": "DENSE ···",
+      "denseFailed": "DENSE !",
+      "denseCount": "DENSE · {{count}}",
+      "dense": "DENSE",
+      "denseError": "Starlink カタログを読み込めませんでした: {{error}}。選択して再試行してください。",
+      "denseDescription": "Starlink コンステレーション全体を軽量な点として表示します（ラベルやテーブル行はありません）。"
+    }
+  },
   "toolbar": {
     "menu": {
       "project": "プロジェクト",
@@ -2513,7 +2609,8 @@
       "czml": "CZML動的3Dシーン",
       "gltfModel": "3Dモデル (glTF)",
       "postgres": "PostgreSQLレイヤー",
-      "iceberg": "Apache Iceberg レイヤー"
+      "iceberg": "Apache Iceberg レイヤー",
+      "wcs": "WCSレイヤー"
     },
     "conversion": {
       "vectorToVector": "ベクターからベクターへ",
@@ -2978,6 +3075,8 @@
       "maplibre-gl-esri-wayback": "過去の衛星画像",
       "maplibre-gl-openaerialmap": "OpenAerialMap",
       "maplibre-gl-arcgis-hub": "ArcGIS Hub",
+      "geolibre-osm-downloader": "OSM ダウンローダー",
+      "geolibre-ign-lidar-hd": "IGN LiDAR HD Downloader",
       "geolibre-stac-catalogs": "STAC カタログ",
       "geolibre-planet-open-data": "Planet オープンデータ",
       "maplibre-gl-source-coop": "Source Cooperative",
@@ -2989,6 +3088,7 @@
       "maplibre-gl-huggingface": "Hugging Face",
       "carto-light": "Carto Light ベースマップ",
       "geolibre-flight-simulator": "フライトシミュレーター",
+      "gods-eye-view": "神の視点",
       "geolibre-route-animation": "ルートアニメーション",
       "geolibre-sun": "太陽シミュレーション",
       "maplibre-atmosphere-effects": "大気エフェクト",
@@ -4525,6 +4625,10 @@
       "errorStartSidecar": "GeoLibre サイドカーを起動できませんでした。",
       "errorStopSidecar": "GeoLibre サイドカーを停止できませんでした。",
       "noToolsFound": "ツールが見つかりません。",
+      "searchToolsByMeaning": "ツールを検索、または作業内容を入力",
+      "searchingByMeaning": "意味でカタログを検索しています",
+      "bestMatches": "最適な候補",
+      "otherMatches": "その他の候補",
       "noParameters": "このツールにはパラメータがありません。",
       "noOutput": "まだ出力はありません。",
       "enabled": "有効",
@@ -6975,6 +7079,11 @@
       "invalidExpression": "無効な式",
       "openBuilder": "式ビルダーを開く",
       "showFeatureId": "フィーチャIDの行を表示",
+      "maxWidth": "ポップアップの幅 (px)",
+      "maxWidthPlaceholder": "既定値",
+      "imageHeight": "画像の高さ (px)",
+      "imageHeightPlaceholder": "既定値",
+      "sizeHint": "空欄にすると既定値になります。画像は縦横比を保つため、写真が余分な高さを使えるようにするにはポップアップを広くします。",
       "fields": "フィールド",
       "allFields": "フィールドが選択されていないため、表示可能なすべてのフィールドをデータ本来の順序で表示します。",
       "addField": "フィールドを追加…",
@@ -7342,6 +7451,7 @@
     "viewportStretchNoRange": "表示範囲の値から範囲を決定できません。",
     "viewportStretchMoved": "読み込みが完了する前に地図が移動しました。もう一度適用してください。",
     "index": "指数",
+    "opacityClasses": "不透明度クラス",
     "classifyToggle": "離散的なクラスに分類する",
     "method": "方法",
     "methodEqualInterval": "等間隔",
@@ -7897,5 +8007,77 @@
     "catalogHuc12pp": "HUC12流出点",
     "catalogNmwdiSt": "ニューメキシコ州の水文観測地点",
     "catalogFlowlines": "NHDPlus流路"
+  },
+  "plugin": {
+    "3d-tiles": {
+      "arcgisSourceUnsupported": "この ArcGIS ビューでは 3D Tiles の tileset.json URL を使用してください。Google Photorealistic と I3S のタイルには別のレンダラーが必要です。",
+      "globeGoogleKeyRequired": "Google Photorealistic 3D Tiles を地球儀上で読み込むには、設定で Google Maps API キーを指定する必要があります。"
+    },
+    "geolibre-osm-downloader": {
+      "title": "OSMダウンローダー",
+      "hint": "現在の地図領域からパブリックのOverpass APIを使用してOpenStreetMapの特徴をダウンロードします。",
+      "attribution": "データ © OpenStreetMapの貢献者、ODbLの下で利用可能。",
+      "featureType": "特徴タイプ",
+      "presetBuildings": "建物",
+      "presetRoads": "道路",
+      "presetAmenities": "施設",
+      "presetWaterways": "水路",
+      "presetLanduse": "土地利用",
+      "presetCustom": "カスタムタグ",
+      "presetAll": "すべてのタグされた特徴",
+      "tagKey": "タグキー",
+      "tagValue": "タグ値",
+      "tagKeyPlaceholder": "例: shop",
+      "tagValuePlaceholder": "オプション、例: bakery",
+      "west": "西",
+      "south": "南",
+      "east": "東",
+      "north": "北",
+      "useMapExtent": "地図の範囲を使用",
+      "download": "OSMデータをダウンロード",
+      "ready": "エリアと特徴タイプを選択してください。",
+      "exportGeoJson": "GeoJSONを保存",
+      "mapUnavailable": "地図の範囲はまだ利用できません。",
+      "extentApplied": "地図範囲が適用されました。",
+      "downloading": "OpenStreetMapからダウンロード中…",
+      "noFeatures": "このエリアには一致する特徴が見つかりませんでした。",
+      "error": "OSMデータをダウンロードできませんでした: {{message}}",
+      "added": "{{count}}個の特徴を地図に追加しました。"
+    },
+    "geolibre-ign-lidar-hd": {
+      "title": "IGN LiDAR HD",
+      "hint": "現在の地図領域についてIGN LiDAR HDのタイル範囲を検索し、タイルをポイントクラウドとして地図に追加するか、IGNのサーバーからCOPC LAZファイルをダウンロードします。",
+      "attribution": "データ © IGN — LiDAR HD、Licence Ouverte 2.0 の下で公開。",
+      "west": "西",
+      "south": "南",
+      "east": "東",
+      "north": "北",
+      "useMapExtent": "地図の範囲を使用",
+      "search": "タイルを検索",
+      "addToMap": "地図に追加",
+      "download": "ダウンロード",
+      "ready": "エリアを選択してLiDAR HDタイルを検索してください。",
+      "mapUnavailable": "地図の範囲はまだ利用できません。",
+      "extentApplied": "地図範囲が適用されました。",
+      "searching": "IGN LiDAR HDタイルを検索中…",
+      "noTiles": "このエリアにはLiDAR HDタイルが見つかりませんでした。",
+      "noDownload": "公開されているポイントクラウドはありません",
+      "layerName": "IGN LiDAR HDタイル",
+      "found": "{{count}}件のタイルが見つかりました。",
+      "foundTruncated": "{{matched}}件中最初の{{count}}件のタイルを表示しています。残りを表示するには検索エリアを狭めてください。",
+      "addedToMap": "{{name}}を地図に追加しました。",
+      "alreadyOnMap": "{{name}}はすでに地図上にあります。",
+      "unsupportedRenderer": "ポイントクラウドにはMapLibreまたはMapboxレンダラーが必要です。",
+      "addError": "{{name}}を地図に追加できませんでした: {{message}}",
+      "error": "IGN LiDAR HDタイルを検索できませんでした: {{message}}",
+      "selectAll": "すべて選択",
+      "selectTile": "{{name}}を選択",
+      "addSelectedToMap": "選択したタイルを地図に追加",
+      "addSelectedToMapCount": "選択した{{count}}件を地図に追加",
+      "addingSelected": "{{count}}件のタイルを地図に追加中…",
+      "addedSelectedCount": "{{count}}件のタイルを地図に追加しました。",
+      "alreadyOnMapCountPlural": "{{count}}件のタイルはすでに地図上にありました。",
+      "addSelectedFailedCount": "{{count}}件のタイルを追加できませんでした。"
+    }
   }
 }

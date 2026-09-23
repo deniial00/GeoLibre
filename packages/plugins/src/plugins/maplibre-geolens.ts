@@ -30,6 +30,7 @@ import {
 import type { Map as MapLibreMap, RequestParameters, ResourceType } from "maplibre-gl";
 import { createLayerId } from "../layer-ids";
 import type { GeoLibreAppAPI, GeoLibrePlugin } from "../types";
+import { isTauriRuntime } from "./earth-engine-auth";
 import { getStyleMap } from "./style-map";
 import {
   applyFeatureEdits,
@@ -98,6 +99,7 @@ export const DEFAULT_GEOLENS_FEATURE_LIMIT = 10_000;
 const MAX_GEOLENS_FEATURE_LIMIT = 1_000_000;
 const FEATURE_LIMIT_STORAGE_KEY = "geolibre.geolens.featureLimit";
 const VIEW_ONLY_STORAGE_KEY = "geolibre.geolens.viewOnly";
+export const GEOLENS_SERVER_URL_STORAGE_KEY = "geolibre.geolens.serverUrl";
 /** Re-mint the tile token this many seconds before it expires. */
 const TOKEN_REFRESH_LEAD_SECONDS = 30;
 /** Floor on the refresh delay, so a tiny/expired TTL cannot busy-loop. */
@@ -115,6 +117,7 @@ export interface GeoLensLabels {
   hint: string;
   sampleServer: string;
   sampleServerTitle: string;
+  currentOrigin: (origin: string) => string;
   baseUrlPlaceholder: string;
   apiKeyPlaceholder: string;
   connect: string;
@@ -176,6 +179,7 @@ export const DEFAULT_GEOLENS_LABELS: GeoLensLabels = {
   hint: "Connect to a GeoLens server to browse and add its catalog datasets.",
   sampleServer: "Sample server…",
   sampleServerTitle: "Connect to a public GeoLens deployment",
+  currentOrigin: (origin) => `Current origin (${origin})`,
   baseUrlPlaceholder: "GeoLens URL, e.g. https://datasets.geolibre.app",
   apiKeyPlaceholder: "API key (optional, for private data)",
   connect: "Connect",
@@ -308,6 +312,52 @@ function writeViewOnly(value: boolean): void {
   } catch {
     // Storage can be unavailable in privacy-restricted webviews.
   }
+}
+
+/** The most recent server whose catalog loaded successfully. */
+export function readSavedGeoLensServerUrl(): string {
+  if (typeof localStorage === "undefined") return "";
+  try {
+    return normalizeBaseUrl(localStorage.getItem(GEOLENS_SERVER_URL_STORAGE_KEY) ?? "");
+  } catch {
+    return "";
+  }
+}
+
+function writeSavedGeoLensServerUrl(value: string): void {
+  if (typeof localStorage === "undefined") return;
+  try {
+    localStorage.setItem(GEOLENS_SERVER_URL_STORAGE_KEY, normalizeBaseUrl(value));
+  } catch {
+    // Storage can be unavailable in privacy-restricted webviews.
+  }
+}
+
+const CURRENT_ORIGIN_DEFAULT = "same-origin";
+const DISABLED_DEFAULT = "off";
+let configuredDefaultServerUrl = "";
+
+/** Set the deployment's preferred GeoLens server before the panel mounts. */
+export function setGeoLensDefaultServerUrl(value: string | undefined): void {
+  const trimmed = value?.trim() ?? "";
+  const normalizedSentinel = trimmed.toLowerCase();
+  configuredDefaultServerUrl =
+    normalizedSentinel === CURRENT_ORIGIN_DEFAULT || normalizedSentinel === DISABLED_DEFAULT
+      ? normalizedSentinel
+      : normalizeBaseUrl(trimmed);
+}
+
+/** Saved preference wins, then deployment config (including `same-origin`). */
+export function resolveGeoLensInitialServerUrl(
+  savedUrl: string,
+  configuredUrl: string,
+  currentOrigin: string,
+): string {
+  const normalizedConfiguredUrl = configuredUrl.trim().toLowerCase();
+  if (normalizedConfiguredUrl === DISABLED_DEFAULT) return "";
+  if (savedUrl) return normalizeBaseUrl(savedUrl);
+  if (normalizedConfiguredUrl === CURRENT_ORIGIN_DEFAULT) return normalizeBaseUrl(currentOrigin);
+  return normalizeBaseUrl(configuredUrl);
 }
 
 /** Panels currently mounted, so a language change can repaint them in place. */
@@ -1605,9 +1655,27 @@ function buildPanel(
     sampleSelect.append(option);
   }
 
+  const browserOrigin =
+    typeof window !== "undefined" &&
+    /^https?:$/.test(window.location?.protocol ?? "") &&
+    !isTauriRuntime()
+      ? normalizeBaseUrl(window.location.origin)
+      : "";
+  if (browserOrigin && !GEOLENS_SAMPLE_SERVERS.some((server) => server.baseUrl === browserOrigin)) {
+    const option = el("option", "", labels.currentOrigin(browserOrigin));
+    option.value = browserOrigin;
+    option.title = browserOrigin;
+    sampleSelect.append(option);
+  }
+
   const baseUrlInput = el("input", CSS.input) as HTMLInputElement;
   baseUrlInput.placeholder = labels.baseUrlPlaceholder;
   baseUrlInput.autocomplete = "off";
+  baseUrlInput.value = resolveGeoLensInitialServerUrl(
+    readSavedGeoLensServerUrl(),
+    configuredDefaultServerUrl,
+    browserOrigin,
+  );
 
   const apiKeyInput = el("input", CSS.input) as HTMLInputElement;
   apiKeyInput.placeholder = labels.apiKeyPlaceholder;
@@ -2081,6 +2149,7 @@ function buildPanel(
     // Restore "flex" (not "") so the row keeps its flex layout and gap — setting
     // display to "" would wipe the inline `display:flex` and collapse to block.
     if (!connected) state.client = null;
+    else writeSavedGeoLensServerUrl(baseUrl);
     searchRow.style.display = connected ? "flex" : "none";
     // Ask the server whether it allows dataset editing at all. Public endpoint,
     // and a failure resolves to "no editing", so this never blocks connecting.
@@ -2160,6 +2229,12 @@ function buildPanel(
     pruneEditSessions();
     if (state.busyLayerIds.size === 0) renderEdits();
   });
+
+  // A remembered or deployment-provided server should be ready as soon as the
+  // panel opens. The Docker runtime explicitly supplies `same-origin`, giving
+  // co-located reverse-proxy deployments zero-click behavior while plain static
+  // builds stay idle until the user chooses a server.
+  if (baseUrlInput.value) void connect();
 
   return () => {
     unsubscribe();

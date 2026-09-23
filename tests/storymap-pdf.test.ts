@@ -76,10 +76,49 @@ describe("htmlToPlainText", () => {
       htmlToPlainText("<style>body{color:red}</style>Hello<script>x=1</script>"),
       "Hello",
     );
+    assert.equal(
+      htmlToPlainText("<scripting>kept</scripting> visible <script>alert(1)</script> more text"),
+      "kept visible more text",
+    );
   });
 
   it("strips tags with a '>' inside a quoted attribute value", () => {
     assert.equal(htmlToPlainText('<span title="a > b">text</span>'), "text");
+  });
+
+  it("keeps malformed nested '<' text while stripping later complete tags", () => {
+    assert.equal(htmlToPlainText("<<span>ab"), "<ab");
+    assert.equal(htmlToPlainText("x <<b>y"), "x <y");
+    assert.equal(htmlToPlainText("1 < 2"), "1 < 2");
+  });
+
+  it("recovers after an unterminated attribute quote", () => {
+    assert.equal(
+      htmlToPlainText('<a href="https://example.com>Read more</a> <p>Second paragraph</p>'),
+      "Read more Second paragraph",
+    );
+    assert.equal(
+      htmlToPlainText(
+        '<a href="/page>Click here</a> and read the "manual" for more info. <span>END</span>',
+      ),
+      'Click here and read the "manual" for more info. END',
+    );
+  });
+
+  it("stays linear on unterminated breaks and tags (#2466)", () => {
+    // Both inputs took several seconds at 100 KB with the old regexes. A wide
+    // bound still catches a quadratic regression without flaking under load.
+    const inputs = [
+      `<br${" ".repeat(100_000)}`,
+      "<".repeat(100_000),
+      '<"'.repeat(50_000),
+      "<script ".repeat(50_000),
+    ];
+    for (const input of inputs) {
+      const started = performance.now();
+      htmlToPlainText(input);
+      assert.ok(performance.now() - started < 5000, `took too long on ${input.length} chars`);
+    }
   });
 });
 
@@ -234,7 +273,13 @@ describe("buildStoryMapHandoutPdf", () => {
     // A full-bleed slide (start/closing screen) has no title or description and
     // still produces a valid one-page document.
     const bytes = buildStoryMapHandoutPdf(
-      [{ title: "", map: { data: PNG_2X2, width: 1200, height: 900 }, fullBleed: true }],
+      [
+        {
+          title: "",
+          map: { data: PNG_2X2, width: 1200, height: 900 },
+          fullBleed: true,
+        },
+      ],
       opts(),
     );
     assert.ok(bytes.length > 0);

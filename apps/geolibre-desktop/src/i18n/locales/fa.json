@@ -22,6 +22,7 @@
     "noMatches": "نتیجه‌ای یافت نشد.",
     "addFailed": "افزودن این منبع داده با شکست مواجه شد.",
     "builtinBadge": "توکار",
+    "configBadge": "کانفیگ",
     "newConnection": "اتصال {{kind}} جدید",
     "loadingTables": "در حال بارگیری جدول‌ها…",
     "files": "فایل‌ها",
@@ -359,6 +360,10 @@
       "kml": {
         "label": "KML / KMZ",
         "description": "KML یا KMZ را با سبک‌های بومی، هم‌پوشانی‌ها و پیوندهای شبکه روی کره بارگذاری کنید."
+      },
+      "wcs": {
+        "description": "بارگذاری زیرمجموعهٔ عددی GeoTIFF از سرویس WCS 1.0.0.",
+        "label": "لایهٔ WCS"
       }
     },
     "shared": {
@@ -398,6 +403,7 @@
       "loadAria": "بارگیری یک سرویس ذخیره‌شده",
       "loadPlaceholder": "بارگیری یک سرویس ذخیره‌شده…",
       "builtin": "{{name}} (توکار)",
+      "config": "{{name}} (کانفیگ)",
       "deleteAria": "حذف سرویس ذخیره‌شده",
       "empty": "هنوز سرویس ذخیره‌شده‌ای نیست — فرم را پر کنید و «ذخیرهٔ مورد فعلی» را برگزینید.",
       "name": "نام",
@@ -423,7 +429,11 @@
       "kindImagery": "تصاویر",
       "altitudeOffset": "جابه‌جایی ارتفاع (متر)",
       "quickPicks": "انتخاب‌های سریع",
+      "quickPicksPlaceholder": "یک دارایی انتخاب کنید…",
+      "quickPicksGlobal": "همراه هر حساب ion",
+      "quickPicksDepot": "نمونه‌های Asset Depot",
       "hint": "شناسهٔ دارایی‌ها را در بخش My Assets در ion.cesium.com بیابید. دارایی باید با توکن تنظیم‌شده در تنظیمات هم‌رسانی شده باشد.",
+      "depotHint": "نمونه‌های Asset Depot تنها پس از افزودن به حسابتان در ion.cesium.com ← Asset Depot پخش می‌شوند.",
       "errorAssetId": "یک شناسهٔ دارایی Cesium Ion (عدد صحیح مثبت) وارد کنید.",
       "errorAltitude": "جابه‌جایی ارتفاع را به‌صورت عدد و بر حسب متر وارد کنید.",
       "tokenMissing": "هیچ توکن Cesium Ion تنظیم نشده است. یکی را در تنظیمات ← متغیرهای محیطی (VITE_CESIUM_TOKEN) بیفزایید، وگرنه بارگیری دارایی ناموفق خواهد بود."
@@ -508,6 +518,7 @@
       "selectType_one": "انتخاب از میان {{count}} نوع عارضه",
       "selectType_other": "انتخاب از میان {{count}} نوع عارضه",
       "noTypesFound": "برای این سرویس هیچ نوع عارضه‌ای یافت نشد.",
+      "errorNoFeatures": "این نوع عارضه هیچ عارضه‌ای برنگرداند.",
       "retrieveError": "دریافت نوع‌های عارضه از این سرویس ممکن نشد."
     },
     "wmts": {
@@ -966,7 +977,42 @@
       "modelTooLarge": "این مدل از حد {{limit}} مگابایت برای جاسازی در پروژه بزرگ‌تر است. آن را روی سرور میزبانی کنید و با نشانی بیفزایید.",
       "modelFileError": "خواندن این مدل ممکن نشد. یک فایل معتبر glTF 2.0 یا GLB انتخاب کنید."
     },
-    "nonGeographicCoordinates": "مختصات در {{names}} طول/عرض جغرافیایی نیستند، بنابراین چیزی روی نقشه ترسیم نمی‌شود. برچسب سیستم مختصات نادرست است — داده را دوباره تصویر کنید (یا فایل ‎.prj آن را درست کنید) و دوباره بارگیری کنید."
+    "nonGeographicCoordinates": "مختصات در {{names}} طول/عرض جغرافیایی نیستند، بنابراین چیزی روی نقشه ترسیم نمی‌شود. برچسب سیستم مختصات نادرست است — داده را دوباره تصویر کنید (یا فایل ‎.prj آن را درست کنید) و دوباره بارگیری کنید.",
+    "pmtiles": {
+      "errorUrl": "یک نشانی HTTP یا HTTPS معتبر برای PMTiles وارد کنید.",
+      "errorMlt": "ArcGIS به کاشی‌های برداری MVT نیاز دارد، نه MLT."
+    },
+    "lidar": {
+      "errorUrl": "یک نشانی HTTP یا HTTPS معتبر برای LiDAR وارد کنید."
+    },
+    "zarr": {
+      "errorUrl": "یک نشانی HTTP یا HTTPS معتبر برای Zarr وارد کنید.",
+      "errorColorLimits": "حد بالای رنگ باید بزرگ‌تر از حد پایین باشد."
+    },
+    "raster": {
+      "errorSource": "نشانی GeoTIFF را وارد کنید یا یک فایل انتخاب کنید."
+    },
+    "wcs": {
+      "coverage": "پوشش",
+      "retrieve": "دریافت پوشش‌ها",
+      "select": "انتخاب پوشش",
+      "extent": "استفاده از محدودهٔ پوشش",
+      "width": "عرض (پیکسل)",
+      "height": "ارتفاع (پیکسل)",
+      "hint": "یک GeoTIFF در EPSG:4326 با ابعاد پیکسلی انتخاب‌شده دریافت می‌کند. ممکن است مقادیر بازنمونه‌برداری شوند. برای نگهداری داده‌های دریافت‌شده، رستر را ذخیره کنید.",
+      "errors": {
+        "xml": "سرویس XML نامعتبر برگرداند.",
+        "version": "این منبع به WCS 1.0.0 نیاز دارد. پاسخ سرویس پشتیبانی نمی‌شود.",
+        "empty": "هیچ پوشش منطبقی در دسترس نیست.",
+        "format": "پوشش، خروجی GeoTIFF را ارائه نمی‌کند.",
+        "crs": "پوشش باید EPSG:4326 را برای درخواست و خروجی پشتیبانی کند.",
+        "size": "ابعاد 1 تا 4096 پیکسل را انتخاب کنید. دریافت‌ها به 128 MB محدود هستند.",
+        "metadata": "سرویس فراداده‌ای بیش از توان بارگذاری GeoLibre برگرداند. پاسخ‌های فراداده به 32 MB محدود هستند.",
+        "response": "سرویس GeoTIFF معتبری برنگرداند.",
+        "bounds": "یک کادر معتبر وارد کنید: غرب/شرق میان ‎-180 تا ‎180، جنوب/شمال میان ‎-90 تا ‎90، با غرب < شرق و جنوب < شمال.",
+        "url": "یک نشانی سرویس WCS وارد کنید."
+      }
+    }
   },
   "offline": {
     "title": "دانلود ناحیهٔ برون‌خط",
@@ -1931,7 +1977,7 @@
     "only3d": "تنها سه‌بعدی",
     "noMapbox": "بدون Mapbox",
     "noArcgis": "بدون ArcGIS",
-    "cesiumTokenHint": "برای زمین و تصاویر Ion، یک توکن Cesium Ion در تنظیمات بیفزایید"
+    "cesiumTokenHint": "برای زمین و تصاویر Ion، یک توکن Cesium Ion در <settingsLink>تنظیمات ← متغیرهای محیطی</settingsLink> بیفزایید"
   },
   "renderer": {
     "basemap": "نقشهٔ پایه",
@@ -1941,6 +1987,7 @@
     "layerCesiumOnly": "تنها روی کرهٔ سه‌بعدی ترسیم می‌شود",
     "layerMapboxUnsupported": "با موتور Mapbox ترسیم نمی‌شود",
     "layerArcgisUnsupported": "با موتور ArcGIS ترسیم نمی‌شود",
+    "layerArcgisViewUnsupported": "در این نمای ArcGIS ترسیم نمی‌شود",
     "resetView": "بازنشانی نما",
     "scene3D": "کرهٔ سه‌بعدی",
     "scene2D": "نقشهٔ دوبعدی",
@@ -2320,6 +2367,55 @@
       }
     }
   },
+  "panel": {
+    "godsEyeView": {
+      "description": "رویدادهای زنده و زمان‌مند زمین از خوراک‌های داده عمومی.",
+      "globeOnly": "خوراک‌های زنده کره زمین روی کره Cesium نمایش داده می‌شوند. برای دیدن آن‌ها به کره سه‌بعدی بروید.",
+      "groups": {
+        "movement": "حرکت",
+        "cameras": "دوربین‌ها",
+        "infrastructure": "زیرساخت",
+        "events": "رویدادها",
+        "utilities": "ابزارها"
+      },
+      "earthquakes": "زمین‌لرزه‌ها",
+      "spaceMissions": "مأموریت‌های فضایی (۳۰ روز)",
+      "satellites": "ماهواره‌ها",
+      "flights": "پروازهای زنده",
+      "militaryFlights": "پروازهای نظامی",
+      "bikeShare": "اشتراک دوچرخه",
+      "transit": "حمل‌ونقل عمومی زنده",
+      "streetTraffic": "ترافیک خیابانی شبیه‌سازی‌شده",
+      "mappedAlpr": "دوربین‌های پلاک‌خوان نقشه‌برداری‌شده",
+      "cctv": "دوربین‌های مداربسته عمومی",
+      "cctvPopup": {
+        "liveSnapshot": "تصویر زنده",
+        "provider": "ارائه‌دهنده",
+        "attribution": "انتساب",
+        "privacy": "حریم خصوصی"
+      },
+      "radio": "ایستگاه‌های رادیویی",
+      "datacenters": "مراکز داده",
+      "dams": "سدها",
+      "cables": "کابل‌های زیردریایی",
+      "osmInfrastructure": "زیرساخت‌های OSM",
+      "loading": "در حال به‌روزرسانی…",
+      "updateFailed": "به‌روزرسانی ناموفق بود",
+      "noneInView": "برای این لایه هیچ عارضه‌ای در نمای کنونی یافت نشد.",
+      "never": "هرگز",
+      "lastUpdated": "آخرین به‌روزرسانی: {{time}}",
+      "speed": "سرعت",
+      "speedRealTime": "زمان واقعی (1×)",
+      "speedMultiple": "{{factor}}×",
+      "denseSatellites": "فهرست متراکم ماهواره‌ها",
+      "denseLoading": "DENSE ···",
+      "denseFailed": "DENSE !",
+      "denseCount": "DENSE · {{count}}",
+      "dense": "DENSE",
+      "denseError": "فهرست Starlink بارگیری نشد: {{error}}. برای تلاش دوباره آن را انتخاب کنید.",
+      "denseDescription": "مجموعه کامل Starlink را به‌صورت نقاط سبک نمایش دهید (بدون برچسب یا ردیف‌های جدول)."
+    }
+  },
   "toolbar": {
     "menu": {
       "project": "پروژه",
@@ -2561,7 +2657,8 @@
       "czml": "صحنهٔ سه‌بعدی پویای CZML",
       "gltfModel": "مدل سه‌بعدی (glTF)",
       "postgres": "لایهٔ PostgreSQL",
-      "iceberg": "لایهٔ Apache Iceberg"
+      "iceberg": "لایهٔ Apache Iceberg",
+      "wcs": "لایهٔ WCS"
     },
     "conversion": {
       "vectorToVector": "برداری به برداری",
@@ -3029,6 +3126,8 @@
       "maplibre-gl-esri-wayback": "تصاویر تاریخی",
       "maplibre-gl-openaerialmap": "OpenAerialMap",
       "maplibre-gl-arcgis-hub": "ArcGIS Hub",
+      "geolibre-osm-downloader": "بارگیر OSM",
+      "geolibre-ign-lidar-hd": "IGN LiDAR HD Downloader",
       "geolibre-stac-catalogs": "فهرست‌های STAC",
       "geolibre-planet-open-data": "داده‌های باز Planet",
       "maplibre-gl-source-coop": "Source Cooperative",
@@ -3040,6 +3139,7 @@
       "maplibre-gl-huggingface": "Hugging Face",
       "carto-light": "نقشهٔ پایهٔ Carto Light",
       "geolibre-flight-simulator": "شبیه‌ساز پرواز",
+      "gods-eye-view": "دید خداگونه",
       "geolibre-route-animation": "پویانمایی مسیر",
       "geolibre-sun": "شبیه‌سازی خورشید",
       "maplibre-atmosphere-effects": "جلوه‌های جوّی",
@@ -4598,6 +4698,10 @@
       "errorStartSidecar": "راه‌اندازی سرویس کناری GeoLibre ممکن نشد.",
       "errorStopSidecar": "متوقف کردن سرویس کناری GeoLibre ممکن نشد.",
       "noToolsFound": "ابزاری یافت نشد.",
+      "searchToolsByMeaning": "جستجوی ابزارها یا توصیف یک وظیفه",
+      "searchingByMeaning": "در حال جستجوی فهرست بر اساس معنا",
+      "bestMatches": "بهترین نتایج",
+      "otherMatches": "نتایج دیگر",
       "noParameters": "این ابزار پارامتری ندارد.",
       "noOutput": "هنوز خروجی‌ای نیست.",
       "enabled": "فعال",
@@ -7055,6 +7159,11 @@
       "invalidExpression": "عبارت نامعتبر",
       "openBuilder": "باز کردن سازندهٔ عبارت",
       "showFeatureId": "نمایش ردیف شناسهٔ عارضه",
+      "maxWidth": "عرض پنجرهٔ بازشو (پیکسل)",
+      "maxWidthPlaceholder": "پیش‌فرض",
+      "imageHeight": "ارتفاع تصویر (پیکسل)",
+      "imageHeightPlaceholder": "پیش‌فرض",
+      "sizeHint": "برای مقدار پیش‌فرض، هرکدام را خالی بگذارید. تصویر نسبت ابعاد خود را حفظ می‌کند، بنابراین تنها با پهن‌تر کردن پنجرهٔ بازشو است که عکس می‌تواند از ارتفاع بیشتر استفاده کند.",
       "fields": "فیلدها",
       "allFields": "هیچ فیلدی انتخاب نشده است، پس همهٔ فیلدهای قابل نمایش به ترتیب خودِ داده‌ها نشان داده می‌شوند.",
       "addField": "افزودن فیلد…",
@@ -7423,6 +7532,7 @@
     "viewportStretchNoRange": "مقادیر نمای فعلی بازه‌ای تعریف نمی‌کنند.",
     "viewportStretchMoved": "نقشه پیش از پایان خواندن جابه‌جا شد. دوباره اعمال کنید.",
     "index": "شاخص",
+    "opacityClasses": "کلاس‌های کدری",
     "classifyToggle": "طبقه‌بندی به کلاس‌های گسسته",
     "method": "روش",
     "methodEqualInterval": "بازهٔ برابر",
@@ -7984,5 +8094,77 @@
     "catalogHuc12pp": "نقاط خروجی HUC12",
     "catalogNmwdiSt": "ایستگاه‌های آبی نیومکزیکو",
     "catalogFlowlines": "خطوط جریان NHDPlus"
+  },
+  "plugin": {
+    "3d-tiles": {
+      "arcgisSourceUnsupported": "در این نمای ArcGIS از نشانی tileset.json مربوط به 3D Tiles استفاده کنید. کاشی‌های Google Photorealistic و I3S به موتور نمایش دیگری نیاز دارند.",
+      "globeGoogleKeyRequired": "برای بارگذاری کاشی‌های Google Photorealistic 3D Tiles روی کره، به کلید API گوگل مپس در تنظیمات نیاز است."
+    },
+    "geolibre-osm-downloader": {
+      "title": "بارگیر OSM",
+      "hint": "بارگیری عوارض OpenStreetMap از محدوده فعلی نقشه با استفاده از Overpass API عمومی.",
+      "attribution": "داده‌ها © مشارکت‌کنندگان OpenStreetMap، تحت مجوز ODbL در دسترس است.",
+      "featureType": "نوع عارضه",
+      "presetBuildings": "ساختمان‌ها",
+      "presetRoads": "راه‌ها",
+      "presetAmenities": "امکانات",
+      "presetWaterways": "آبراه‌ها",
+      "presetLanduse": "استفاده از زمین",
+      "presetCustom": "برچسب سفارشی",
+      "presetAll": "تمام عوارض برچسب‌دار",
+      "tagKey": "کلید برچسب",
+      "tagValue": "مقدار برچسب",
+      "tagKeyPlaceholder": "مثلاً shop",
+      "tagValuePlaceholder": "اختیاری، مثلاً bakery",
+      "west": "غرب",
+      "south": "جنوب",
+      "east": "شرق",
+      "north": "شمال",
+      "useMapExtent": "استفاده از محدوده نقشه",
+      "download": "دانلود داده OSM",
+      "ready": "یک محدوده و نوع عارضه انتخاب کنید.",
+      "exportGeoJson": "ذخیره فایل GeoJSON",
+      "mapUnavailable": "محدوده نقشه هنوز در دسترس نیست.",
+      "extentApplied": "محدوده نقشه اعمال شد.",
+      "downloading": "در حال دانلود از OpenStreetMap…",
+      "noFeatures": "هیچ عارضه منطبقی در این محدوده یافت نشد.",
+      "error": "بارگیری داده‌های OSM انجام نشد: {{message}}",
+      "added": "{{count}} عارضه به نقشه افزوده شد."
+    },
+    "geolibre-ign-lidar-hd": {
+      "title": "IGN LiDAR HD",
+      "hint": "پوشش کاشی‌های IGN LiDAR HD را برای محدوده فعلی نقشه جستجو کنید، کاشی‌ها را به‌صورت ابر نقاط به نقشه اضافه کنید یا فایل‌های COPC LAZ آن‌ها را از سرورهای IGN دانلود کنید.",
+      "attribution": "داده‌ها © IGN — LiDAR HD، منتشرشده تحت Licence Ouverte 2.0.",
+      "west": "غرب",
+      "south": "جنوب",
+      "east": "شرق",
+      "north": "شمال",
+      "useMapExtent": "استفاده از محدوده نقشه",
+      "search": "جستجوی کاشی‌ها",
+      "addToMap": "افزودن به نقشه",
+      "download": "دانلود",
+      "ready": "یک محدوده انتخاب کنید و کاشی‌های LiDAR HD را جستجو کنید.",
+      "mapUnavailable": "محدوده نقشه هنوز در دسترس نیست.",
+      "extentApplied": "محدوده نقشه اعمال شد.",
+      "searching": "در حال جستجوی کاشی‌های IGN LiDAR HD…",
+      "noTiles": "هیچ کاشی LiDAR HD در این محدوده یافت نشد.",
+      "noDownload": "ابر نقاطی منتشر نشده است",
+      "layerName": "کاشی‌های IGN LiDAR HD",
+      "found": "{{count}} کاشی یافت شد.",
+      "foundTruncated": "نمایش {{count}} کاشی نخست از {{matched}} کاشی. برای دیدن بقیه، محدوده جستجو را کوچک‌تر کنید.",
+      "addedToMap": "{{name}} به نقشه افزوده شد.",
+      "alreadyOnMap": "{{name}} از قبل روی نقشه است.",
+      "unsupportedRenderer": "ابرهای نقطه به موتور رندر MapLibre یا Mapbox نیاز دارند.",
+      "addError": "افزودن {{name}} به نقشه ممکن نشد: {{message}}",
+      "error": "جستجوی کاشی‌های IGN LiDAR HD ممکن نشد: {{message}}",
+      "selectAll": "انتخاب همه",
+      "selectTile": "انتخاب {{name}}",
+      "addSelectedToMap": "افزودن موارد انتخاب‌شده به نقشه",
+      "addSelectedToMapCount": "افزودن {{count}} مورد انتخاب‌شده به نقشه",
+      "addingSelected": "در حال افزودن {{count}} کاشی به نقشه…",
+      "addedSelectedCount": "{{count}} کاشی به نقشه افزوده شد.",
+      "alreadyOnMapCountPlural": "{{count}} کاشی از قبل روی نقشه بود.",
+      "addSelectedFailedCount": "افزودن {{count}} کاشی ممکن نشد."
+    }
   }
 }

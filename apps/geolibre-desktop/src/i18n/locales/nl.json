@@ -22,6 +22,7 @@
     "noMatches": "Geen resultaten.",
     "addFailed": "Kan deze gegevensbron niet toevoegen.",
     "builtinBadge": "ingebouwd",
+    "configBadge": "geconfigureerd",
     "newConnection": "Nieuwe {{kind}}-verbinding",
     "loadingTables": "Tabellen laden…",
     "files": "Bestanden",
@@ -359,6 +360,10 @@
       "kml": {
         "label": "KML / KMZ",
         "description": "Laad KML of KMZ met oorspronkelijke stijlen, overlays en netwerkkoppelingen op de globe."
+      },
+      "wcs": {
+        "description": "Laad een numerieke GeoTIFF-uitsnede van een WCS 1.0.0-service.",
+        "label": "WCS-laag"
       }
     },
     "shared": {
@@ -398,6 +403,7 @@
       "loadAria": "Een opgeslagen service laden",
       "loadPlaceholder": "Een opgeslagen service laden…",
       "builtin": "{{name}} (ingebouwd)",
+      "config": "{{name}} (geconfigureerd)",
       "deleteAria": "Opgeslagen service verwijderen",
       "empty": "Nog geen opgeslagen services — vul het formulier in en kies “Huidige opslaan”.",
       "name": "Naam",
@@ -423,7 +429,11 @@
       "kindImagery": "Beelden",
       "altitudeOffset": "Hoogteverschuiving (m)",
       "quickPicks": "Snelle keuzes",
+      "quickPicksPlaceholder": "Kies een asset…",
+      "quickPicksGlobal": "Bij elk ion-account inbegrepen",
+      "quickPicksDepot": "Asset Depot-voorbeelden",
       "hint": "Asset-id's vindt u onder ‘My Assets’ op ion.cesium.com. De asset moet gedeeld zijn met het token dat in Instellingen is ingesteld.",
+      "depotHint": "Asset Depot-voorbeelden streamen pas nadat je ze via ion.cesium.com → Asset Depot aan je account toevoegt.",
       "errorAssetId": "Voer een Cesium Ion-asset-id in (een positief geheel getal).",
       "errorAltitude": "Voer de hoogteverschuiving in als een aantal meters.",
       "tokenMissing": "Er is geen Cesium Ion-token ingesteld. Voeg er een toe via Instellingen → Omgevingsvariabelen (VITE_CESIUM_TOKEN), anders kan de asset niet worden geladen."
@@ -508,6 +518,7 @@
       "selectType_one": "Kies uit {{count}} featuretype",
       "selectType_other": "Kies uit {{count}} featuretypen",
       "noTypesFound": "Er zijn geen featuretypen gevonden voor deze service.",
+      "errorNoFeatures": "Dit featuretype heeft geen features geretourneerd.",
       "retrieveError": "Kan geen featuretypen ophalen van deze service."
     },
     "wmts": {
@@ -966,7 +977,42 @@
       "modelTooLarge": "Dit model is groter dan de limiet van {{limit}} MB voor insluiten in een project. Host het en voeg het via een URL toe.",
       "modelFileError": "Kan dit model niet lezen. Kies een geldig glTF 2.0- of GLB-bestand."
     },
-    "nonGeographicCoordinates": "De coördinaten in {{names}} zijn geen lengte-/breedtegraad, dus er wordt niets op de kaart getekend. Het CRS klopt niet — herprojecteer de gegevens (of corrigeer de .prj) en laad ze opnieuw."
+    "nonGeographicCoordinates": "De coördinaten in {{names}} zijn geen lengte-/breedtegraad, dus er wordt niets op de kaart getekend. Het CRS klopt niet — herprojecteer de gegevens (of corrigeer de .prj) en laad ze opnieuw.",
+    "pmtiles": {
+      "errorUrl": "Voer een geldige HTTP- of HTTPS-URL voor PMTiles in.",
+      "errorMlt": "ArcGIS vereist MVT-vectortegels, geen MLT."
+    },
+    "lidar": {
+      "errorUrl": "Voer een geldige HTTP- of HTTPS-URL voor LiDAR in."
+    },
+    "zarr": {
+      "errorUrl": "Voer een geldige HTTP- of HTTPS-URL voor Zarr in.",
+      "errorColorLimits": "De maximale kleurgrens moet groter zijn dan de minimale."
+    },
+    "raster": {
+      "errorSource": "Voer een GeoTIFF-URL in of kies een bestand."
+    },
+    "wcs": {
+      "coverage": "Coverage",
+      "retrieve": "Coverages ophalen",
+      "select": "Selecteer een coverage",
+      "extent": "Coveragebereik gebruiken",
+      "width": "Breedte (pixels)",
+      "height": "Hoogte (pixels)",
+      "hint": "Downloadt een GeoTIFF in EPSG:4326 met de gekozen pixelafmetingen. Waarden kunnen opnieuw worden bemonsterd. Sla het raster op om de gedownloade gegevens te behouden.",
+      "errors": {
+        "xml": "De service heeft ongeldige XML teruggestuurd.",
+        "version": "Deze bron vereist WCS 1.0.0. De service heeft een niet-ondersteund antwoord teruggestuurd.",
+        "empty": "Er zijn geen overeenkomende coverages beschikbaar.",
+        "format": "De coverage biedt geen GeoTIFF-uitvoer aan.",
+        "crs": "De coverage moet EPSG:4326 ondersteunen voor aanvragen en uitvoer.",
+        "size": "Kies afmetingen van 1 tot 4096 pixels. Downloads zijn beperkt tot 128 MB.",
+        "metadata": "De service heeft meer metadata teruggestuurd dan GeoLibre kan laden. Metadata-antwoorden zijn beperkt tot 32 MB.",
+        "response": "De service heeft geen geldige GeoTIFF teruggestuurd.",
+        "bounds": "Voer een geldig kader in: west/oost binnen -180 tot 180, zuid/noord binnen -90 tot 90, met west < oost en zuid < noord.",
+        "url": "Voer een WCS-service-URL in."
+      }
+    }
   },
   "offline": {
     "title": "Offline gebied downloaden",
@@ -1931,7 +1977,7 @@
     "only3d": "Alleen 3D",
     "noMapbox": "Geen Mapbox",
     "noArcgis": "Geen ArcGIS",
-    "cesiumTokenHint": "Voeg in Instellingen een Cesium Ion-token toe voor terrein en Ion-beelden"
+    "cesiumTokenHint": "Voeg via <settingsLink>Instellingen → Omgevingsvariabelen</settingsLink> een Cesium Ion-token toe voor terrein en Ion-beelden"
   },
   "renderer": {
     "basemap": "Achtergrondkaart",
@@ -1941,6 +1987,7 @@
     "layerCesiumOnly": "Alleen weergegeven door de 3D-globe",
     "layerMapboxUnsupported": "Niet weergegeven door de Mapbox-engine",
     "layerArcgisUnsupported": "Niet weergegeven door de ArcGIS-engine",
+    "layerArcgisViewUnsupported": "Niet weergegeven in deze ArcGIS-weergave",
     "resetView": "Weergave herstellen",
     "scene3D": "3D-globe",
     "scene2D": "2D-kaart",
@@ -2320,6 +2367,55 @@
       }
     }
   },
+  "panel": {
+    "godsEyeView": {
+      "description": "Live, tijdgebonden gebeurtenissen op aarde uit openbare datafeeds.",
+      "globeOnly": "Live wereldbolfeeds worden op de Cesium-wereldbol weergegeven. Schakel over naar de 3D-wereldbol om ze te bekijken.",
+      "groups": {
+        "movement": "Beweging",
+        "cameras": "Camera's",
+        "infrastructure": "Infrastructuur",
+        "events": "Gebeurtenissen",
+        "utilities": "Hulpmiddelen"
+      },
+      "earthquakes": "Aardbevingen",
+      "spaceMissions": "Ruimtemissies (30 dagen)",
+      "satellites": "Satellieten",
+      "flights": "Livevluchten",
+      "militaryFlights": "Militaire vluchten",
+      "bikeShare": "Deelfietsen",
+      "transit": "Live openbaar vervoer",
+      "streetTraffic": "Gesimuleerd wegverkeer",
+      "mappedAlpr": "Gekarteerde kentekencamera's",
+      "cctv": "Openbare CCTV-camera's",
+      "cctvPopup": {
+        "liveSnapshot": "Livebeeld",
+        "provider": "Provider",
+        "attribution": "Naamsvermelding",
+        "privacy": "Privacy"
+      },
+      "radio": "Radiozenders",
+      "datacenters": "Datacenters",
+      "dams": "Dammen",
+      "cables": "Onderzeese kabels",
+      "osmInfrastructure": "OSM-infrastructuur",
+      "loading": "Bijwerken…",
+      "updateFailed": "Bijwerken mislukt",
+      "noneInView": "Geen features gevonden in de huidige weergave voor deze laag.",
+      "never": "Nooit",
+      "lastUpdated": "Laatst bijgewerkt: {{time}}",
+      "speed": "Snelheid",
+      "speedRealTime": "Realtime (1×)",
+      "speedMultiple": "{{factor}}×",
+      "denseSatellites": "Dichte satellietcatalogus",
+      "denseLoading": "DENSE ···",
+      "denseFailed": "DENSE !",
+      "denseCount": "DENSE · {{count}}",
+      "dense": "DENSE",
+      "denseError": "De Starlink-catalogus kon niet worden geladen: {{error}}. Selecteer om opnieuw te proberen.",
+      "denseDescription": "Toon de volledige Starlink-constellatie als lichte punten (zonder labels of tabelrijen)."
+    }
+  },
   "toolbar": {
     "menu": {
       "project": "Project",
@@ -2561,7 +2657,8 @@
       "czml": "Dynamische CZML-3D-scène",
       "gltfModel": "3D-model (glTF)",
       "postgres": "PostgreSQL-laag",
-      "iceberg": "Apache Iceberg-laag"
+      "iceberg": "Apache Iceberg-laag",
+      "wcs": "WCS-laag"
     },
     "conversion": {
       "vectorToVector": "Vector naar vector",
@@ -3029,6 +3126,8 @@
       "maplibre-gl-esri-wayback": "Historische beelden",
       "maplibre-gl-openaerialmap": "OpenAerialMap",
       "maplibre-gl-arcgis-hub": "ArcGIS Hub",
+      "geolibre-osm-downloader": "OSM-downloader",
+      "geolibre-ign-lidar-hd": "IGN LiDAR HD Downloader",
       "geolibre-stac-catalogs": "STAC-catalogi",
       "geolibre-planet-open-data": "Open data van Planet",
       "maplibre-gl-source-coop": "Source Cooperative",
@@ -3040,6 +3139,7 @@
       "maplibre-gl-huggingface": "Hugging Face",
       "carto-light": "Carto Light-basiskaart",
       "geolibre-flight-simulator": "Vluchtsimulator",
+      "gods-eye-view": "Alziend overzicht",
       "geolibre-route-animation": "Route-animatie",
       "geolibre-sun": "Zonsimulatie",
       "maplibre-atmosphere-effects": "Atmosferische effecten",
@@ -4598,6 +4698,10 @@
       "errorStartSidecar": "Kon de GeoLibre-sidecar niet starten.",
       "errorStopSidecar": "Kon de GeoLibre-sidecar niet stoppen.",
       "noToolsFound": "Geen gereedschappen gevonden.",
+      "searchToolsByMeaning": "Hulpmiddelen zoeken of een taak beschrijven",
+      "searchingByMeaning": "Catalogus doorzoeken op betekenis",
+      "bestMatches": "Beste overeenkomsten",
+      "otherMatches": "Overige overeenkomsten",
       "noParameters": "Dit gereedschap heeft geen parameters.",
       "noOutput": "Nog geen uitvoer.",
       "enabled": "Ingeschakeld",
@@ -7055,6 +7159,11 @@
       "invalidExpression": "Ongeldige expressie",
       "openBuilder": "Expressie-editor openen",
       "showFeatureId": "De rij met de object-id tonen",
+      "maxWidth": "Breedte van de pop-up (px)",
+      "maxWidthPlaceholder": "Standaard",
+      "imageHeight": "Hoogte van de afbeelding (px)",
+      "imageHeightPlaceholder": "Standaard",
+      "sizeHint": "Laat een van beide leeg voor de standaardwaarde. Een afbeelding behoudt haar verhouding, dus pas een bredere pop-up laat een foto de extra hoogte gebruiken.",
       "fields": "Velden",
       "allFields": "Geen velden gekozen, dus alle zichtbare velden worden getoond, in de volgorde van de gegevens zelf.",
       "addField": "Een veld toevoegen…",
@@ -7423,6 +7532,7 @@
     "viewportStretchNoRange": "De waarden in de weergave vormen geen bereik.",
     "viewportStretchMoved": "De kaart is verplaatst voordat het lezen klaar was. Pas opnieuw toe.",
     "index": "Index",
+    "opacityClasses": "Dekkingsklassen",
     "classifyToggle": "Indelen in discrete klassen",
     "method": "Methode",
     "methodEqualInterval": "Gelijk interval",
@@ -7984,5 +8094,77 @@
     "catalogHuc12pp": "HUC12-uitstroompunten",
     "catalogNmwdiSt": "Waterlocaties in New Mexico",
     "catalogFlowlines": "NHDPlus-stroomlijnen"
+  },
+  "plugin": {
+    "3d-tiles": {
+      "arcgisSourceUnsupported": "Gebruik een 3D Tiles-URL voor tileset.json in deze ArcGIS-weergave. Google Photorealistic- en I3S-tegels vereisen een andere renderer.",
+      "globeGoogleKeyRequired": "Google Photorealistic 3D Tiles hebben een Google Maps API-sleutel in Instellingen nodig om op de globe te laden."
+    },
+    "geolibre-osm-downloader": {
+      "title": "OSM-downloader",
+      "hint": "Download OpenStreetMap-objecten van het huidige kaartgebied via de publieke Overpass API.",
+      "attribution": "Data © OpenStreetMap-bijdragers, beschikbaar onder de ODbL.",
+      "featureType": "Type object",
+      "presetBuildings": "Gebouwen",
+      "presetRoads": "Wegen",
+      "presetAmenities": "Voorzieningen",
+      "presetWaterways": "Waterwegen",
+      "presetLanduse": "Grondgebruik",
+      "presetCustom": "Aangepaste tag",
+      "presetAll": "Alle getagde objecten",
+      "tagKey": "Tag-sleutel",
+      "tagValue": "Tag-waarde",
+      "tagKeyPlaceholder": "bijv. shop",
+      "tagValuePlaceholder": "optioneel, bijv. bakkerij",
+      "west": "West",
+      "south": "Zuid",
+      "east": "Oost",
+      "north": "Noord",
+      "useMapExtent": "Gebruik kaartbereik",
+      "download": "Download OSM-data",
+      "ready": "Kies een gebied en een type object.",
+      "exportGeoJson": "Opslaan als GeoJSON",
+      "mapUnavailable": "Het kaartbereik is nog niet beschikbaar.",
+      "extentApplied": "Kaartbereik toegepast.",
+      "downloading": "Downloaden van OpenStreetMap…",
+      "noFeatures": "Geen overeenkomende objecten gevonden in dit gebied.",
+      "error": "OSM-data kon niet worden gedownload: {{message}}",
+      "added": "{{count}} objecten toegevoegd aan de kaart."
+    },
+    "geolibre-ign-lidar-hd": {
+      "title": "IGN LiDAR HD",
+      "hint": "Doorzoek de IGN LiDAR HD-tegeldekking voor het huidige kaartgebied, voeg tegels als puntenwolken aan de kaart toe, of download hun COPC LAZ-bestanden van de servers van IGN.",
+      "attribution": "Data © IGN — LiDAR HD, gepubliceerd onder de Licence Ouverte 2.0.",
+      "west": "West",
+      "south": "Zuid",
+      "east": "Oost",
+      "north": "Noord",
+      "useMapExtent": "Gebruik kaartbereik",
+      "search": "Tegels zoeken",
+      "addToMap": "Toevoegen aan kaart",
+      "download": "Downloaden",
+      "ready": "Kies een gebied en zoek naar LiDAR HD-tegels.",
+      "mapUnavailable": "Het kaartbereik is nog niet beschikbaar.",
+      "extentApplied": "Kaartbereik toegepast.",
+      "searching": "IGN LiDAR HD-tegels worden gezocht…",
+      "noTiles": "Er zijn geen LiDAR HD-tegels gevonden in dit gebied.",
+      "noDownload": "geen puntenwolk gepubliceerd",
+      "layerName": "IGN LiDAR HD-tegels",
+      "found": "{{count}} tegel(s) gevonden.",
+      "foundTruncated": "De eerste {{count}} van {{matched}} tegels worden getoond. Verklein het zoekgebied om de rest te zien.",
+      "addedToMap": "{{name}} toegevoegd aan de kaart.",
+      "alreadyOnMap": "{{name}} staat al op de kaart.",
+      "unsupportedRenderer": "Puntenwolken vereisen de MapLibre- of Mapbox-renderer.",
+      "addError": "Kon {{name}} niet aan de kaart toevoegen: {{message}}",
+      "error": "Kon niet zoeken naar IGN LiDAR HD-tegels: {{message}}",
+      "selectAll": "Alles selecteren",
+      "selectTile": "{{name}} selecteren",
+      "addSelectedToMap": "Selectie toevoegen aan kaart",
+      "addSelectedToMapCount": "{{count}} geselecteerde toevoegen aan kaart",
+      "addingSelected": "{{count}} tegel(s) worden aan de kaart toegevoegd…",
+      "addedSelectedCount": "{{count}} tegel(s) toegevoegd aan de kaart.",
+      "alreadyOnMapCountPlural": "{{count}} tegel(s) stonden al op de kaart.",
+      "addSelectedFailedCount": "{{count}} tegel(s) konden niet worden toegevoegd."
+    }
   }
 }

@@ -5,6 +5,8 @@ import {
   resolvePopupTitle,
   resolvePopupBody,
   resolvePopupRows,
+  resolvePopupImageHeight,
+  resolvePopupMaxWidth,
   resolveConfiguredPopupTitle,
   type FieldVisibility,
   type LayerPopupConfig,
@@ -28,6 +30,80 @@ export interface IdentifyPopupOptions {
 }
 
 /**
+ * Closes the lightbox that is currently open, if any. Held module-side so a
+ * second image link tears the previous viewer down through the same path that
+ * unregisters its key handler, rather than orphaning the listener by removing
+ * only the DOM node.
+ */
+let closeActivePopupImageViewer: (() => void) | null = null;
+
+/** Open a configured popup image in a lightbox over the map. */
+function openPopupImageViewer(source: string, alt: string): void {
+  closeActivePopupImageViewer?.();
+  // Focus moves into the dialog and has to come back to whatever opened it,
+  // which is the image link in the popup unless the popup itself has gone.
+  const trigger = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+  const overlay = document.createElement("div");
+  overlay.className = "geolibre-photo-fullscreen geolibre-popup-image-viewer";
+  overlay.role = "dialog";
+  overlay.setAttribute("aria-modal", "true");
+  overlay.setAttribute("aria-label", alt);
+
+  const image = document.createElement("img");
+  image.src = source;
+  image.alt = alt;
+  image.className = "geolibre-popup-image-viewer-img";
+  // Pinned providers such as Caltrans serve small stills (320x260), and
+  // stretching one to the viewport just magnifies the JPEG artifacts. Publish
+  // the natural size so the stylesheet can stop enlarging past 2x.
+  const capToNaturalSize = () => {
+    if (!image.naturalWidth || !image.naturalHeight) return;
+    overlay.style.setProperty("--geolibre-popup-image-max-w", `${image.naturalWidth * 2}px`);
+    overlay.style.setProperty("--geolibre-popup-image-max-h", `${image.naturalHeight * 2}px`);
+  };
+  if (image.complete) capToNaturalSize();
+  else image.addEventListener("load", capToNaturalSize, { once: true });
+
+  const closeButton = document.createElement("button");
+  closeButton.type = "button";
+  closeButton.className = "geolibre-photo-fullscreen-close";
+  closeButton.textContent = "×";
+  closeButton.setAttribute("aria-label", "Close");
+
+  const close = () => {
+    document.removeEventListener("keydown", onKeyDown);
+    if (closeActivePopupImageViewer === close) closeActivePopupImageViewer = null;
+    overlay.remove();
+    if (trigger?.isConnected) trigger.focus();
+  };
+  const onKeyDown = (event: KeyboardEvent) => {
+    if (event.key === "Escape") {
+      // The globe's own Escape handler listens on `window` and would clear the
+      // Identify popup underneath, so closing the lightbox stops there.
+      event.stopPropagation();
+      close();
+      return;
+    }
+    // An aria-modal dialog must hold focus. The close button is its only
+    // control, so Tab in either direction stays on it instead of walking into
+    // the page behind the backdrop.
+    if (event.key === "Tab") {
+      event.preventDefault();
+      closeButton.focus();
+    }
+  };
+  closeButton.addEventListener("click", close);
+  overlay.addEventListener("click", (event) => {
+    if (event.target === overlay) close();
+  });
+  document.addEventListener("keydown", onKeyDown);
+  closeActivePopupImageViewer = close;
+  overlay.append(image, closeButton);
+  document.body.appendChild(overlay);
+  closeButton.focus();
+}
+
+/**
  * Draw one resolved value into its cell. `"auto"` keeps the historical
  * behavior (sanitized KML description markup, inline base64 images as
  * thumbnails, everything else as text); the explicit kinds render what the
@@ -37,14 +113,43 @@ export interface IdentifyPopupOptions {
 function renderPopupValue(cell: HTMLElement, row: PopupRow): void {
   if (row.kind === "image") {
     if (isSafePopupUrl(row.value, true)) {
+      const source = row.value.trim();
+      const isRemoteImage = /^https?:\/\//i.test(source);
+      const trigger = isRemoteImage
+        ? document.createElement("a")
+        : document.createElement("button");
+      if (trigger instanceof HTMLAnchorElement) {
+        trigger.href = source;
+        trigger.target = "_blank";
+        trigger.rel = "noopener noreferrer";
+      } else {
+        trigger.type = "button";
+      }
+      trigger.className = "geolibre-popup-image-link";
+      trigger.addEventListener("click", (event) => {
+        const mouseEvent = event as MouseEvent;
+        if (
+          isRemoteImage &&
+          (mouseEvent.button !== 0 ||
+            mouseEvent.metaKey ||
+            mouseEvent.ctrlKey ||
+            mouseEvent.shiftKey ||
+            mouseEvent.altKey)
+        ) {
+          return;
+        }
+        event.preventDefault();
+        openPopupImageViewer(source, row.label);
+      });
       const image = document.createElement("img");
       // Trimmed, because that is the copy isSafePopupUrl actually validated —
       // as in the link branch below.
-      image.src = row.value.trim();
+      image.src = source;
       image.alt = row.label;
       image.loading = "lazy";
-      image.className = "max-h-40 max-w-full rounded";
-      cell.appendChild(image);
+      image.className = "geolibre-popup-image rounded";
+      trigger.appendChild(image);
+      cell.appendChild(trigger);
       return;
     }
     cell.textContent = row.text;
@@ -86,13 +191,69 @@ function renderPopupValue(cell: HTMLElement, row: PopupRow): void {
       image.src = row.value;
       image.alt = row.field;
       image.loading = "lazy";
-      image.className = "max-h-40 max-w-full rounded";
+      image.className = "geolibre-popup-inline-image rounded";
       cell.appendChild(image);
       return;
     }
   }
 
   cell.textContent = row.text;
+}
+
+/**
+ * MapLibre's own `maxWidth` for an Identify popup, which caps the shell the
+ * root element sits in. It has to clear the author's width or the shell would
+ * clip what the root was just told it may use; the 40px is the popup content's
+ * padding plus its border, the same slack the 560px default leaves over the
+ * root's 520px cap.
+ */
+export const IDENTIFY_POPUP_SHELL_PADDING = 40;
+
+/** The `maxWidth` option for a MapLibre Identify popup showing this config. */
+export function identifyPopupShellMaxWidth(popup: LayerPopupConfig | undefined): string {
+  const maxWidth = resolvePopupMaxWidth(popup);
+  return maxWidth === undefined ? "560px" : `${maxWidth + IDENTIFY_POPUP_SHELL_PADDING}px`;
+}
+
+/**
+ * Apply an author's {@link LayerPopupConfig.maxWidth} to a *filled* popup root.
+ *
+ * Written as an inline style so it beats both the Tailwind cap on the element
+ * and the wider `:has(.geolibre-popup-image)` rule in the app stylesheet, and
+ * kept inside `min()` with the viewport so an oversized setting still leaves
+ * the map visible on a phone.
+ *
+ * `width` is set only for a popup that carries a picture, which is why this
+ * runs after the content is in place. There the `:has(.geolibre-popup-image)`
+ * rule already pins a fixed `width: min(420px, …)` that has to be overridden
+ * or the new cap could never be reached, and the image is `width: 100%` of its
+ * cell, so a shrink-to-fit popup would draw a thumbnail as narrow as the text
+ * beside it. A text-only popup keeps shrinking to its content the way it
+ * always has, with the author's value as its ceiling rather than its size.
+ */
+export function applyPopupWidth(root: HTMLElement, popup: LayerPopupConfig | undefined): void {
+  const maxWidth = resolvePopupMaxWidth(popup);
+  if (maxWidth === undefined) return;
+  const cap = `min(${maxWidth}px, calc(100vw - 48px))`;
+  root.style.maxWidth = cap;
+  if (root.querySelector(".geolibre-popup-image")) root.style.width = cap;
+}
+
+/**
+ * Publish an author's {@link LayerPopupConfig.imageHeight} to the stylesheet.
+ *
+ * The cap belongs to `.geolibre-popup-image`, which the rows element does not
+ * own, so this sets the custom property the rule reads rather than styling the
+ * images directly — the fullscreen-image popup variant can then still drop the
+ * cap entirely, as it always has.
+ */
+export function applyPopupImageHeight(
+  rows: HTMLElement,
+  popup: LayerPopupConfig | undefined,
+): void {
+  const height = resolvePopupImageHeight(popup);
+  if (height === undefined) return;
+  rows.style.setProperty("--geolibre-popup-image-height", `${height}px`);
 }
 
 export function createIdentifyPopupElement(
@@ -120,6 +281,10 @@ export function createIdentifyPopupElement(
 
   root.appendChild(createIdentifyPopupRows(properties, featureId, options));
 
+  // Last, because applyPopupWidth reads the finished content to decide whether
+  // the popup needs a fixed width or may keep shrinking to fit.
+  applyPopupWidth(root, popup);
+
   return root;
 }
 
@@ -135,6 +300,7 @@ export function createIdentifyPopupRows(
 
   const rows = document.createElement("div");
   rows.className = scrollable ? "geolibre-identify-popup-rows pe-2" : "pe-2";
+  applyPopupImageHeight(rows, popup);
 
   // An author-supplied body expression replaces the whole body outright — the
   // field table AND the synthetic id row. The point of it is a sentence
@@ -154,6 +320,7 @@ export function createIdentifyPopupRows(
   const appendRow = (row: PopupRow) => {
     const rowElement = document.createElement("div");
     rowElement.className = "grid grid-cols-[minmax(5rem,0.45fr)_1fr] gap-2 border-t py-1";
+    if (row.kind === "image") rowElement.classList.add("geolibre-identify-popup-image-row");
 
     const keyCell = document.createElement("div");
     keyCell.className = "break-words font-medium text-muted-foreground";
@@ -161,6 +328,7 @@ export function createIdentifyPopupRows(
 
     const valueCell = document.createElement("div");
     valueCell.className = "break-words text-foreground";
+    if (row.kind === "image") valueCell.classList.add("geolibre-popup-image-cell");
     renderPopupValue(valueCell, row);
 
     rowElement.append(keyCell, valueCell);

@@ -22,6 +22,7 @@
     "noMatches": "Không có kết quả phù hợp.",
     "addFailed": "Không thể thêm nguồn dữ liệu này.",
     "builtinBadge": "tích hợp sẵn",
+    "configBadge": "config",
     "newConnection": "Kết nối {{kind}} mới",
     "loadingTables": "Đang tải bảng...",
     "files": "Tập tin",
@@ -357,6 +358,10 @@
       "kml": {
         "label": "KML / KMZ",
         "description": "Tải KML hoặc KMZ lên địa cầu với kiểu gốc, lớp phủ và liên kết mạng."
+      },
+      "wcs": {
+        "description": "Tải tập con GeoTIFF dạng số từ dịch vụ WCS 1.0.0.",
+        "label": "Lớp WCS"
       }
     },
     "shared": {
@@ -396,6 +401,7 @@
       "loadAria": "Tải một dịch vụ đã lưu",
       "loadPlaceholder": "Tải dịch vụ đã lưu…",
       "builtin": "{{name}} (tích hợp sẵn)",
+      "config": "{{name}} (config)",
       "deleteAria": "Xóa dịch vụ đã lưu",
       "empty": "Chưa có dịch vụ nào được lưu - hãy điền vào biểu mẫu và chọn “Lưu hiện tại”.",
       "name": "Hồ toàn cầu (bản demo pygeoapi)",
@@ -419,7 +425,11 @@
       "kindImagery": "Hình ảnh",
       "altitudeOffset": "Độ lệch cao độ (m)",
       "quickPicks": "Chọn nhanh",
+      "quickPicksPlaceholder": "Chọn tài sản…",
+      "quickPicksGlobal": "Có sẵn trong mọi tài khoản ion",
+      "quickPicksDepot": "Mẫu từ Asset Depot",
       "hint": "Tìm id tài sản trong mục My Assets tại ion.cesium.com. Tài sản phải được chia sẻ với mã thông báo đã cấu hình trong Cài đặt.",
+      "depotHint": "Mẫu từ Asset Depot chỉ phát trực tuyến sau khi bạn thêm chúng vào tài khoản tại ion.cesium.com → Asset Depot.",
       "errorAssetId": "Nhập id tài sản Cesium Ion (một số nguyên dương).",
       "errorAltitude": "Nhập độ lệch cao độ dưới dạng số mét.",
       "tokenMissing": "Chưa cấu hình mã thông báo Cesium Ion. Hãy thêm trong Cài đặt → Biến môi trường (VITE_CESIUM_TOKEN), nếu không tài sản sẽ không tải được."
@@ -497,6 +507,7 @@
       "retrievedTypes": "API OGC - Lớp tính năng",
       "selectType_other": "Chọn từ các loại tính năng {{count}}",
       "noTypesFound": "Không tìm thấy loại tính năng nào cho dịch vụ này.",
+      "errorNoFeatures": "Loại tính năng này không trả về tính năng nào.",
       "retrieveError": "Không thể truy xuất các loại tính năng từ dịch vụ này.",
       "defaultName": "Lớp WFS",
       "sampleLabel": "Các tiểu bang của Hoa Kỳ (GeoServer)",
@@ -945,7 +956,42 @@
       "localFile": "Tệp cục bộ",
       "urlPlaceholder": "https://example.com/data.csv"
     },
-    "nonGeographicCoordinates": "Tọa độ trong {{names}} không phải là kinh độ/vĩ độ nên sẽ không có gì được vẽ trên bản đồ. CRS bị gắn nhãn sai — chiếu lại dữ liệu (hoặc sửa .prj của nó) và tải lại."
+    "nonGeographicCoordinates": "Tọa độ trong {{names}} không phải là kinh độ/vĩ độ nên sẽ không có gì được vẽ trên bản đồ. CRS bị gắn nhãn sai — chiếu lại dữ liệu (hoặc sửa .prj của nó) và tải lại.",
+    "pmtiles": {
+      "errorUrl": "Hãy nhập URL PMTiles hợp lệ theo HTTP hoặc HTTPS.",
+      "errorMlt": "ArcGIS yêu cầu ô bản đồ vector MVT, không phải MLT."
+    },
+    "lidar": {
+      "errorUrl": "Hãy nhập URL LiDAR hợp lệ theo HTTP hoặc HTTPS."
+    },
+    "zarr": {
+      "errorUrl": "Hãy nhập URL Zarr hợp lệ theo HTTP hoặc HTTPS.",
+      "errorColorLimits": "Giới hạn màu tối đa phải lớn hơn giới hạn tối thiểu."
+    },
+    "raster": {
+      "errorSource": "Nhập URL GeoTIFF hoặc chọn một tệp."
+    },
+    "wcs": {
+      "coverage": "Vùng phủ",
+      "retrieve": "Lấy các vùng phủ",
+      "select": "Chọn vùng phủ",
+      "extent": "Dùng phạm vi vùng phủ",
+      "width": "Chiều rộng (pixel)",
+      "height": "Chiều cao (pixel)",
+      "hint": "Tải GeoTIFF theo EPSG:4326 với kích thước pixel đã chọn. Giá trị có thể được lấy mẫu lại. Lưu raster để giữ dữ liệu đã tải.",
+      "errors": {
+        "xml": "Dịch vụ trả về XML không hợp lệ.",
+        "version": "Nguồn này yêu cầu WCS 1.0.0. Dịch vụ trả về phản hồi không được hỗ trợ.",
+        "empty": "Không có vùng phủ phù hợp.",
+        "format": "Vùng phủ không công bố đầu ra GeoTIFF.",
+        "crs": "Vùng phủ phải hỗ trợ EPSG:4326 cho cả yêu cầu và đầu ra.",
+        "size": "Chọn kích thước từ 1 đến 4096 pixel. Giới hạn tải xuống là 128 MB.",
+        "metadata": "Dịch vụ trả về nhiều siêu dữ liệu hơn mức GeoLibre có thể tải. Giới hạn phản hồi siêu dữ liệu là 32 MB.",
+        "response": "Dịch vụ không trả về GeoTIFF hợp lệ.",
+        "bounds": "Nhập một ô hợp lệ: tây/đông trong khoảng -180 đến 180, nam/bắc trong khoảng -90 đến 90, với tây < đông và nam < bắc.",
+        "url": "Nhập URL dịch vụ WCS."
+      }
+    }
   },
   "offline": {
     "title": "Tải xuống khu vực ngoại tuyến",
@@ -1885,7 +1931,7 @@
     "only3d": "chỉ 3D",
     "noMapbox": "không Mapbox",
     "noArcgis": "không ArcGIS",
-    "cesiumTokenHint": "Thêm mã thông báo Cesium Ion trong Cài đặt để dùng địa hình và ảnh vệ tinh Ion"
+    "cesiumTokenHint": "Thêm mã thông báo Cesium Ion trong <settingsLink>Cài đặt → Biến môi trường</settingsLink> để dùng địa hình và ảnh vệ tinh Ion"
   },
   "renderer": {
     "basemap": "Sơ đồ cơ sở",
@@ -1895,6 +1941,7 @@
     "layerCesiumOnly": "Chỉ được kết xuất trên quả địa cầu 3D",
     "layerMapboxUnsupported": "Không được kết xuất bởi công cụ Mapbox",
     "layerArcgisUnsupported": "Không được kết xuất bởi công cụ ArcGIS",
+    "layerArcgisViewUnsupported": "Không được kết xuất trong chế độ xem ArcGIS này",
     "resetView": "Đặt lại chế độ xem",
     "scene3D": "Quả địa cầu 3D",
     "scene2D": "Bản đồ 2D",
@@ -2272,6 +2319,55 @@
       }
     }
   },
+  "panel": {
+    "godsEyeView": {
+      "description": "Các sự kiện Trái Đất trực tiếp, có yếu tố thời gian từ nguồn dữ liệu công khai.",
+      "globeOnly": "Nguồn dữ liệu trực tiếp được hiển thị trên địa cầu Cesium. Hãy chuyển sang địa cầu 3D để xem.",
+      "groups": {
+        "movement": "Di chuyển",
+        "cameras": "Camera",
+        "infrastructure": "Cơ sở hạ tầng",
+        "events": "Sự kiện",
+        "utilities": "Tiện ích"
+      },
+      "earthquakes": "Động đất",
+      "spaceMissions": "Sứ mệnh không gian (30 ngày)",
+      "satellites": "Vệ tinh",
+      "flights": "Chuyến bay trực tiếp",
+      "militaryFlights": "Chuyến bay quân sự",
+      "bikeShare": "Chia sẻ xe đạp",
+      "transit": "Giao thông công cộng trực tiếp",
+      "streetTraffic": "Giao thông đường phố mô phỏng",
+      "mappedAlpr": "Camera nhận dạng biển số đã lập bản đồ",
+      "cctv": "Camera CCTV công cộng",
+      "cctvPopup": {
+        "liveSnapshot": "Hình ảnh trực tiếp",
+        "provider": "Nhà cung cấp",
+        "attribution": "Ghi công",
+        "privacy": "Quyền riêng tư"
+      },
+      "radio": "Đài phát thanh",
+      "datacenters": "Trung tâm dữ liệu",
+      "dams": "Đập",
+      "cables": "Cáp ngầm biển",
+      "osmInfrastructure": "Hạ tầng OSM",
+      "loading": "Đang cập nhật…",
+      "updateFailed": "Cập nhật thất bại",
+      "noneInView": "Không tìm thấy tính năng nào trong chế độ xem hiện tại cho lớp này.",
+      "never": "Chưa bao giờ",
+      "lastUpdated": "Cập nhật lần cuối: {{time}}",
+      "speed": "Tốc độ",
+      "speedRealTime": "Thời gian thực (1×)",
+      "speedMultiple": "{{factor}}×",
+      "denseSatellites": "Danh mục vệ tinh dày đặc",
+      "denseLoading": "DENSE ···",
+      "denseFailed": "DENSE !",
+      "denseCount": "DENSE · {{count}}",
+      "dense": "DENSE",
+      "denseError": "Không thể tải danh mục Starlink: {{error}}. Chọn để thử lại.",
+      "denseDescription": "Hiển thị toàn bộ chòm vệ tinh Starlink dưới dạng các điểm nhẹ (không có nhãn hoặc hàng bảng)."
+    }
+  },
   "toolbar": {
     "menu": {
       "project": "Dự án",
@@ -2513,7 +2609,8 @@
       "czml": "Cảnh 3D động CZML",
       "gltfModel": "Mô hình 3D (glTF)",
       "postgres": "Lớp PostgreSQL",
-      "iceberg": "Lớp Apache Iceberg"
+      "iceberg": "Lớp Apache Iceberg",
+      "wcs": "Lớp WCS"
     },
     "conversion": {
       "vectorToVector": "Vectơ sang Vectơ",
@@ -2985,6 +3082,8 @@
       "maplibre-gl-esri-wayback": "Hình ảnh lịch sử",
       "maplibre-gl-openaerialmap": "MởBản đồ trên không",
       "maplibre-gl-arcgis-hub": "Trung tâm ArcGIS",
+      "geolibre-osm-downloader": "Trình tải xuống OSM",
+      "geolibre-ign-lidar-hd": "IGN LiDAR HD Downloader",
       "geolibre-stac-catalogs": "Sơ đồ cơ sở OpenStreetMap",
       "geolibre-planet-open-data": "Dữ liệu mở Planet",
       "maplibre-gl-source-coop": "Hợp tác xã nguồn",
@@ -3006,6 +3105,7 @@
       "maplibre-gl-huggingface": "ôm mặt",
       "carto-light": "Sơ đồ cơ sở ánh sáng Carto",
       "geolibre-flight-simulator": "Trình mô phỏng chuyến bay",
+      "gods-eye-view": "Góc nhìn toàn tri",
       "geolibre-route-animation": "Hoạt hình tuyến đường",
       "geolibre-sun": "Mô phỏng mặt trời",
       "maplibre-atmosphere-effects": "GeoJSON không có tính năng điểm nào để đặt mô hình.",
@@ -4525,6 +4625,10 @@
       "errorStartSidecar": "Không thể khởi động sidecar GeoLibre.",
       "errorStopSidecar": "Không thể dừng sidecar GeoLibre.",
       "noToolsFound": "Không tìm thấy công cụ nào.",
+      "searchToolsByMeaning": "Tìm công cụ hoặc mô tả một tác vụ",
+      "searchingByMeaning": "Đang tìm trong danh mục theo ngữ nghĩa",
+      "bestMatches": "Kết quả phù hợp nhất",
+      "otherMatches": "Kết quả khác",
       "noParameters": "Công cụ này không có tham số.",
       "noOutput": "Chưa có đầu ra.",
       "enabled": "Đã bật",
@@ -6975,6 +7079,11 @@
       "invalidExpression": "Biểu thức không hợp lệ",
       "openBuilder": "Mở trình tạo biểu thức",
       "showFeatureId": "Hiển thị hàng id của đối tượng",
+      "maxWidth": "Chiều rộng cửa sổ bật lên (px)",
+      "maxWidthPlaceholder": "Mặc định",
+      "imageHeight": "Chiều cao của ảnh (px)",
+      "imageHeightPlaceholder": "Mặc định",
+      "sizeHint": "Để trống để dùng giá trị mặc định. Ảnh giữ nguyên tỷ lệ khung hình, nên phải mở rộng cửa sổ bật lên thì ảnh mới dùng được phần chiều cao tăng thêm.",
       "fields": "Trường",
       "allFields": "Chưa chọn trường nào, nên mọi trường hiển thị được đều xuất hiện theo đúng thứ tự của dữ liệu.",
       "addField": "Thêm trường…",
@@ -7334,6 +7443,7 @@
     "viewportStretchNoRange": "Các giá trị trong khung nhìn không xác định được một khoảng.",
     "viewportStretchMoved": "Bản đồ đã di chuyển trước khi đọc xong. Hãy áp dụng lại.",
     "index": "chỉ mục",
+    "opacityClasses": "Các lớp độ mờ",
     "classifyToggle": "Phân loại thành các lớp riêng biệt",
     "method": "Phương pháp",
     "methodEqualInterval": "Khoảng bằng nhau",
@@ -7897,5 +8007,77 @@
     "catalogHuc12pp": "Điểm thoát nước HUC12",
     "catalogNmwdiSt": "Trạm quan trắc nước New Mexico",
     "catalogFlowlines": "Đường dòng chảy NHDPlus"
+  },
+  "plugin": {
+    "3d-tiles": {
+      "arcgisSourceUnsupported": "Sử dụng URL tileset.json của 3D Tiles trong chế độ xem ArcGIS này. Các ô Google Photorealistic và I3S cần một bộ kết xuất khác.",
+      "globeGoogleKeyRequired": "Google Photorealistic 3D Tiles cần khóa API Google Maps trong Cài đặt để tải trên quả địa cầu."
+    },
+    "geolibre-osm-downloader": {
+      "title": "Trình tải xuống OSM",
+      "hint": "Tải các đối tượng OpenStreetMap từ khu vực bản đồ hiện tại bằng Overpass API công khai.",
+      "attribution": "Dữ liệu © các cộng tác viên OpenStreetMap, có sẵn theo giấy phép ODbL.",
+      "featureType": "Loại đối tượng",
+      "presetBuildings": "Công trình",
+      "presetRoads": "Đường",
+      "presetAmenities": "Tiện ích",
+      "presetWaterways": "Thủy lộ",
+      "presetLanduse": "Sử dụng đất",
+      "presetCustom": "Thẻ tùy chỉnh",
+      "presetAll": "Tất cả đối tượng có thẻ",
+      "tagKey": "Khóa thẻ",
+      "tagValue": "Giá trị thẻ",
+      "tagKeyPlaceholder": "vd. shop",
+      "tagValuePlaceholder": "tùy chọn, vd. bakery",
+      "west": "Tây",
+      "south": "Nam",
+      "east": "Đông",
+      "north": "Bắc",
+      "useMapExtent": "Dùng phạm vi bản đồ",
+      "download": "Tải dữ liệu OSM",
+      "ready": "Chọn khu vực và loại đối tượng.",
+      "exportGeoJson": "Lưu GeoJSON",
+      "mapUnavailable": "Phạm vi bản đồ chưa khả dụng.",
+      "extentApplied": "Đã áp dụng phạm vi bản đồ.",
+      "downloading": "Đang tải từ OpenStreetMap…",
+      "noFeatures": "Không tìm thấy đối tượng phù hợp trong khu vực này.",
+      "error": "Không thể tải dữ liệu OSM: {{message}}",
+      "added": "Đã thêm {{count}} đối tượng vào bản đồ."
+    },
+    "geolibre-ign-lidar-hd": {
+      "title": "IGN LiDAR HD",
+      "hint": "Tìm kiếm phạm vi phủ của các ô IGN LiDAR HD cho khu vực bản đồ hiện tại, thêm các ô vào bản đồ dưới dạng đám mây điểm, hoặc tải xuống tệp COPC LAZ của chúng từ máy chủ của IGN.",
+      "attribution": "Dữ liệu © IGN — LiDAR HD, được công bố theo Licence Ouverte 2.0.",
+      "west": "Tây",
+      "south": "Nam",
+      "east": "Đông",
+      "north": "Bắc",
+      "useMapExtent": "Dùng phạm vi bản đồ",
+      "search": "Tìm kiếm các ô",
+      "addToMap": "Thêm vào bản đồ",
+      "download": "Tải xuống",
+      "ready": "Chọn một khu vực và tìm kiếm các ô LiDAR HD.",
+      "mapUnavailable": "Phạm vi bản đồ chưa khả dụng.",
+      "extentApplied": "Đã áp dụng phạm vi bản đồ.",
+      "searching": "Đang tìm kiếm các ô IGN LiDAR HD…",
+      "noTiles": "Không tìm thấy ô LiDAR HD nào trong khu vực này.",
+      "noDownload": "chưa có đám mây điểm được công bố",
+      "layerName": "Các ô IGN LiDAR HD",
+      "found": "Đã tìm thấy {{count}} ô.",
+      "foundTruncated": "Đang hiển thị {{count}} ô đầu tiên trong tổng số {{matched}} ô. Thu hẹp khu vực tìm kiếm để xem phần còn lại.",
+      "addedToMap": "Đã thêm {{name}} vào bản đồ.",
+      "alreadyOnMap": "{{name}} đã có trên bản đồ.",
+      "unsupportedRenderer": "Đám mây điểm yêu cầu công cụ kết xuất MapLibre hoặc Mapbox.",
+      "addError": "Không thể thêm {{name}} vào bản đồ: {{message}}",
+      "error": "Không thể tìm kiếm các ô IGN LiDAR HD: {{message}}",
+      "selectAll": "Chọn tất cả",
+      "selectTile": "Chọn {{name}}",
+      "addSelectedToMap": "Thêm mục đã chọn vào bản đồ",
+      "addSelectedToMapCount": "Thêm {{count}} mục đã chọn vào bản đồ",
+      "addingSelected": "Đang thêm {{count}} ô vào bản đồ…",
+      "addedSelectedCount": "Đã thêm {{count}} ô vào bản đồ.",
+      "alreadyOnMapCountPlural": "{{count}} ô đã có sẵn trên bản đồ.",
+      "addSelectedFailedCount": "Không thể thêm {{count}} ô."
+    }
   }
 }

@@ -481,6 +481,7 @@ default. Point them at your own server instead, or turn the feature off:
 docker run --rm -p 8080:80 \
   -e GEOLIBRE_SHARE_URL=https://maps.example.org \
   -e GEOLIBRE_COLLAB_URL=wss://collab.example.org \
+  -e GEOLIBRE_GEOLENS_URL=https://catalog.example.org \
   ghcr.io/opengeos/geolibre:latest
 ```
 
@@ -488,19 +489,23 @@ docker run --rm -p 8080:80 \
 | --- | --- |
 | `GEOLIBRE_SHARE_URL` | Base URL of the project sharing server. Unset uses `share.geolibre.app`. Set it to `off` to remove Share and the Project Gallery from the UI entirely. |
 | `GEOLIBRE_COLLAB_URL` | Base URL of the [collaboration](collaboration.md) relay. Unset leaves live collaboration disabled. |
+| `GEOLIBRE_GEOLENS_URL` | Default GeoLens server root without a query or fragment. The plugin connects automatically and remembers the last successful server; unset uses the image's baked default. Set `same-origin` for a co-located deployment or `off` to leave the panel idle until the user chooses a server. |
 
-Both are read at container startup, so a prebuilt image can be repointed by
-restarting it with different values — no rebuild. (The equivalent build
-arguments, `VITE_GEOLIBRE_SHARE_URL` and `VITE_GEOLIBRE_COLLAB_URL`, exist for
-baking a default into your own image.)
+All three are read at container startup, so a prebuilt image can be repointed by
+restarting it with different values, with no rebuild. (The equivalent build
+arguments, `VITE_GEOLIBRE_SHARE_URL`, `VITE_GEOLIBRE_COLLAB_URL`, and
+`VITE_GEOLENS_DEFAULT_URL`, exist for baking defaults into your own image. The
+last one defaults to `same-origin` and can be overridden when building.)
 
 When `GEOLIBRE_COLLAB_URL` is set, the entrypoint also adds that relay's origin to
 the container's `Content-Security-Policy` `connect-src`, so the browser is allowed
 to open the WebSocket. (The directive has a bare `https:`, which covers any share
 server, but no bare `wss:`.) No manual edit of `docker/nginx.conf` is needed.
 
-Both must use TLS — `https://` for the share server, `wss://` for the relay —
-because the app sends your API token to the share server with every request.
+All remote services must use TLS because the app may send credentials to the
+configured service. Use `https://` for the share and GeoLens servers and
+`wss://` for the relay.
+For GeoLens only, a scheme-less host is interpreted as HTTPS.
 Plaintext is accepted only on `localhost` / `127.0.0.1` for local development, so
 put a self-hosted server behind a reverse proxy that terminates TLS. A value that
 does not satisfy this **fails the container boot** with an error naming the
@@ -596,6 +601,152 @@ Its Docker image defaults to a SQLite database and filesystem objects under
 service's
 [`README`](https://github.com/opengeos/GeoLibre/tree/main/backend/geolibre_server_api)
 for Postgres and S3-compatible storage configuration.
+
+#### Deployment service library
+
+GeoLibre ships a small read-only service library (Sentinel-2 cloudless OSM,
+GEBCO, GeoServer examples) so the Browser and the Add Data dialog are useful on
+first run. Self-hosted deployments can add their own organization-wide services
+to that library without rebuilding or forking the app, by mounting a service
+catalog JSON and pointing the entrypoint at it:
+
+```bash
+docker run --rm -p 8080:80 \
+  -v /srv/geolibre/services.json:/data/services.json:ro \
+  -e GEOLIBRE_SERVICES_FILE=/data/services.json \
+  ghcr.io/opengeos/geolibre:latest
+```
+
+To show only the configured and personal services, add
+`-e GEOLIBRE_BUILTIN_SERVICES=off` — the built-in starter set (USGS, GEBCO,
+OSM samples) disappears from the Browser and every Add Data service picker.
+Unset (the default) keeps them; any other nonempty value fails the container
+boot so a typo cannot silently keep publishing the built-ins.
+
+The file is read at **container startup** — change it and restart the container
+(visitors refresh their browser tab) to repoint a prebuilt image, no rebuild.
+One catalog can mix the two endpoint styles: the relative entries below resolve
+against the GeoLibre origin itself (reverse-proxy your GIS services onto the
+same host or path the app is served from, and no per-user URL configuration is
+needed), while the absolute `https://` entries point at services on their own
+host — the last three are the app's own starter services, kept as working
+references for the field shapes:
+
+```json
+{
+  "services": [
+    {
+      "id": "org-geoserver-wms",
+      "name": "Internal GeoServer",
+      "category": "Organization",
+      "kind": "wms",
+      "fields": {
+        "endpoint": "/geoserver/wms",
+        "layers": "",
+        "format": "image/png",
+        "transparent": true,
+        "tileSize": "256"
+      }
+    },
+    {
+      "id": "org-geoserver-wfs",
+      "name": "Internal GeoServer Features",
+      "category": "Organization",
+      "kind": "wfs",
+      "fields": {
+        "endpoint": "/geoserver/wfs",
+        "version": "2.0.0",
+        "outputFormat": "application/json",
+        "srsName": "EPSG:4326"
+      }
+    },
+    {
+      "id": "org-tiles",
+      "name": "Internal Tiles",
+      "category": "Organization",
+      "kind": "xyz",
+      "fields": {
+        "url": "/tiles/{z}/{x}/{y}.png",
+        "tileSize": "256"
+      }
+    },
+    {
+      "id": "ref-xyz",
+      "name": "USGS national imagery",
+      "kind": "xyz",
+      "fields": {
+        "url": "https://basemap.nationalmap.gov/arcgis/rest/services/USGSImageryOnly/MapServer/tile/{z}/{y}/{x}"
+      }
+    },
+    {
+      "id": "ref-wms",
+      "name": "OSM WMS",
+      "kind": "wms",
+      "fields": {
+        "endpoint": "https://ows.terrestris.de/osm/service",
+        "layers": "OSM-WMS",
+        "format": "image/png",
+        "transparent": true,
+        "tileSize": "256"
+      }
+    },
+    {
+      "id": "ref-wfs",
+      "name": "GeoServer demo features",
+      "kind": "wfs",
+      "fields": {
+        "endpoint": "https://ahocevar.com/geoserver/wfs",
+        "version": "1.1.0",
+        "typeName": "topp:states",
+        "outputFormat": "application/json",
+        "srsName": "EPSG:4326",
+        "maxFeatures": "1000"
+      }
+    }
+  ]
+}
+```
+
+Each entry is one of the built-in service kinds (`wms`, `wfs`, `wmts`, `xyz`,
+`arcgis`, `csw`). Startup validates only the structural conditions described
+here; a well-formed entry is published even when its kind-specific fields are
+incomplete, and the Add Data form validates those fields when a user actually
+connects. The fields each kind's form saves are:
+
+- `wms` — `endpoint`, `layers`, `styles`, `format`, `transparent`, `tileSize`, `version`
+- `wfs` — `endpoint`, `version`, `typeName`, `outputFormat`, `srsName`, `maxFeatures`
+- `wmts` — `url`, `tileSize`
+- `xyz` — `url`, `tileSize`, `shortUrl`
+- `arcgis` — `layerType`, `sourceType`, `url`, `itemId`, `portalUrl`, `pageSize`, `maxFeatures`, `sublayers`, `renderingRule`
+- `csw` — `endpoint`, `keyword`
+
+Configured services:
+
+- appear automatically in the Browser and in every Add Data service picker;
+- are read-only — users can apply them, and save a personal copy, but cannot
+  edit or delete the organization's entries;
+- are **not** stored in `localStorage` or included in service-library
+  import/export;
+- are individually marked *config* in the UI, distinct from built-in
+  entries.
+
+Invalid entries — a missing id, an unknown kind, duplicate ids, empty
+fields, integers outside JavaScript's safe integer range (2<sup>53</sup>−1),
+or non-finite numbers — **fail the container boot** with an error naming the
+offending entry, rather than publishing a half-configured library.
+
+!!! warning "Made for public data"
+    The catalog is published to every visitor as part of the page's runtime
+    configuration (the same file that carries the sign-in keys and share URL),
+    so treat it as public and never put credentials, signed URLs, or
+    authentication tokens in service fields.
+
+For a non-Docker static hosting, serve the same `window.__GEOLIBRE_DEPLOYMENT_ENV__`
+object yourself, with `VITE_GEOLIBRE_SERVICES` set to the JSON string of that
+`{ "services": [...] }` document — the app reads it, unchanged, from
+`geolibre-runtime-config.js`. Set `VITE_GEOLIBRE_BUILTIN_SERVICES` to `"off"`
+in the same object to hide the built-in starter services, mirroring
+`GEOLIBRE_BUILTIN_SERVICES=off` in Docker.
 
 ### Run the desktop app
 
@@ -740,7 +891,7 @@ Keys set via **Settings → Environment Variables**, or typed directly into the 
 
 ## Optional 3D globe credentials (Cesium Ion)
 
-The optional **Cesium 3D-globe view** — a split-pane globe rendered with [CesiumJS](https://cesium.com/platform/cesiumjs/) alongside the 2D MapLibre map — works with no credentials at all: it draws whatever basemap the project is using. A [Cesium Ion](https://ion.cesium.com/) access token is optional, and adds Cesium World Terrain (relief on tilted views) plus Ion World Imagery as the fallback for a basemap that has no raster form. To use one, create a free Ion account, copy your default access token, and set it at build time:
+The optional **Cesium 3D-globe renderer** can own the primary map or any pane in a mixed-engine split layout. It requires a [Cesium Ion](https://ion.cesium.com/) access token. The hosted web version bundles a demo token, so the globe works there out of the box, but the desktop and mobile apps need your own. The token enables Cesium World Terrain (relief on tilted views) plus Ion World Imagery as the fallback for a basemap that has no raster form. To get one, create a free Ion account, copy your default access token, and set it at build time:
 
 ```env
 CESIUM_TOKEN=your_cesium_ion_access_token

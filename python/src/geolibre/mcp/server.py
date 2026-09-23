@@ -557,6 +557,7 @@ def build_server(workspace: Workspace) -> MCPServer:
         transparent: bool = True,
         tile_size: int = 256,
         version: str | None = "1.1.1",
+        crs: str | None = None,
         bounds: list[float] | None = None,
         index: int | None = None,
     ) -> dict[str, Any]:
@@ -574,6 +575,12 @@ def build_server(workspace: Workspace) -> MCPServer:
             transparent: Request a transparent background (WMS).
             tile_size: Tile edge in pixels.
             version: WMS protocol version, e.g. `1.1.1` or `1.3.0`.
+            crs: The CRS WMS tiles are requested in; `EPSG:3857` when
+                omitted. Check the capabilities first: if the layer does not
+                list EPSG:3857, pass a geographic CRS it does list
+                (`EPSG:4326`, `EPSG:4258`, `EPSG:6706`, `CRS:84`). The
+                desktop app redraws those tiles into Web Mercator; the web
+                build and `export_html` pages cannot show them.
             bounds: The layer's extent as `[west, south, east, north]` in
                 WGS84. A service layer has no geometry to derive it from, so
                 without this "zoom to layer" cannot reach it. Read it from the
@@ -587,10 +594,15 @@ def build_server(workspace: Workspace) -> MCPServer:
 
         Raises:
             ValueError: If `service` is not `wms` or `wmts`, if `layers` is
-                missing for `wms`, or if `bounds` is not four finite numbers
-                with valid latitudes.
+                missing for `wms`, if `bounds` is not four finite numbers
+                with valid latitudes, or if `crs` is not a supported CRS or
+                is given for `wmts`.
         """
         if service == "wmts":
+            if crs is not None:
+                # A WMTS template carries its own tile matrix set; there is no
+                # GetMap request for a CRS to change.
+                raise ValueError("add_ogc_layer: 'crs' applies only to service='wms'")
             layer = _project.wmts_layer(name, endpoint, tile_size=tile_size, bounds=bounds)
         elif service == "wms":
             if not layers:
@@ -604,6 +616,7 @@ def build_server(workspace: Workspace) -> MCPServer:
                 transparent=transparent,
                 tile_size=tile_size,
                 version=version,
+                crs=crs,
                 bounds=bounds,
             )
         else:
@@ -844,6 +857,8 @@ def build_server(workspace: Workspace) -> MCPServer:
         title_expression: str | None = None,
         body_expression: str | None = None,
         show_feature_id: bool | None = None,
+        max_width: int | None = None,
+        image_height: int | None = None,
         tooltip: list[str] | None = None,
         merge: bool = False,
     ) -> dict[str, Any]:
@@ -870,6 +885,12 @@ def build_server(workspace: Workspace) -> MCPServer:
             body_expression: MapLibre expression source producing the body as
                 one block of text instead of the field rows.
             show_feature_id: False drops the synthetic `id` row.
+            max_width: Widest the click popup may draw, in CSS pixels (288 to
+                1200). The viewport still caps it.
+            image_height: Tallest an `image` field's thumbnail may draw inside
+                the popup, in CSS pixels (40 to 1200). Thumbnails keep their
+                aspect ratio, so raise `max_width` too for a landscape photo to
+                use the extra height.
             tooltip: Property names to show in a hover tooltip. An empty list
                 turns the tooltip off.
             merge: Merge into the layer's existing popup config instead of
@@ -888,6 +909,8 @@ def build_server(workspace: Workspace) -> MCPServer:
                 title_expression=title_expression,
                 body_expression=body_expression,
                 show_feature_id=show_feature_id,
+                max_width=max_width,
+                image_height=image_height,
                 tooltip=tooltip,
                 merge=merge,
             )

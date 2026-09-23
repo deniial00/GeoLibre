@@ -7,7 +7,10 @@ import {
   disposeAllRasterClassification,
 } from "../packages/plugins/src/plugins/raster-symbology-texture";
 
-type PipelineModule = { module?: { name?: string }; props?: Record<string, unknown> };
+type PipelineModule = {
+  module?: { name?: string };
+  props?: Record<string, unknown>;
+};
 
 // Minimal ImageData polyfill so the texture builder can run headless; the real
 // createColormapTexture only reads width/height/data off it.
@@ -41,7 +44,11 @@ function fakeControl() {
           { module: { name: "composite" }, props: {} },
           {
             module: { name: "colormap" },
-            props: { reversed: false, colormapIndex: 4, colormapTexture: "upstream" },
+            props: {
+              reversed: false,
+              colormapIndex: 4,
+              colormapTexture: "upstream",
+            },
           },
         ],
       }),
@@ -208,6 +215,95 @@ describe("raster symbology render injection", () => {
 
     assert.equal(created, 2);
     assert.equal(destroyed, 1);
+  });
+
+  it("injects, updates and removes opacity on a named continuous ramp", () => {
+    const symbology = {
+      classified: false,
+      opacityClasses: true,
+      ramp: "viridis",
+      method: "manual",
+      classCount: 2,
+      breaks: [0, 25, 100],
+      classOpacities: [0, 1],
+    };
+    const layer = rasterLayer("continuous", {
+      rasterSymbology: symbology,
+      reversed: true,
+    });
+    useAppStore.getState().addLayer(layer);
+    const control = fakeControl();
+    let created = 0;
+    let destroyed = 0;
+    control._layerManager._device = {
+      createTexture: () => ({
+        id: ++created,
+        destroy: () => {
+          destroyed++;
+        },
+      }),
+    };
+    control.setEngine("cog-tiler-wasm");
+    activateRasterClassification(control);
+    assert.equal(control.getEngine(), "maplibre-gl-raster");
+    assert.notEqual(renderColormapProps(control, layer.id)?.colormapTexture, "upstream");
+    assert.equal(renderColormapProps(control, layer.id)?.reversed, false);
+    const update = (patch: Record<string, unknown>, state = {}) => {
+      useAppStore.getState().updateLayer(layer.id, {
+        metadata: {
+          ...layer.metadata,
+          rasterState: { ...(layer.metadata.rasterState as object), ...state },
+          rasterSymbology: { ...symbology, ...patch },
+        },
+      });
+      return renderColormapProps(control, layer.id);
+    };
+    update({ classOpacities: [0.5, 1] });
+    assert.equal(created, 2);
+    update({}, { gamma: 2, stretch: "sqrt", rescale: [[0, 50]] });
+    assert.equal(created, 3);
+    update({ classified: true });
+    assert.equal(created, 4);
+    assert.equal(update({ classOpacities: undefined })?.colormapTexture, "upstream");
+    assert.equal(destroyed, 4);
+  });
+
+  it("leaves a classified texture alone when only the render stretch changes", () => {
+    const symbology = {
+      classified: true,
+      ramp: "viridis",
+      customColors: ["#ff0000", "#0000ff"],
+      method: "manual",
+      classCount: 2,
+      breaks: [0, 25, 100],
+      classOpacities: [0.5, 1],
+    };
+    const layer = rasterLayer("stepped", { rasterSymbology: symbology });
+    useAppStore.getState().addLayer(layer);
+    const control = fakeControl();
+    let created = 0;
+    control._layerManager._device = {
+      createTexture: () => ({ id: ++created, destroy: () => {} }),
+    };
+    activateRasterClassification(control);
+    renderColormapProps(control, layer.id);
+    assert.equal(created, 1);
+    // A stepped colormap never reads rescale / stretch / gamma, so editing them
+    // must not invalidate its cached GPU texture.
+    useAppStore.getState().updateLayer(layer.id, {
+      metadata: {
+        ...layer.metadata,
+        rasterState: {
+          ...(layer.metadata.rasterState as object),
+          gamma: 2,
+          stretch: "sqrt",
+          rescale: [[0, 50]],
+        },
+        rasterSymbology: symbology,
+      },
+    });
+    renderColormapProps(control, layer.id);
+    assert.equal(created, 1);
   });
 
   it("switches from the WASM renderer when discrete classes need the GPU pipeline", () => {

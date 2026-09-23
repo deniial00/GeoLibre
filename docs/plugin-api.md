@@ -75,6 +75,15 @@ export interface GeoLibreLayerSummary {
   opacity: number;
 }
 
+export interface GeoLibreLayerGroupSummary {
+  id: string;
+  name: string;
+  parentId: string | null;  // null for a group at the panel root
+  visible: boolean;
+  opacity: number;
+  collapsed: boolean;
+}
+
 export interface GeoLibreSelection {
   layerId: string | null;
   features: Feature<Geometry | null>[];
@@ -164,6 +173,12 @@ export interface GeoLibreAppAPI {
     layer: GeoLibreExternalNativeLayerRegistration,
   ) => void;
   unregisterExternalNativeLayer?: (id: string) => void;
+  // Layers-panel groups (folders). See "Layer groups" below.
+  addLayerGroup?: (name?: string, layerIds?: string[]) => string;
+  listLayerGroups?: () => GeoLibreLayerGroupSummary[];
+  moveLayersToGroup?: (layerIds: string[], groupId: string | null) => void;
+  moveLayerGroupToGroup?: (id: string, parentId: string | null) => void;
+  removeLayerGroup?: (id: string) => void;
   getActiveBasemap: () => string;
   onBasemapChange: (callback: (styleUrl: string) => void) => () => void;
   fetchArrayBuffer?: (url: string) => Promise<ArrayBuffer>;
@@ -180,6 +195,9 @@ export interface GeoLibreAppAPI {
   // falls back to this when getMap() is null — see "Supporting the Mapbox
   // renderer" below.
   getMapboxMap?: () => import("mapbox-gl").Map | null;
+  // The primary ArcGIS MapView or SceneView, or null on another renderer.
+  // The shared deck overlay hosts flat maps and local scenes only.
+  getArcgisView?: () => ReturnType<import("@geolibre/map").ArcgisEngine["getView"]>;
   // The primary Cesium globe's scene (namespace, widget, scene, camera, clock,
   // canvas, readView), or null when the primary map is not a globe. The globe's
   // counterpart to getMap for plugins that declare engines: ["maplibre", "cesium"].
@@ -421,6 +439,7 @@ change. If you also touched pages under `docs/`, build the site — CI runs
 | `maplibre-gl-dimensions`      | Adds Dimension tools (linear/angular CAD-style dimension lines, with optional vertex snapping)                     |
 | `maplibre-gl-geoagent`        | Adds GeoAgent map assistant controls                                                                                |
 | `maplibre-gl-lidar`           | Adds LiDAR controls                                                                                                 |
+| `geolibre-ign-lidar-hd`       | Searches IGN LiDAR HD tile coverage (WFS) and downloads point cloud (COPC LAZ) files. Its live-network test is opt-in via `RUN_LIVE_TESTS` (see `tests/ign-lidar-hd.test.ts`) |
 | `maplibre-gl-streetview`      | Adds street view controls                                                                                           |
 | `maplibre-gl-swipe`           | Adds map swipe controls                                                                                             |
 
@@ -537,6 +556,42 @@ unsubscribe?.();
 These methods are a read-only query surface: calling them does not change the
 GeoLibre store. Plugins must also treat returned GeoJSON features as read-only
 and use host APIs such as `addGeoJsonLayer` when they need to add data.
+
+## Layer groups
+
+A plugin that adds several related layers can put them in a Layers-panel group (a folder) instead of leaving them loose at the panel root, and can nest one group inside another the same way a user can by hand.
+
+```typescript
+// Create a folder, optionally moving existing layers into it. Returns its id.
+const basins = app.addLayerGroup?.("Basins", [catchmentLayerId]) ?? null;
+
+// Append to a folder you created earlier rather than creating a second one
+// with the same name. A null group id lifts the layers back to the root.
+app.moveLayersToGroup?.([outletLayerId], basins);
+
+// Nest a folder inside another one. A null parent lifts it back to the root.
+const subBasins = app.addLayerGroup?.("Sub-basins");
+if (basins && subBasins) app.moveLayerGroupToGroup?.(subBasins, basins);
+
+// Remove the folder without removing the layers inside it.
+if (subBasins) app.removeLayerGroup?.(subBasins);
+```
+
+`moveLayerGroupToGroup` is the group-of-groups counterpart of `moveLayersToGroup`: the same reparenting the Layers panel's own "Move to group" menu performs. It is a no-op when either id is unknown, when the group is already in that parent, and when the move would make a group its own ancestor — the host refuses the cycle rather than corrupting the tree, so a plugin does not have to walk the parent chain itself.
+
+`addLayerGroup` is the only source of group ids for folders a plugin creates. To address a folder it did not create — one the user made, or one another plugin made — read the tree first:
+
+```typescript
+const groups = app.listLayerGroups?.() ?? [];
+const existing = groups.find((group) => group.name === "Basins");
+const roots = groups.filter((group) => group.parentId === null);
+```
+
+`listLayerGroups` returns every group with `parentId` set to the enclosing group's id, or `null` at the root, so the flat array describes the whole folder tree. It is the store's own group order, which is not the panel's: the panel re-orders a group after its parent for display, while a reparent leaves the array alone. Like the other read-only queries, calling it does not change the store.
+
+Group visibility and opacity are **combined** with each child layer's own: a hidden group hides its children on the map without touching their individual `visible` flags, and group opacity multiplies into each child's. `removeLayerGroup` through this API removes only the folder, never its contents: the layers it held move to the panel root, and any groups nested inside it are reparented to the removed folder's own parent.
+
+These methods are typed optional for forward-compatibility with host variants, so call them with optional chaining.
 
 ## Raster and tile layers
 
@@ -1012,7 +1067,7 @@ If instead you want a plugin compiled into the main JS bundle (no `plugin.json`,
 }
 ```
 
-The `entry` file must export a `GeoLibrePlugin` as either the default export or a named `plugin` export. The exported plugin `id`, `name`, and `version` must match `plugin.json`. The entry must be a self-contained `.js` or `.mjs` bundle because relative module imports inside the zip are not resolved by this first loader. The optional `engines` array declares which map renderers the plugin supports (`"maplibre" | "mapbox" | "cesium" | "arcgis"`, defaulting to `["maplibre"]`; no bundled plugin declares `"arcgis"` yet, since that engine hosts no MapLibre controls — see `docs/arcgis-renderer.md`); plugins supporting the 3D globe declare `["maplibre", "cesium"]` so users can toggle them when Cesium is active, and plugins that only use the style API both 2D engines share add `"mapbox"` (see "Supporting the Mapbox renderer").
+The `entry` file must export a `GeoLibrePlugin` as either the default export or a named `plugin` export. The exported plugin `id`, `name`, and `version` must match `plugin.json`. The entry must be a self-contained `.js` or `.mjs` bundle because relative module imports inside the zip are not resolved by this first loader. The optional `engines` array declares which of GeoLibre's four map renderers the plugin supports (`"maplibre" | "mapbox" | "cesium" | "arcgis"`, defaulting to `["maplibre"]`). Plugins supporting the native globe add `"cesium"`; plugins that stay on the Style Spec surface can add `"mapbox"` (see "Supporting the Mapbox renderer"); and plugins with an ArcGIS-native adapter can add `"arcgis"` (see the [ArcGIS renderer](arcgis-renderer.md)). The host suspends a plugin when the selected engine is not in this list and restores it when a compatible engine becomes active.
 
 External plugin entries are executed with `import(URL.createObjectURL(...))`, which is why the desktop CSP in `tauri.conf.json` includes `blob:` in `script-src`. Removing `blob:` from `script-src` breaks external plugin loading. Combined with `'unsafe-eval'`, this means code that can create a blob URL can execute scripts, which is acceptable because external plugins are trusted local files installed by the user.
 

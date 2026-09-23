@@ -557,6 +557,21 @@ def test_set_layer_popup_writes_fields_labels_and_kinds(server, project_path):
     }
 
 
+def test_set_layer_popup_records_the_popup_and_image_sizes(server, project_path):
+    call(server, "add_geojson_layer", path=project_path, name="Cities", data=json.dumps(POINT_FC))
+    result = call(
+        server,
+        "set_layer_popup",
+        path=project_path,
+        layer="Cities",
+        fields=[{"field": "photo", "kind": "image"}],
+        max_width=480,
+        image_height=320,
+    )
+    assert result["popup"]["maxWidth"] == 480
+    assert result["popup"]["imageHeight"] == 320
+
+
 def test_set_layer_popup_tooltip_flags_the_named_fields(server, project_path):
     call(server, "add_geojson_layer", path=project_path, name="Cities", data=json.dumps(POINT_FC))
     result = call(
@@ -703,6 +718,46 @@ def test_add_ogc_layer_passes_bounds_through(server, project_path, tmp_path, ser
     )
     written = json.loads((tmp_path / project_path).read_text(encoding="utf-8"))
     assert written["layers"][-1]["source"]["bounds"] == [8.14, 38.85, 9.83, 41.31]
+
+
+def test_add_ogc_layer_passes_crs_through(server, project_path, tmp_path):
+    call(
+        server,
+        "add_ogc_layer",
+        path=project_path,
+        name="Cadastre",
+        service="wms",
+        endpoint="https://example.com/wms",
+        layers="CP.CadastralParcel",
+        crs="EPSG:6706",
+    )
+    written = json.loads((tmp_path / project_path).read_text(encoding="utf-8"))
+    assert "SRS=EPSG%3A6706" in written["layers"][-1]["source"]["tiles"][0]
+
+
+def test_add_ogc_layer_rejects_an_unsupported_crs(server, project_path):
+    assert "crs must be one of" in call_error(
+        server,
+        "add_ogc_layer",
+        path=project_path,
+        name="Cadastre",
+        service="wms",
+        endpoint="https://example.com/wms",
+        layers="CP.CadastralParcel",
+        crs="EPSG:25833",
+    )
+
+
+def test_add_ogc_layer_rejects_crs_for_wmts(server, project_path):
+    assert "applies only to service='wms'" in call_error(
+        server,
+        "add_ogc_layer",
+        path=project_path,
+        name="Tiles",
+        service="wmts",
+        endpoint="https://example.com/wmts/{z}/{y}/{x}.png",
+        crs="EPSG:4326",
+    )
 
 
 def test_add_ogc_layer_rejects_an_unknown_service(server, project_path):

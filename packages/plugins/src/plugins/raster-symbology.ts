@@ -18,15 +18,18 @@ export type RasterClassificationMethod = "equal-interval" | "quantile" | "manual
  * GeoLibre-owned raster symbology, stored at `metadata.rasterSymbology`. The
  * upstream `maplibre-gl-raster` control owns the continuous render state
  * (`metadata.rasterState`: mode/bands/colormap/reversed/rescale/…); this record
- * adds what the control cannot express: discrete classification and custom
- * color ramps. When `classified` is true the stepped colormap drives color and
+ * adds discrete classification, custom color ramps and value-range opacity.
+ * When `classified` is true the stepped colormap drives color and
  * `rasterState.colormap` is ignored; otherwise the record is needed only for a
- * custom ramp. Reverse lives on `rasterState.reversed` (the control renders it
- * for built-in colormaps; the injected texture reads it for classified/custom).
+ * custom ramp or value-range opacity. Reverse lives on `rasterState.reversed`
+ * (the control renders it for built-in colormaps; the injected texture reads it
+ * for classified/custom ramps and value-range opacity).
  */
 export type RasterSymbology = {
   /** Whether the single band is rendered as discrete classes. */
   classified: boolean;
+  /** Show value-range opacity controls independently of discrete colors. */
+  opacityClasses?: boolean;
   /** Color ramp name (a `VECTOR_COLOR_RAMPS` value / deck.gl-raster colormap). */
   ramp: string;
   /**
@@ -285,30 +288,65 @@ export function buildSteppedColormapRgba(
 /**
  * Builds a 256-wide RGBA lookup row that interpolates custom anchor colors
  * smoothly across the rescaled [0, 1] data window, for a continuous
- * (unclassified) single-band raster whose ramp is user-defined. The upstream
- * control renders only its named colormaps, so a custom continuous ramp is
- * injected as this texture. Returned as a flat `Uint8ClampedArray` so it is
- * constructible and testable without a DOM.
+ * (unclassified) single-band raster with custom colors or value-range opacity.
+ * Returned as a flat `Uint8ClampedArray` so it is constructible and testable
+ * without a DOM.
  *
  * @param colors - The custom anchor colors (at least one).
  * @param reversed - Whether to sample the colors back-to-front.
+ * @param opacity - Optional value ranges, opacity and upstream value adjustments.
  * @returns A 256x1 RGBA buffer (length COLORMAP_TEXTURE_WIDTH * 4).
  */
 export function buildContinuousColormapRgba(
   colors: readonly string[],
   reversed = false,
+  opacity?: {
+    breaks: number[];
+    classOpacities?: readonly number[];
+    range?: readonly number[];
+    stretch?: string;
+    gamma?: number;
+  },
 ): Uint8ClampedArray {
   const width = COLORMAP_TEXTURE_WIDTH;
   const rgba = new Uint8ClampedArray(width * 4);
   const ordered = reversed ? [...colors].reverse() : colors;
   const sampled = interpolateColors(ordered, width);
+  const opacities = opacity
+    ? normalizeRasterClassOpacities(opacity.classOpacities, opacity.breaks.length - 1)
+    : undefined;
+  const min = opacity?.range?.[0] ?? opacity?.breaks[0] ?? 0;
+  const max = opacity?.range?.[1] ?? opacity?.breaks.at(-1) ?? 1;
   for (let column = 0; column < width; column += 1) {
     const color = parseHexColor(sampled[column] ?? "#000000");
     const offset = column * 4;
     rgba[offset] = color.r;
     rgba[offset + 1] = color.g;
     rgba[offset + 2] = color.b;
-    rgba[offset + 3] = 255;
+    // Undo the upstream stretch and gamma for opacity lookup only. Colors
+    // still sample the adjusted coordinate, while opacity stays tied to values.
+    //
+    // This inverts `maplibre-gl-raster`'s render pipeline, which the package
+    // does not export, so it is a hand-written mirror (docs/maintenance.md).
+    // Its `pushAdjustments` runs rescale → stretch → gamma and only then
+    // samples the colormap, so a texture column is the fully adjusted value and
+    // the inverse has to unwind gamma first, then the stretch curve:
+    //   gamma  `pow(x, 1.0 / max(gamma, 0.0001))`  → `pow(t, max(gamma, 1e-4))`
+    //   sqrt   `sqrt(x)`                           → `t * t`
+    //   log    `log(1 + 99x) / log(1 + 99)`        → `(100^t - 1) / 99`
+    // The package's own `inverseStretch` helper (used for its histogram ticks)
+    // is the same pair of curves.
+    let t = column / (width - 1);
+    t = Math.pow(t, Math.max(opacity?.gamma ?? 1, 0.0001));
+    if (opacity?.stretch === "sqrt") t *= t;
+    if (opacity?.stretch === "log") t = Math.expm1(t * Math.log(100)) / 99;
+    const value = min + t * (max - min);
+    let index = (opacity?.breaks.length ?? 2) - 2;
+    if (opacity && max > min) {
+      const edge = opacity.breaks.findIndex((limit, i) => i > 0 && value < limit);
+      if (edge > 0) index = edge - 1;
+    }
+    rgba[offset + 3] = Math.round((opacities?.[index] ?? 1) * 255);
   }
   return rgba;
 }
@@ -382,6 +420,7 @@ export function savedRasterSymbology(layer: GeoLibreLayer): RasterSymbology | nu
 
   return {
     classified: candidate.classified,
+    ...(candidate.opacityClasses === true ? { opacityClasses: true } : {}),
     ramp: candidate.ramp,
     ...(customColors ? { customColors } : {}),
     method: candidate.method,

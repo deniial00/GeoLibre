@@ -227,19 +227,30 @@ export interface GpsStatusFix {
 function preferencesForBasemap(state: AppState, ellipsoidId = state.preferences.map.ellipsoidId) {
   const clearMapbox =
     state.primaryRenderer === "mapbox" && state.preferences.map.mapboxStyleUrl !== undefined;
-  // Any ArcGIS pane, not only a primary one: split panes pick the renderer
-  // independently, and a pinned Esri style would otherwise ignore the picker.
+  // Any Cesium or ArcGIS pane, not only a primary one: split panes pick the
+  // renderer independently, and a pinned globe imagery or Esri style would
+  // otherwise ignore the picker.
+  const clearCesium =
+    state.preferences.map.cesiumBasemap !== "project" &&
+    (state.primaryRenderer === "cesium" ||
+      state.secondaryMapViews.some((pane) => pane.viewKind === "cesium"));
   const clearArcgis =
     state.preferences.map.arcgisBasemap !== undefined &&
     (state.primaryRenderer === "arcgis" ||
       state.secondaryMapViews.some((pane) => pane.viewKind === "arcgis"));
-  if (!clearMapbox && !clearArcgis && ellipsoidId === state.preferences.map.ellipsoidId)
+  if (
+    !clearMapbox &&
+    !clearCesium &&
+    !clearArcgis &&
+    ellipsoidId === state.preferences.map.ellipsoidId
+  )
     return state.preferences;
   return {
     ...state.preferences,
     map: {
       ...state.preferences.map,
       ...(clearMapbox ? { mapboxStyleUrl: undefined } : {}),
+      ...(clearCesium ? { cesiumBasemap: "project" as const } : {}),
       ...(clearArcgis ? { arcgisBasemap: undefined } : {}),
       ellipsoidId,
     },
@@ -1462,7 +1473,9 @@ export const useAppStore = create<AppState>()(
           selectedFeatureId: null,
           selectedFeatureIds: [],
         }),
-      selectFeature: (id) => set({ selectedFeatureId: id, selectedFeatureIds: id ? [id] : [] }),
+      // `""` is a valid feature id; only `null` clears the selection.
+      selectFeature: (id) =>
+        set({ selectedFeatureId: id, selectedFeatureIds: id === null ? [] : [id] }),
       selectFeatures: (ids, anchorId) =>
         set({
           selectedFeatureIds: ids,

@@ -1,5 +1,13 @@
+import { disposeArcgisControlAdapters, identifyArcgisControls } from "./arcgis-control-adapters";
+import { ArcgisControlHost } from "./arcgis-control-host";
+import { createArcgisZarrLayer } from "./arcgis-zarr";
+import { createArcgisArchiveLayer } from "./arcgis-tile-archives";
+import { createArcgisCogLayer, loadCogTiler } from "./arcgis-cog-imagery";
+import { cachingCogTiler, cogSourceUrl } from "./cog-imagery";
 import { SEARCH_HIGHLIGHT_COLOR } from "./map-engine";
 import { renderFillPatternCanvas } from "./fill-patterns";
+import { registerCogDemSource, type CogDemSourceRegistration } from "./cog-dem-source";
+import { createCogElevationLayer } from "./arcgis-cog-terrain";
 import type * as maplibregl from "maplibre-gl";
 import type { FeatureCollection, Geometry, Point, Polygon, Position } from "geojson";
 import {
@@ -69,14 +77,12 @@ import { drawExtentOnCanvas } from "./extent-drawing";
  *
  * - `styleSpec` / `nativeMapInstance`: the SDK draws layers with renderers,
  *   not a Mapbox Style document, and there is no `maplibregl.Map` behind it.
- * - `customLayers` / `deckOverlay`: `@deck.gl/arcgis` exists but is not wired
- *   yet; the shared interleaved overlay binds to MapLibre and Mapbox only.
+ * - `customLayers`: MapLibre custom layers have no native SDK equivalent.
+ *   `deckOverlay` is enabled separately on primary 2D and local scene views.
  * - `terrain` is claimed: the pane renders a `SceneView` over Esri's world
  *   elevation while terrain is on (see {@link arcgisSceneMode}).
- * - `domControls`: the built-in controls are the SDK's own widgets, mounted
- *   through `view.ui`. MapLibre `IControl` plugin controls expect a MapLibre
- *   map to call into, which this engine cannot offer, so `addControl` reports
- *   that it has nowhere to host them.
+ * - `domControls`: the primary view hosts adapted controls through `view.ui`.
+ *   Rendering operations still require an explicit native or deck.gl bridge.
  */
 export const ARCGIS_CAPABILITIES: MapEngineCapabilities = Object.freeze({
   styleSpec: false,
@@ -86,7 +92,15 @@ export const ARCGIS_CAPABILITIES: MapEngineCapabilities = Object.freeze({
   terrain: true,
   picking: true,
   onMapDrawing: true,
-  domControls: false,
+  domControls: true,
+  screenOverlays: false,
+  flatProjection: true,
+  terrainSource: true,
+});
+
+export const ARCGIS_DECK_CAPABILITIES: MapEngineCapabilities = Object.freeze({
+  ...ARCGIS_CAPABILITIES,
+  deckOverlay: true,
 });
 
 /**
@@ -151,6 +165,7 @@ export function arcgisSceneMode(
 
 /** The SDK's layer instances a plan produced, plus the blob URLs backing them. */
 interface NativePlan {
+  disposers: (() => void)[];
   plan: ArcgisLayerPlan;
   /** Serialized plan without the features, for cheap change detection. */
   signature: string;
@@ -369,8 +384,18 @@ export function rotationToBearing(rotation: number): number {
  */
 export class ArcgisEngine implements MapEngine {
   readonly kind = "arcgis" as const;
-  readonly capabilities = ARCGIS_CAPABILITIES;
+  get capabilities(): MapEngineCapabilities {
+    const capabilities =
+      this.options.deckOverlay !== false &&
+      (this.view?.type === "2d" || this.view?.viewingMode === "local")
+        ? ARCGIS_DECK_CAPABILITIES
+        : ARCGIS_CAPABILITIES;
+    return this.options.domControls === false
+      ? { ...capabilities, domControls: false }
+      : capabilities;
+  }
   private view: ArcgisView | null;
+  private controlHost: ArcgisControlHost | null = null;
   private map: ArcgisMap | null;
   private surface: MapRenderSurface | null;
   private layers: GeoLibreLayer[] = [];
@@ -399,6 +424,20 @@ export class ArcgisEngine implements MapEngine {
   private zoomWatch: ArcgisHandle | null = null;
   private terrain = false;
   private exaggeration = 1;
+  private cogTerrain: CogDemSourceRegistration | null = null;
+  private cogTerrainUrl: string | null = null;
+  private cogTerrainRequest = 0;
+  private cogTiler: Promise<ReturnType<typeof cachingCogTiler>> | null = null;
+  private cogUrls = new Set<string>();
+
+  private loadCachedCogTiler(): Promise<ReturnType<typeof cachingCogTiler>> {
+    return (this.cogTiler ??= loadCogTiler()
+      .then(cachingCogTiler)
+      .catch((error) => {
+        this.cogTiler = null;
+        throw error;
+      }));
+  }
   private elevation: ArcgisElevationLayer | null = null;
 
   constructor(
@@ -406,6 +445,9 @@ export class ArcgisEngine implements MapEngine {
     map: ArcgisMap,
     view: ArcgisView,
     private options: {
+      /** Secondary panes do not own the primary shared deck overlay. */
+      deckOverlay?: boolean;
+      domControls?: boolean;
       /** Whether an API key is configured, so Esri basemap styles are usable. */
       hasApiKey?: boolean;
       /**
@@ -421,6 +463,8 @@ export class ArcgisEngine implements MapEngine {
       onProjectionToggle?: (projection: MapProjection) => void;
       /** Write LayerList changes through the owning pane's store state. */
       onLayerVisibilityChange?: (id: string, visible: boolean) => void;
+      /** Preserve the device-local terrain choice across a 2D/3D view rebuild. */
+      onTerrainSourceChange?: (source: string | Blob | null, band: number) => void;
       /**
        * Override built-in control visibility before the controls are added.
        * Split/grid panes pass `{ "layer-control": false }` like the other
@@ -448,7 +492,7 @@ export class ArcgisEngine implements MapEngine {
       },
       unproject: (p) => {
         const point = this.view?.toMap({ x: p[0], y: p[1] });
-        return point ? { lng: point.longitude, lat: point.latitude } : { lng: 0, lat: 0 };
+        return point ? { lng: point.longitude, lat: point.latitude } : null;
       },
       redraw: () => {},
     };
@@ -561,6 +605,9 @@ export class ArcgisEngine implements MapEngine {
     const view = this.view;
     if (!view) return;
     this.stopCamera();
+    this.controlHost?.destroy();
+    this.controlHost = null;
+    disposeArcgisControlAdapters(view);
     for (const dispose of this.disposers) dispose();
     this.disposers.clear();
     for (const handle of this.handles) handle.remove();
@@ -569,6 +616,12 @@ export class ArcgisEngine implements MapEngine {
     this.zoomWatch = null;
     this.clearFeatureHighlight();
     this.removeElevation();
+    this.cogTerrainRequest++;
+    this.cogTerrain?.dispose();
+    void this.cogTiler?.then((tiler) => tiler.clear()).catch(() => {});
+    this.cogTiler = null;
+    this.cogUrls.clear();
+    this.cogTerrain = null;
     for (const id of [...this.natives.keys()]) this.removeLayer(id);
     for (const widget of this.builtInControls.values()) widget.destroy();
     this.builtInControls.clear();
@@ -596,7 +649,7 @@ export class ArcgisEngine implements MapEngine {
       ...(bounds ? { bbox: bounds } : {}),
     };
   }
-  applyView(view: MapViewState): void {
+  async applyView(view: MapViewState): Promise<void> {
     const old = this.readView();
     const target = this.constrainView(view);
     const scene = this.view?.type === "3d";
@@ -609,16 +662,18 @@ export class ArcgisEngine implements MapEngine {
       (!scene || Math.abs(old.pitch - this.clampPitch(target.pitch)) < 1e-8)
     )
       return;
-    void this.view
-      ?.goTo(
+    try {
+      await this.view?.goTo(
         {
           center: target.center,
           zoom: target.zoom,
           ...this.orientation(target.bearing, target.pitch),
         },
         { animate: false },
-      )
-      .catch(reportGoToFailure);
+      );
+    } catch (error) {
+      reportGoToFailure(error);
+    }
   }
   /**
    * Place the camera at `view` and resolve once it is there. A new view
@@ -847,6 +902,18 @@ export class ArcgisEngine implements MapEngine {
     const map = this.map;
     if (!map) return;
     const ids = new Set(layers.map((layer) => layer.id));
+    const previousCogUrls = this.cogUrls;
+    this.cogUrls = new Set(
+      layers
+        .filter((layer) => layer.type === "cog")
+        .map(cogSourceUrl)
+        .filter((url): url is string => !!url),
+    );
+    void this.cogTiler
+      ?.then((tiler) => {
+        for (const url of previousCogUrls) if (!this.cogUrls.has(url)) tiler.forget(url);
+      })
+      .catch(() => {});
     for (const id of [...this.natives.keys()]) if (!ids.has(id)) this.removeLayer(id);
     for (const key of [...this.errors.keys()])
       if (key.startsWith("layer:") && !ids.has(key.slice(6))) this.errors.delete(key);
@@ -863,6 +930,7 @@ export class ArcgisEngine implements MapEngine {
         const plan = compileArcgisLayer(layer, {
           zoom: this.compiledZoom,
           scene: this.view?.type === "3d",
+          deckOverlay: this.capabilities.deckOverlay,
         });
         const signature = planSignature(plan, layer);
         let entry = this.natives.get(layer.id);
@@ -873,8 +941,9 @@ export class ArcgisEngine implements MapEngine {
           entry = undefined;
         }
         if (!entry) {
-          entry = { plan, signature, layers: [], urls: [], geojson: layer.geojson };
-          for (const native of this.instantiate(plan, entry.urls)) {
+          entry = { plan, signature, layers: [], urls: [], disposers: [], geojson: layer.geojson };
+          this.natives.set(layer.id, entry);
+          for (const native of this.instantiate(plan, entry.urls, entry.disposers)) {
             // A mixed-geometry GeoJSON record has several native layers but
             // one shared visibility toggle. Service sublayers stay managed by
             // their source record rather than exposing unsaved native changes.
@@ -882,7 +951,6 @@ export class ArcgisEngine implements MapEngine {
             entry.layers.push(native);
             map.add(native);
           }
-          this.natives.set(layer.id, entry);
           const first = entry.layers[0];
           if (first && this.options.onLayerVisibilityChange) {
             entry.visibilityHandle = this.sdk.reactiveUtils.watch(
@@ -905,6 +973,11 @@ export class ArcgisEngine implements MapEngine {
           );
         else this.errors.delete(`filter:${layer.id}`);
         for (const native of entry.layers) {
+          if (plan.kind === "zarr") {
+            const zarr = native as import("./arcgis-zarr").ArcgisZarrLayer;
+            zarr.setSelector((plan.source.source.selector ?? {}) as Record<string, unknown>);
+            zarr.setStyle(plan.source.source);
+          }
           native.visible = plan.visible;
           native.opacity = plan.opacity;
           native.minScale = plan.minScale;
@@ -928,7 +1001,11 @@ export class ArcgisEngine implements MapEngine {
       map.layers.reorder(this.highlight, map.layers.length - 1);
   }
   /** Build the SDK layers for a plan, recording blob URLs to revoke on removal. */
-  private instantiate(plan: ArcgisLayerPlan, urls: string[]): ArcgisLayer[] {
+  private instantiate(
+    plan: ArcgisLayerPlan,
+    urls: string[],
+    disposers: (() => void)[],
+  ): ArcgisLayer[] {
     const { layers, media } = this.sdk;
     const common = {
       title: plan.title,
@@ -949,6 +1026,22 @@ export class ArcgisEngine implements MapEngine {
         }
       : {};
     switch (plan.kind) {
+      case "zarr": {
+        const bridge = createArcgisZarrLayer(this.sdk, plan.source, common);
+        disposers.push(bridge.dispose);
+        return [bridge.layer];
+      }
+      case "archive": {
+        const bridge = createArcgisArchiveLayer(this.sdk, plan, common);
+        disposers.push(bridge.dispose);
+        return [bridge.layer];
+      }
+      case "external-deck":
+        return [];
+      case "cog":
+        return [
+          createArcgisCogLayer(this.sdk, plan.source, common, () => this.loadCachedCogTiler()),
+        ];
       case "geojson":
         return plan.parts.map((part) => {
           let url = part.url;
@@ -1087,6 +1180,7 @@ export class ArcgisEngine implements MapEngine {
         if (this.map?.layers.includes(native)) this.map.remove(native);
         native.destroy();
       }
+      for (const dispose of entry.disposers) dispose();
       for (const url of entry.urls) URL.revokeObjectURL(url);
     }
     this.natives.delete(id);
@@ -1241,21 +1335,22 @@ export class ArcgisEngine implements MapEngine {
   ): Promise<IdentifiedFeature[]> {
     const view = this.view;
     if (!view) return [];
+    const external = identifyArcgisControls(view, screenPoint, layerId);
     const include = [...this.natives]
       .filter(([id]) => !layerId || id === layerId)
       .flatMap(([, entry]) => entry.layers);
-    if (!include.length) return [];
+    if (!include.length) return external;
     let hit;
     try {
       hit = await view.hitTest(screenPoint, { include });
     } catch {
-      return [];
+      return external;
     }
     // The engine may have been destroyed (a renderer swap, an unmounted pane)
     // while the hit test was in flight; the captured view is gone with it.
-    if (this.view !== view) return [];
+    if (this.view !== view) return external;
     const seen = new Set<string>();
-    const features: IdentifiedFeature[] = [];
+    const features: IdentifiedFeature[] = [...external];
     for (const result of hit.results) {
       if (result.type !== "graphic" || !result.graphic) continue;
       const native = result.graphic.layer ?? result.layer ?? null;
@@ -1770,6 +1865,35 @@ export class ArcgisEngine implements MapEngine {
     const response = await fetch(shot.dataUrl);
     return response.blob();
   }
+  onMapClick(listener: (lngLat: [number, number]) => void): () => void {
+    const view = this.view;
+    if (!view) return () => {};
+    const handle = view.on("click", (event) => {
+      const point = view.toMap({ x: event.x, y: event.y });
+      if (point) listener([point.longitude, point.latitude]);
+    });
+    this.handles.add(handle);
+    return () => {
+      handle.remove();
+      this.handles.delete(handle);
+    };
+  }
+  isCameraMoving(): boolean {
+    return this.view ? !this.view.stationary : false;
+  }
+  onCameraMove(listener: () => void): () => void {
+    const view = this.view;
+    if (!view) return () => {};
+    const handle = this.sdk.reactiveUtils.watch(
+      () => viewPlacementState(view),
+      () => listener(),
+    );
+    this.handles.add(handle);
+    return () => {
+      handle.remove();
+      this.handles.delete(handle);
+    };
+  }
   onCameraIdle(listener: () => void): () => void {
     const view = this.view;
     if (!view) return () => {};
@@ -1813,10 +1937,14 @@ export class ArcgisEngine implements MapEngine {
 
   // ----------------------------------------------------------------- controls
 
-  addControl(): boolean {
-    return false;
+  addControl(control: maplibregl.IControl, position?: maplibregl.ControlPosition): boolean {
+    if (!control || !this.view || this.options.domControls === false) return false;
+    this.controlHost ??= new ArcgisControlHost(this, this.view, this.sdk);
+    return this.controlHost.addControl(control, position);
   }
-  removeControl(): void {}
+  removeControl(control: maplibregl.IControl): void {
+    this.controlHost?.removeControl(control);
+  }
   private createBuiltInControl(id: BuiltInMapControl): ArcgisWidget | null {
     const view = this.view;
     if (!view) return null;
@@ -1959,7 +2087,9 @@ export class ArcgisEngine implements MapEngine {
     const ground = this.map?.ground;
     const scene = this.options.scene;
     if (!this.terrain || !this.canDrape() || !ground || !scene) return;
-    this.elevation = createElevationLayer(scene, this.exaggeration);
+    this.elevation = this.cogTerrain
+      ? createCogElevationLayer(scene, this.cogTerrain, this.exaggeration)
+      : createElevationLayer(scene, this.exaggeration);
     ground.layers.add(this.elevation);
   }
   private removeElevation(): void {
@@ -1973,14 +2103,36 @@ export class ArcgisEngine implements MapEngine {
     (layer as { source?: ArcgisElevationLayer }).source?.destroy();
     layer.destroy();
   }
-  getTerrainCogSource(): null {
-    return null;
+  getTerrainCogSource(): string | null {
+    return this.cogTerrainUrl;
   }
   hasCustomTerrainSource(): boolean {
-    return false;
+    return this.cogTerrain !== null;
   }
-  async setTerrainCogSource(source: string | Blob | null): Promise<boolean> {
-    return source === null;
+  private openCogDem = registerCogDemSource;
+
+  async setTerrainCogSource(source: string | Blob | null, band = 1): Promise<boolean> {
+    if (!this.view) return false;
+    const normalized = typeof source === "string" ? source.trim() || null : source;
+    const request = ++this.cogTerrainRequest;
+    let registration: CogDemSourceRegistration | null;
+    try {
+      registration = normalized ? await this.openCogDem(normalized, band) : null;
+    } catch (error) {
+      if (request !== this.cogTerrainRequest || !this.view) return false;
+      throw error;
+    }
+    if (request !== this.cogTerrainRequest || !this.view) {
+      registration?.dispose();
+      return false;
+    }
+    const previous = this.cogTerrain;
+    this.cogTerrain = registration;
+    this.cogTerrainUrl = typeof normalized === "string" ? normalized : null;
+    this.applyElevation();
+    previous?.dispose();
+    this.options.onTerrainSourceChange?.(normalized, band);
+    return true;
   }
 }
 
@@ -2023,6 +2175,10 @@ function stripSyntheticFields(attributes: Record<string, unknown>): Record<strin
  */
 function planSignature(plan: ArcgisLayerPlan, layer: GeoLibreLayer): string {
   const { visible: _v, opacity: _o, minScale: _mn, maxScale: _mx, ...rest } = plan;
+  if (rest.kind === "cog" || rest.kind === "zarr") {
+    const { source: _source, ...signature } = rest;
+    return JSON.stringify(signature);
+  }
   if (rest.kind === "geojson") {
     return JSON.stringify({
       ...rest,

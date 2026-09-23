@@ -57,6 +57,8 @@ mod native_duckdb {
 #[cfg(all(feature = "mas", feature = "native-duckdb"))]
 compile_error!("the `mas` (Mac App Store) build must not enable `native-duckdb`: DuckDB loads its spatial extension as unsigned native code at runtime, which App Sandbox and App Store guideline 2.5.2 forbid.");
 
+mod http_body;
+
 use earth_engine_oauth::{poll_earth_engine_oauth, start_earth_engine_oauth};
 #[cfg(not(any(feature = "mas", target_os = "ios")))]
 use earth_engine_oauth::EarthEngineOAuthState;
@@ -928,6 +930,7 @@ const ALLOWED_ENV_VARS: &[&str] = &[
     "OPENAI_COMPATIBLE_API_KEY",
     "OPENAI_COMPATIBLE_MODEL",
     "TAVILY_API_KEY",
+    "JEV_API_KEY",
 ];
 
 /// Read the AI Assistant's allowlisted variables from the OS environment.
@@ -1357,11 +1360,19 @@ fn build_guarded_http_client_with_redirects(
 /// whole dataset rather than a tile; it is clamped to
 /// `[REMOTE_TILE_TIMEOUT_SECS, MAX_FETCH_TIMEOUT_SECS]`, so the budget can only
 /// ever be raised and never removed.
+/// `max_bytes`, when supplied, limits the body while it is read rather than
+/// buffering an oversized response before rejecting it.
 #[tauri::command]
-async fn fetch_url_bytes(url: String, timeout_secs: Option<u64>) -> Result<Vec<u8>, String> {
-    tauri::async_runtime::spawn_blocking(move || fetch_url_bytes_blocking(url, timeout_secs))
-        .await
-        .map_err(|error| format!("Tile fetch task failed: {error}"))?
+async fn fetch_url_bytes(
+    url: String,
+    timeout_secs: Option<u64>,
+    max_bytes: Option<u64>,
+) -> Result<Vec<u8>, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        fetch_url_bytes_blocking(url, timeout_secs, max_bytes)
+    })
+    .await
+    .map_err(|error| format!("Tile fetch task failed: {error}"))?
 }
 
 /// Resolves the request budget for a fetch, defaulting to the tile timeout and
@@ -1375,7 +1386,11 @@ fn resolve_fetch_timeout_secs(timeout_secs: Option<u64>) -> u64 {
         .clamp(REMOTE_TILE_TIMEOUT_SECS, MAX_FETCH_TIMEOUT_SECS)
 }
 
-fn fetch_url_bytes_blocking(url: String, timeout_secs: Option<u64>) -> Result<Vec<u8>, String> {
+fn fetch_url_bytes_blocking(
+    url: String,
+    timeout_secs: Option<u64>,
+    max_bytes: Option<u64>,
+) -> Result<Vec<u8>, String> {
     ensure_fetchable_url(&url)?;
 
     let client = guarded_http_client()?;
@@ -1391,10 +1406,15 @@ fn fetch_url_bytes_blocking(url: String, timeout_secs: Option<u64>) -> Result<Ve
         return Err(format!("Request failed with status {status}"));
     }
 
-    response
-        .bytes()
-        .map(|bytes| bytes.to_vec())
-        .map_err(|error| format!("Could not read response body: {error}"))
+    if let Some(limit) = max_bytes {
+        let content_length = response.content_length();
+        http_body::read_limited_body(response, content_length, limit)
+    } else {
+        response
+            .bytes()
+            .map(|bytes| bytes.to_vec())
+            .map_err(|error| format!("Could not read response body: {error}"))
+    }
 }
 
 /// Install a packaged plugin from a local `.zip` archive into GeoLibre's
@@ -4012,6 +4032,17 @@ struct MbtilesMetadata {
 fn read_mbtiles_metadata(path: String) -> Result<MbtilesMetadata, String> {
     let connection = open_mbtiles(&path)?;
     let metadata = read_metadata_rows(&connection)?;
+    let metadata_min_zoom = metadata
+        .get("minzoom")
+        .and_then(|value| value.parse::<i64>().ok());
+    let metadata_max_zoom = metadata
+        .get("maxzoom")
+        .and_then(|value| value.parse::<i64>().ok());
+    let (tile_min_zoom, tile_max_zoom) = read_mbtiles_zoom_range(
+        &connection,
+        metadata_min_zoom.is_none(),
+        metadata_max_zoom.is_none(),
+    )?;
     let fallback_name = Path::new(&path)
         .file_stem()
         .and_then(|name| name.to_str())
@@ -4036,12 +4067,8 @@ fn read_mbtiles_metadata(path: String) -> Result<MbtilesMetadata, String> {
         format,
         tile_type,
         source_layers: read_vector_source_layers(metadata.get("json")),
-        min_zoom: metadata
-            .get("minzoom")
-            .and_then(|value| value.parse::<i64>().ok()),
-        max_zoom: metadata
-            .get("maxzoom")
-            .and_then(|value| value.parse::<i64>().ok()),
+        min_zoom: metadata_min_zoom.or(tile_min_zoom),
+        max_zoom: metadata_max_zoom.or(tile_max_zoom),
         bounds: metadata.get("bounds").and_then(|value| parse_bounds(value)),
         center: metadata.get("center").and_then(|value| parse_center(value)),
         scheme: metadata
@@ -4049,6 +4076,26 @@ fn read_mbtiles_metadata(path: String) -> Result<MbtilesMetadata, String> {
             .map(|value| value.to_ascii_lowercase())
             .unwrap_or_else(|| "tms".to_string()),
     })
+}
+
+fn read_mbtiles_zoom_range(
+    connection: &Connection,
+    need_min: bool,
+    need_max: bool,
+) -> Result<(Option<i64>, Option<i64>), String> {
+    let read = |aggregate: &str| {
+        connection
+            .query_row(
+                &format!("SELECT {aggregate}(zoom_level) FROM tiles"),
+                [],
+                |row| row.get(0),
+            )
+            .map_err(|error| format!("Could not read MBTiles zoom range: {error}"))
+    };
+    Ok((
+        if need_min { read("MIN")? } else { None },
+        if need_max { read("MAX")? } else { None },
+    ))
 }
 
 #[tauri::command]
@@ -4459,7 +4506,7 @@ mod tests {
         is_allowed_local_vector_path, is_allowed_project_path, is_disallowed_ip,
         is_image_picker_path, is_persisted_image_file,
         is_safe_absolute_path, is_ssrf_guard_error, path_is_under, project_path_string,
-        project_paths_from_args, resolve_fetch_timeout_secs, tcp_table_port,
+        project_paths_from_args, read_mbtiles_zoom_range, resolve_fetch_timeout_secs, tcp_table_port,
         MAX_FETCH_TIMEOUT_SECS, REMOTE_TILE_TIMEOUT_SECS, SSRF_BLOCKED_MESSAGE,
     };
     #[cfg(target_os = "linux")]
@@ -4496,6 +4543,30 @@ mod tests {
     // environment must not run concurrently with each other.
     #[cfg(not(feature = "mas"))]
     static ENV_LOCK: Mutex<()> = Mutex::new(());
+
+    #[test]
+    fn derives_mbtiles_zoom_range_from_tile_rows() {
+        let connection = rusqlite::Connection::open_in_memory().unwrap();
+        connection
+            .execute("CREATE TABLE tiles (zoom_level INTEGER NOT NULL)", [])
+            .unwrap();
+        for zoom in [4, 9, 6] {
+            connection
+                .execute("INSERT INTO tiles (zoom_level) VALUES (?1)", [zoom])
+                .unwrap();
+        }
+
+        assert_eq!(
+            read_mbtiles_zoom_range(&connection, true, true).unwrap(),
+            (Some(4), Some(9))
+        );
+
+        let no_tiles_table = rusqlite::Connection::open_in_memory().unwrap();
+        assert_eq!(
+            read_mbtiles_zoom_range(&no_tiles_table, false, false).unwrap(),
+            (None, None)
+        );
+    }
 
     #[cfg(not(feature = "mas"))]
     #[test]

@@ -425,6 +425,15 @@ POPUP_FIELD_KINDS = frozenset({"auto", "text", "number", "date", "link", "image"
 #: Rendering choices for a ``"date"`` field.
 POPUP_DATE_FORMATS = frozenset({"date", "datetime", "time", "iso", "year"})
 
+#: Inclusive bounds for a popup's ``max_width``, in CSS pixels. Mirrors
+#: ``POPUP_MAX_WIDTH_RANGE`` in ``packages/core/src/popup.ts``: the floor is the
+#: popup's own minimum width, the ceiling stops a popup blanketing the map.
+POPUP_MAX_WIDTH_RANGE = (288, 1200)
+
+#: Inclusive bounds for a popup's ``image_height``, in CSS pixels. Mirrors
+#: ``POPUP_IMAGE_HEIGHT_RANGE`` in ``packages/core/src/popup.ts``.
+POPUP_IMAGE_HEIGHT_RANGE = (40, 1200)
+
 #: Built-in marker shapes, plus ``"custom"`` for a caller-supplied SVG.
 MARKER_SHAPES = frozenset(
     {"circle", "square", "triangle", "diamond", "star", "cross", "pin", "custom"}
@@ -442,6 +451,8 @@ _POPUP_CONFIG_KEYS = {
     "titleexpression": "titleExpression",
     "bodyexpression": "bodyExpression",
     "showfeatureid": "showFeatureId",
+    "maxwidth": "maxWidth",
+    "imageheight": "imageHeight",
     "tooltip": "tooltip",
 }
 
@@ -471,6 +482,8 @@ _POPUP_CONFIG_ARGUMENTS = sorted(
         "titleExpression": "title_expression",
         "bodyExpression": "body_expression",
         "showFeatureId": "show_feature_id",
+        "maxWidth": "max_width",
+        "imageHeight": "image_height",
     }.get(value, value)
     for value in set(_POPUP_CONFIG_KEYS.values())
 )
@@ -502,6 +515,41 @@ def normalize_hex_color(value: str) -> str | None:
     if re.fullmatch(r"#[0-9a-f]{3}", token):
         token = "#" + "".join(channel * 2 for channel in token[1:])
     return token if re.fullmatch(r"#[0-9a-f]{6}", token) else None
+
+
+def _popup_pixel_size(name: str, value: Any, bounds: tuple[int, int]) -> int:
+    """Validate a popup pixel size against the range the app renders.
+
+    The app clamps an out-of-range size rather than failing, so an accepted
+    ``max_width=4000`` would be written to the project and drawn at 1200 --
+    a setting that reads one way in the notebook and another on the map.
+    Raising here keeps the two the same.
+
+    Args:
+        name: The argument name, for the error message.
+        value: The caller's size in CSS pixels.
+        bounds: The inclusive ``(minimum, maximum)`` the app honors.
+
+    Returns:
+        The size as a whole number of pixels.
+
+    Raises:
+        ValueError: If the value is not a whole number inside ``bounds``.
+    """
+    low, high = bounds
+    try:
+        size = int(value)
+        exact = size == value
+    except (TypeError, ValueError, OverflowError):
+        # OverflowError is what `int(float("inf"))` raises, so without it an
+        # infinite size escapes as an internal error instead of the ValueError
+        # this function documents.
+        exact = False
+    if not exact:
+        raise ValueError(f"{name} must be a whole number of pixels, got {value!r}")
+    if not low <= size <= high:
+        raise ValueError(f"{name} must be between {low} and {high} pixels, got {value!r}")
+    return size
 
 
 def popup_field(
@@ -566,7 +614,8 @@ def popup_field(
         try:
             digits = int(decimals)
             exact = digits == decimals
-        except (TypeError, ValueError):
+        except (TypeError, ValueError, OverflowError):
+            # `int(float("inf"))` raises OverflowError, not ValueError.
             exact = False
         if not exact:
             raise ValueError(f"decimals must be a whole number, got {decimals!r}")
@@ -643,6 +692,8 @@ def popup_config(
     title_expression: str | None = None,
     body_expression: str | None = None,
     show_feature_id: bool | None = None,
+    max_width: int | None = None,
+    image_height: int | None = None,
 ) -> dict[str, Any]:
     """Build a layer's ``LayerPopupConfig``.
 
@@ -660,12 +711,20 @@ def popup_config(
         body_expression: MapLibre expression source producing the whole popup
             body as one block of text instead of the field rows.
         show_feature_id: ``False`` drops the synthetic ``id`` row.
+        max_width: Widest the click popup may draw, in CSS pixels
+            (:data:`POPUP_MAX_WIDTH_RANGE`). The viewport still caps it, so a
+            popup never covers the whole map on a small screen.
+        image_height: Tallest an ``"image"`` field's thumbnail may draw inside
+            the popup, in CSS pixels (:data:`POPUP_IMAGE_HEIGHT_RANGE`). A
+            thumbnail keeps its aspect ratio, so raise ``max_width`` too for a
+            landscape photo to use the extra height.
 
     Returns:
         A ``LayerPopupConfig`` dict, empty when nothing was configured.
 
     Raises:
-        ValueError: If a field entry is not a name or a valid field mapping.
+        ValueError: If a field entry is not a name or a valid field mapping, or
+            a size falls outside the range the app renders.
     """
     config: dict[str, Any] = {}
     if click is not None:
@@ -680,6 +739,12 @@ def popup_config(
         config["bodyExpression"] = str(body_expression)
     if show_feature_id is not None:
         config["showFeatureId"] = bool(show_feature_id)
+    if max_width is not None:
+        config["maxWidth"] = _popup_pixel_size("max_width", max_width, POPUP_MAX_WIDTH_RANGE)
+    if image_height is not None:
+        config["imageHeight"] = _popup_pixel_size(
+            "image_height", image_height, POPUP_IMAGE_HEIGHT_RANGE
+        )
     if fields is not None:
         if isinstance(fields, (str, dict)):
             entries = [fields]
@@ -809,7 +874,13 @@ def apply_tooltip(config: dict[str, Any], tooltip: Any) -> dict[str, Any]:
     return config
 
 
-def normalize_popup(popup: Any = None, tooltip: Any = None) -> dict[str, Any] | None:
+def normalize_popup(
+    popup: Any = None,
+    tooltip: Any = None,
+    *,
+    max_width: Any = None,
+    image_height: Any = None,
+) -> dict[str, Any] | None:
     """Coerce the ``popup=``/``tooltip=`` arguments to a ``LayerPopupConfig``.
 
     ``popup`` accepts, in rising order of control: ``True``/``False`` to turn
@@ -817,12 +888,19 @@ def normalize_popup(popup: Any = None, tooltip: Any = None) -> dict[str, Any] | 
     and/or :func:`popup_field` mappings, or a full config mapping whose keys
     are the arguments of :func:`popup_config` (``fields``, ``click``,
     ``hover``, ``title``, ``title_expression``, ``body_expression``,
-    ``show_feature_id``, ``tooltip``) in either snake_case or camelCase.
+    ``show_feature_id``, ``max_width``, ``image_height``, ``tooltip``) in
+    either snake_case or camelCase.
 
     Args:
         popup: The popup specification, or ``None`` for no popup config.
         tooltip: Hover-tooltip shorthand; see :func:`apply_tooltip`. Wins over
             a ``tooltip`` key inside ``popup``.
+        max_width: ``popup_max_width=`` shorthand, in CSS pixels. Wins over a
+            ``max_width`` key inside ``popup``, and configures a popup on its
+            own -- ``popup_max_width=480`` alone still widens the default
+            popup, which is the point of the shorthand.
+        image_height: ``popup_image_height=`` shorthand, in CSS pixels; the
+            same precedence as ``max_width``.
 
     Returns:
         A ``LayerPopupConfig`` dict, or ``None`` when neither argument
@@ -832,7 +910,7 @@ def normalize_popup(popup: Any = None, tooltip: Any = None) -> dict[str, Any] | 
         ValueError: If the specification carries an unknown key or an
             unusable field entry.
     """
-    if popup is None and tooltip is None:
+    if popup is None and tooltip is None and max_width is None and image_height is None:
         return None
 
     inline_tooltip: Any = None
@@ -860,11 +938,33 @@ def normalize_popup(popup: Any = None, tooltip: Any = None) -> dict[str, Any] | 
                 kwargs["body_expression"] = value
             elif mapped == "showFeatureId":
                 kwargs["show_feature_id"] = value
+            elif mapped == "maxWidth":
+                kwargs["max_width"] = value
+            elif mapped == "imageHeight":
+                kwargs["image_height"] = value
             else:
                 kwargs[mapped] = value
+        # Drop the mapping's copy of a size the dedicated argument also carries,
+        # rather than validating a value that is about to be overwritten -- the
+        # same thing `inline_tooltip` gets when `tooltip=` was passed. Left in,
+        # an out-of-range mapping value would raise even though the argument
+        # that wins is perfectly valid.
+        if max_width is not None:
+            kwargs.pop("max_width", None)
+        if image_height is not None:
+            kwargs.pop("image_height", None)
         config = popup_config(**kwargs)
     else:
         config = popup_config(popup)
+
+    # After the mapping form, so the dedicated argument wins over the key of
+    # the same name inside `popup=` -- the same precedence `tooltip` has.
+    if max_width is not None:
+        config["maxWidth"] = _popup_pixel_size("max_width", max_width, POPUP_MAX_WIDTH_RANGE)
+    if image_height is not None:
+        config["imageHeight"] = _popup_pixel_size(
+            "image_height", image_height, POPUP_IMAGE_HEIGHT_RANGE
+        )
 
     return apply_tooltip(config, tooltip if tooltip is not None else inline_tooltip)
 
@@ -994,11 +1094,17 @@ def marker_style(
 
 
 def _layer_base(name: str, layer_type: str, **style: Any) -> dict[str, Any]:
-    # `popup` and `tooltip` ride in with the style overrides so every add_*
-    # builder accepts them without threading two more arguments through each
-    # signature, but the popup config is a top-level layer key -- left in
-    # `style` it would land somewhere the app never reads.
-    popup = normalize_popup(style.pop("popup", None), style.pop("tooltip", None))
+    # `popup`, `tooltip` and the `popup_*` size shorthands ride in with the
+    # style overrides so every add_* builder accepts them without threading
+    # four more arguments through each signature, but the popup config is a
+    # top-level layer key -- left in `style` they would land somewhere the app
+    # never reads.
+    popup = normalize_popup(
+        style.pop("popup", None),
+        style.pop("tooltip", None),
+        max_width=style.pop("popup_max_width", None),
+        image_height=style.pop("popup_image_height", None),
+    )
     # Deep-copy the defaults so nested values (e.g. the vectorStyleStops list)
     # are not shared with the module constant; a caller mutating a returned
     # layer's style must not corrupt DEFAULT_LAYER_STYLE for later layers.
@@ -1171,6 +1277,50 @@ def _append_query(endpoint: str, params: list[tuple[str, str]]) -> str:
     return f"{base}{separator}{query}{sep}{fragment}"
 
 
+#: The GetMap parameters `wms_layer` writes itself, lower-cased.
+_WMS_GETMAP_KEYS = frozenset(
+    {
+        "service",
+        "request",
+        "version",
+        "layers",
+        "styles",
+        "format",
+        "transparent",
+        "srs",
+        "crs",
+        "bbox",
+        "width",
+        "height",
+    }
+)
+
+
+def _drop_query_keys(endpoint: str, keys: frozenset[str]) -> str:
+    """Remove query parameters named in ``keys`` (case-insensitive) from a URL.
+
+    The other parameters are kept byte for byte, in order, so a vendor option
+    such as ``map=...`` reaches the server exactly as the caller wrote it.
+
+    Args:
+        endpoint: A URL that may carry a query string.
+        keys: Lower-case parameter names to drop.
+
+    Returns:
+        The endpoint without those parameters.
+    """
+    base, sep, fragment = endpoint.partition("#")
+    path, qmark, query = base.partition("?")
+    if not qmark:
+        return endpoint
+    # Names are compared decoded, as a server or `URLSearchParams` reads them,
+    # so `%73RS=` counts as `SRS=`; kept parameters stay as written.
+    kept = [
+        part for part in query.split("&") if unquote_plus(part.split("=", 1)[0]).lower() not in keys
+    ]
+    return f"{path}?{'&'.join(kept)}{sep}{fragment}"
+
+
 def _resolve_bounds(bounds: list[float] | None) -> list[float] | None:
     """Validate optional layer bounds and coerce them to floats.
 
@@ -1230,6 +1380,35 @@ def _normalize_wms_version(version: str | None) -> str:
     return "1.3.0" if version.strip().startswith("1.3") else "1.1.1"
 
 
+#: CRSs a WMS layer can be requested in. MapLibre tiles are Web Mercator; the
+#: geographic ones are for servers without EPSG:3857, which the desktop app
+#: requests per tile in that CRS and redraws into Web Mercator. Keep in step with
+#: `GEOGRAPHIC_WMS_CRS` in `apps/geolibre-desktop/src/lib/wms-geographic.ts`:
+#: a geographic CRS accepted here but missing there renders blank, and
+#: `tests/wms-geographic.test.ts` fails when the two drift.
+WMS_CRS = frozenset({"EPSG:3857", "EPSG:4326", "EPSG:4258", "EPSG:6706", "CRS:84"})
+
+
+def _normalize_wms_crs(crs: str | None) -> str:
+    """Normalize the CRS a WMS layer requests its tiles in.
+
+    Args:
+        crs: The requested CRS code, or None for Web Mercator.
+
+    Returns:
+        The upper-cased code, ``"EPSG:3857"`` for None.
+
+    Raises:
+        ValueError: If ``crs`` is not one of :data:`WMS_CRS`.
+    """
+    if crs is None:
+        return "EPSG:3857"
+    code = str(crs).strip().upper()
+    if code not in WMS_CRS:
+        raise ValueError(f"crs must be one of {sorted(WMS_CRS)}, got {crs!r}")
+    return code
+
+
 def wms_layer(
     name: str,
     endpoint: str,
@@ -1240,6 +1419,7 @@ def wms_layer(
     transparent: bool = True,
     tile_size: int = 256,
     version: str | None = "1.1.1",
+    crs: str | None = None,
     bounds: list[float] | None = None,
     **style: Any,
 ) -> dict[str, Any]:
@@ -1261,6 +1441,13 @@ def wms_layer(
             Version 1.3.0 sends ``CRS`` instead of ``SRS``; some servers accept
             only one version. EPSG:3857 keeps its axis order in both, so the
             BBOX template is unchanged. None falls back to ``"1.1.1"``.
+        crs: The CRS tiles are requested in: ``"EPSG:3857"`` (None, the
+            default) or, for a server that does not offer Web Mercator, a
+            geographic CRS it does list in its capabilities (``"EPSG:4326"``,
+            ``"EPSG:4258"``, ``"EPSG:6706"``, ``"CRS:84"``). The desktop app
+            requests each tile's lon/lat extent in that CRS and redraws it
+            into Web Mercator; the web build still sends the Web Mercator
+            BBOX, which such a server rejects.
         bounds: Optional ``[west, south, east, north]`` request bounds, in
             WGS84. Take them from the service's ``EX_GeographicBoundingBox``,
             which is always lon/lat, rather than a 1.3.0 ``BoundingBox
@@ -1271,11 +1458,22 @@ def wms_layer(
         A layer dict for the project's ``layers`` array.
 
     Raises:
-        ValueError: If ``bounds`` is not four finite numbers with valid latitudes.
+        ValueError: If ``bounds`` is not four finite numbers with valid latitudes,
+            ``crs`` is not one of :data:`WMS_CRS`, or ``crs`` is ``"CRS:84"``
+            with a version other than 1.3.0.
     """
     wms_version = _normalize_wms_version(version)
+    wms_crs = _normalize_wms_crs(crs)
+    if wms_crs == "CRS:84" and wms_version != "1.3.0":
+        # CRS:84 is defined by WMS 1.3.0; a 1.1.1 server rejects it as an SRS.
+        raise ValueError("crs='CRS:84' needs version='1.3.0'; use EPSG:4326 with WMS 1.1.1")
+    # An endpoint copied from a capabilities OnlineResource or a GetMap URL
+    # may already carry VERSION, CRS or BBOX. A duplicate would leave the
+    # server and the desktop tile protocol (which reads the first VERSION to
+    # pick the axis order) disagreeing, so every key written here replaces
+    # the endpoint's own; vendor parameters such as `map=` are kept.
     tile_url = _append_query(
-        endpoint,
+        _drop_query_keys(endpoint, _WMS_GETMAP_KEYS),
         [
             ("SERVICE", "WMS"),
             ("REQUEST", "GetMap"),
@@ -1284,7 +1482,7 @@ def wms_layer(
             ("STYLES", styles),
             ("FORMAT", image_format),
             ("TRANSPARENT", "TRUE" if transparent else "FALSE"),
-            ("CRS" if wms_version == "1.3.0" else "SRS", "EPSG:3857"),
+            ("CRS" if wms_version == "1.3.0" else "SRS", wms_crs),
             ("BBOX", "{bbox-epsg-3857}"),
             ("WIDTH", str(tile_size)),
             ("HEIGHT", str(tile_size)),
@@ -1744,7 +1942,10 @@ def czml_layer(
     metadata: dict[str, Any] = {
         "sourceKind": CZML_SOURCE_KIND,
         "externalNativeLayer": True,
-        "identifiable": False,
+        # Cesium builds real entities from the document and the globe's layer
+        # sync answers for them, so a click can read a packet's name and custom
+        # properties. Mirrors ``createCzmlLayer`` in ``@geolibre/core``.
+        "identifiable": True,
         "sourceId": source_id,
         "nativeLayerIds": [source_id],
     }
@@ -1952,6 +2153,12 @@ PUBLISHABLE_PLUGIN_SETTINGS: dict[str, tuple[str, ...] | None] = {
     # shared Time Slider layers impossible to reconstruct. The retained value
     # is still recursively credential-scrubbed by the caller.
     "maplibre-gl-time-slider": None,
+    # Feed toggles (one boolean per feed) plus a numeric clock speed — no URLs,
+    # no keys, nothing user-authored. Listed as a whole blob rather than by key
+    # because the feed set grows with every new feed; an enumerated list would
+    # silently start counting each new toggle as a credential. The retained
+    # value is still recursively credential-scrubbed by the caller.
+    "gods-eye-view": None,
 }
 
 # Plugins the app activates by default (``activeByDefault: true`` in

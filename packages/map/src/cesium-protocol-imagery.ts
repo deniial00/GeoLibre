@@ -191,7 +191,7 @@ export function expandTileTemplate(
     .replace(/\{ratio\}/g, "");
 }
 
-function quadkey(z: number, x: number, y: number): string {
+export function quadkey(z: number, x: number, y: number): string {
   let key = "";
   for (let i = z; i > 0; i--) {
     const mask = 1 << (i - 1);
@@ -203,7 +203,7 @@ function quadkey(z: number, x: number, y: number): string {
   return key;
 }
 
-function mercatorBbox(z: number, x: number, y: number): string {
+export function mercatorBbox(z: number, x: number, y: number): string {
   const half = 20037508.342789244;
   const size = (2 * half) / 2 ** z;
   const west = -half + x * size;

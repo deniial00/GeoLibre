@@ -1,3 +1,4 @@
+import { readControlPreference, writeControlPreference } from "../../lib/control-preferences";
 import { supportsAddDataRenderer } from "../../lib/add-data-renderer";
 import {
   DEFAULT_PROJECT_NAME,
@@ -1241,27 +1242,23 @@ export function TopToolbar({
   const [controlsVisible, setControlsVisible] = useState<Record<ToolbarMapControl, boolean>>(() =>
     MAP_CONTROL_ITEMS.reduce(
       (acc, { id }) => {
-        acc[id] = DEFAULT_BUILT_IN_CONTROL_VISIBILITY[id];
+        acc[id] =
+          id === "terrain" || id === "maptoolkit-logo"
+            ? DEFAULT_BUILT_IN_CONTROL_VISIBILITY[id]
+            : readControlPreference(id, DEFAULT_BUILT_IN_CONTROL_VISIBILITY[id]);
         return acc;
       },
       {} as Record<ToolbarMapControl, boolean>,
     ),
   );
-  // A renderer swap replaces the engine and its controls while this toolbar
-  // keeps its checkbox state. Replay the controls the globe mounts on its own
-  // (fullscreen, Home under compass, the scene-mode picker under globe) once
-  // the new engine is ready, so a control hidden from the Controls menu stays
-  // hidden instead of reappearing with its checkbox still unticked.
+  // Restore optional chrome after startup and renderer replacement. Terrain is
+  // project state and the Maptoolkit logo follows attribution requirements.
   useEffect(() => {
-    for (const control of ["fullscreen", "compass", "globe"] as const)
-      mapControllerRef.current?.setBuiltInControlVisible(control, controlsVisible[control]);
-  }, [
-    mapControllerRef,
-    mapReadyGeneration,
-    controlsVisible.fullscreen,
-    controlsVisible.compass,
-    controlsVisible.globe,
-  ]);
+    for (const { id } of MAP_CONTROL_ITEMS) {
+      if (id !== "terrain" && id !== "maptoolkit-logo")
+        mapControllerRef.current?.setBuiltInControlVisible(id, controlsVisible[id]);
+    }
+  }, [mapControllerRef, mapReadyGeneration, controlsVisible]);
 
   const terrainEnabled = useAppStore((state) => state.preferences.map.terrainEnabled);
 
@@ -1404,14 +1401,21 @@ export function TopToolbar({
   // command palette so each panel opens identically from both.
   const addLayer: AddLayerHandlers = {
     vector: () => openVectorLayerPanel(appApi),
-    raster: () => openRasterLayerPanel(appApi),
+    raster: () =>
+      appApi.getMapRenderer?.() === "arcgis"
+        ? openAddDataKind("raster")
+        : openRasterLayerPanel(appApi),
     stac: () => {
       if (isActive(STAC_PLUGIN_ID)) openRightPanel(STAC_PLUGIN_ID);
       else toggle(STAC_PLUGIN_ID, appApi);
     },
     flatGeobuf: () => openFlatGeobufAddVectorLayerPanel(appApi),
-    pmtiles: () => openPMTilesLayerPanel(appApi),
-    zarr: () => openZarrLayerPanel(appApi),
+    pmtiles: () =>
+      appApi.getMapRenderer?.() === "arcgis"
+        ? openAddDataKind("pmtiles")
+        : openPMTilesLayerPanel(appApi),
+    zarr: () =>
+      appApi.getMapRenderer?.() === "arcgis" ? openAddDataKind("zarr") : openZarrLayerPanel(appApi),
     netcdf: () => setNetcdfDialogOpen(true),
     lidar: () => openLidarLayerPanel(appApi),
     splatting: () => openSplattingLayerPanel(appApi),
@@ -1425,6 +1429,8 @@ export function TopToolbar({
     const updated = mapControllerRef.current?.setBuiltInControlVisible(control, visible) ?? false;
     if (!updated) return;
     setControlsVisible((current) => ({ ...current, [control]: visible }));
+    if (control !== "terrain" && control !== "maptoolkit-logo")
+      writeControlPreference(control, visible);
     if (control === "terrain") {
       const { preferences, setPreferences } = useAppStore.getState();
       setPreferences({
@@ -1544,20 +1550,17 @@ export function TopToolbar({
           },
         ]
       : []),
-    // Print layout renders from the MapLibre canvas; the palette has no disabled
-    // state, so drop the command rather than offer one that opens a dialog which
-    // cannot produce a preview (#2268 review).
-    ...(capabilities.nativeMapInstance
-      ? [
-          {
-            id: "project.print-layout",
-            title: t("toolbar.item.printLayoutEllipsis"),
-            group: t("toolbar.commandGroup.project"),
-            icon: Printer,
-            run: () => setPrintLayoutOpen(true),
-          },
-        ]
-      : []),
+    // The composer captures through the engine's render surface, so it produces
+    // a preview on every renderer (#2475); it was gated on a MapLibre map back
+    // when it read that canvas directly (#2268 review), which left the menu item
+    // working while the palette had no entry at all.
+    {
+      id: "project.print-layout",
+      title: t("toolbar.item.printLayoutEllipsis"),
+      group: t("toolbar.commandGroup.project"),
+      icon: Printer,
+      run: () => setPrintLayoutOpen(true),
+    },
     // Add Data
     {
       id: "add.vector",
@@ -2108,13 +2111,25 @@ export function TopToolbar({
           commands.filter(
             (command) =>
               !command.id.startsWith("add.") ||
-              (addDataReady && supportsAddDataRenderer(command.id.slice(4), primaryRenderer)),
+              (addDataReady &&
+                supportsAddDataRenderer(
+                  command.id.slice(4),
+                  primaryRenderer,
+                  capabilities.deckOverlay,
+                )),
           ),
           deploymentCapabilities,
         ),
         appPrivileges,
       ),
-    [commands, deploymentCapabilities, appPrivileges, primaryRenderer, addDataReady],
+    [
+      commands,
+      deploymentCapabilities,
+      appPrivileges,
+      primaryRenderer,
+      addDataReady,
+      capabilities.deckOverlay,
+    ],
   );
   const shortcutCommands = useMemo(
     () =>
@@ -2131,11 +2146,6 @@ export function TopToolbar({
 
   const toolbarButtonSize = compact ? "icon" : "sm";
   const toolbarButtonClass = compact ? "h-8 w-8 shrink-0" : "shrink-0";
-  // Class for "secondary" toolbar menus that may be hidden on narrow screens to
-  // reduce toolbar wrapping. The menu stays reachable other ways (e.g. Edit's
-  // actions also have keyboard shortcuts). To make a future menu hideable, give
-  // its trigger Button this class instead of `toolbarButtonClass`.
-  const toolbarSecondaryButtonClass = cn(toolbarButtonClass, "hidden md:inline-flex");
   const toolbarIconClassName = cn("h-3.5 w-3.5", showLabels && "sm:me-1");
   // "GeoLibre Desktop" is the *desktop* product name. `isTauri()` alone is true
   // on iOS and Android too — where the app is named plain "GeoLibre" (the bundle
@@ -2146,7 +2156,6 @@ export function TopToolbar({
     showLabels ? <span className="hidden sm:inline">{label}</span> : null;
   const chrome: ToolbarChrome = {
     buttonClass: toolbarButtonClass,
-    secondaryButtonClass: toolbarSecondaryButtonClass,
     buttonSize: toolbarButtonSize,
     iconClassName: toolbarIconClassName,
     renderLabel: renderToolbarLabel,
@@ -2155,11 +2164,10 @@ export function TopToolbar({
   return (
     <header
       className={cn(
-        "flex min-h-11 min-w-0 shrink-0 items-center gap-1 border-b bg-card py-1",
-        compact
-          ? "flex-nowrap overflow-x-auto px-1.5"
-          : // Wrap below md; scroll a single row at md+ so tablets reach every menu (#871).
-            "flex-wrap px-2 md:flex-nowrap md:overflow-x-auto",
+        // One row at every width: menus that don't fit scroll horizontally
+        // instead of wrapping onto a second row (#871).
+        "flex min-h-11 min-w-0 shrink-0 flex-nowrap items-center gap-1 overflow-x-auto border-b bg-card py-1",
+        compact ? "px-1.5" : "px-2",
       )}
     >
       <span className="me-1 flex shrink-0 items-center gap-1.5 text-sm font-semibold text-primary md:me-2">

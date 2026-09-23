@@ -205,6 +205,12 @@ function sourceForCapture(layer: GeoLibreLayer): Record<string, unknown> {
       ? source.url
       : null;
   if (!originalUrl) return source;
+  // A TileJSON layer keeps its own tile templates — see `prepareLayerForSave`.
+  // The library re-adds a captured source verbatim, with no re-resolution step,
+  // so collapsing `tiles` onto the document URL here would never load a tile.
+  if (typeof (layer.metadata ?? {}).tilejsonUrl === "string") {
+    return { ...source, url: originalUrl };
+  }
   return { ...source, tiles: [originalUrl], url: originalUrl };
 }
 

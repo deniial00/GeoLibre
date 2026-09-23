@@ -83,42 +83,6 @@ export const CESIUM_BASEMAPS = [
     service: "Ocean/World_Ocean_Base",
   },
   { id: "osm", name: "OpenStreetMap", icon: "openStreetMap.png", category: "Other" },
-  {
-    id: "stadia-watercolor",
-    name: "Stadia x Stamen Watercolor",
-    icon: "stamenWatercolor.png",
-    category: "Other",
-    stadiaStyle: "stamen_watercolor",
-    maximumLevel: 16,
-    extension: "jpg",
-  },
-  {
-    id: "stadia-toner",
-    name: "Stadia x Stamen Toner",
-    icon: "stamenToner.png",
-    category: "Other",
-    stadiaStyle: "stamen_toner",
-    maximumLevel: 20,
-    extension: "png",
-  },
-  {
-    id: "stadia-smooth",
-    name: "Stadia Alidade Smooth",
-    icon: "stadiaAlidadeSmooth.png",
-    category: "Other",
-    stadiaStyle: "alidade_smooth",
-    maximumLevel: 20,
-    extension: "png",
-  },
-  {
-    id: "stadia-dark",
-    name: "Stadia Alidade Smooth Dark",
-    icon: "stadiaAlidadeSmoothDark.png",
-    category: "Other",
-    stadiaStyle: "alidade_smooth_dark",
-    maximumLevel: 20,
-    extension: "png",
-  },
 ] as const;
 
 export type CesiumBasemapId = (typeof CESIUM_BASEMAPS)[number]["id"];
@@ -127,10 +91,21 @@ export function normalizeCesiumBasemap(value: unknown): CesiumBasemapId {
   return CESIUM_BASEMAPS.find((entry) => entry.id === value)?.id ?? "project";
 }
 
-/** Missing credentials fall back to the project background without changing the saved choice. */
+/**
+ * Missing credentials fall back to keyless imagery without changing the saved
+ * choice.
+ *
+ * The fallback is ArcGIS World Imagery rather than the project background: a
+ * globe wants to look like the Earth, and the project's own basemap is usually
+ * a vector street style whose raster analogue is mostly empty ocean from
+ * orbit. It needs no key, so the globe looks the same with or without an Ion
+ * token — only terrain and the Ion-only basemaps are lost.
+ */
 export function availableCesiumBasemap(value: unknown, hasIonToken: boolean): CesiumBasemapId {
-  const entry = CESIUM_BASEMAPS.find((entry) => entry.id === value);
-  return entry && (!("assetId" in entry) || hasIonToken) ? entry.id : "project";
+  const keyless = "esri-imagery";
+  const requested = value ?? (hasIonToken ? "bing-aerial" : keyless);
+  const entry = CESIUM_BASEMAPS.find((entry) => entry.id === requested);
+  return entry && (!("assetId" in entry) || hasIonToken) ? entry.id : keyless;
 }
 
 /**
@@ -154,8 +129,6 @@ export type CesiumBasemapImagery =
       kind: "xyz";
       /** Tile template with `{z}`/`{x}`/`{y}` placeholders. */
       template: string;
-      /** Credentials are resolved at render time, never embedded in the descriptor. */
-      apiKeyProvider?: "stadia";
       /** Credit to show on the globe, as the HTML the 2D map already uses. */
       attribution: string;
       /** Max native zoom of the source, so the globe overzooms rather than 404s. */
@@ -273,7 +246,6 @@ export function sameCesiumImagery(a: CesiumBasemapImagery, b: CesiumBasemapImage
   if (a.kind !== "xyz" || b.kind !== "xyz") return true;
   return (
     a.template === b.template &&
-    a.apiKeyProvider === b.apiKeyProvider &&
     a.attribution === b.attribution &&
     a.maximumLevel === b.maximumLevel &&
     a.scheme === b.scheme &&
@@ -350,21 +322,6 @@ export function basemapToCesiumImagery(
     return {
       kind: "arcgis",
       url: `https://services.arcgisonline.com/ArcGIS/rest/services/${entry.service}/MapServer`,
-    };
-  }
-  if (entry && "stadiaStyle" in entry) {
-    return {
-      kind: "xyz",
-      template: `https://tiles.stadiamaps.com/tiles/${entry.stadiaStyle}/{z}/{x}/{y}.${entry.extension}`,
-      maximumLevel: entry.maximumLevel,
-      apiKeyProvider: "stadia",
-      attribution:
-        '<a href="https://stadiamaps.com/">© Stadia Maps</a> ' +
-        (entry.stadiaStyle.startsWith("stamen_")
-          ? '<a href="https://stamen.com/">© Stamen Design</a> '
-          : "") +
-        '<a href="https://openmaptiles.org/">© OpenMapTiles</a> ' +
-        '<a href="https://www.openstreetmap.org/copyright">© OpenStreetMap contributors</a>',
     };
   }
   if (entry && "assetId" in entry) return { kind: "ion", assetId: entry.assetId };

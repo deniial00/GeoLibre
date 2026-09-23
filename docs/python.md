@@ -289,7 +289,7 @@ m.on_layer_change(lambda e: print("layers", e["layerIds"]))
 | `add_pmtiles(url, name=, tile_type=, source_layers=, **style)` | Add a PMTiles archive (vector or raster). |
 | `add_tile_layer(url, name=, tile_size=, attribution=)` | Add a raster XYZ tile layer. |
 | `add_ee_layer(ee_object, vis_params=, name=, shown=, opacity=)` | Add an authenticated Google Earth Engine object as raster tiles (needs `earthengine-api`). |
-| `add_wms(endpoint, layers, name=, styles=, image_format=, transparent=, tile_size=, version=, bounds=, **style)` | Add a WMS layer (GetMap, tiled raster). `bounds` is `[west, south, east, north]`, needed for zoom-to-layer. |
+| `add_wms(endpoint, layers, name=, styles=, image_format=, transparent=, tile_size=, version=, crs=, bounds=, **style)` | Add a WMS layer (GetMap, tiled raster). `bounds` is `[west, south, east, north]`, needed for zoom-to-layer. `crs` defaults to `EPSG:3857`; for a server without Web Mercator pass a geographic CRS it lists (`EPSG:4326`, `EPSG:4258`, `EPSG:6706`, or `CRS:84` with `version="1.3.0"`; no others). Only the desktop app redraws those tiles into Web Mercator: the web build and `export_html` pages still send the Web Mercator BBOX, so such a layer stays blank there. |
 | `add_wmts(url, name=, tile_size=, bounds=, **style)` | Add a WMTS layer from a tile URL template. |
 | `add_wfs(endpoint, type_name, name=, version=, output_format=, srs_name=, max_features=, **style)` | Add a WFS layer (GetFeature GeoJSON, fetched and inlined). |
 | `add_cog(url, name=, bands=, colormap=, rescale=, **style)` | Add a Cloud Optimized GeoTIFF (URL or a kernel-side local GeoTIFF path). |
@@ -382,12 +382,14 @@ m.clear_popup("Sites")                                 # back to the default
 list of names (`popup=["name", "pop"]`), a list of field mappings, or `False` to
 suppress the click popup. The full mapping form above takes the same keys as
 `set_popup` — `fields`, `click`, `hover`, `title`, `title_expression`,
-`body_expression`, `show_feature_id`, `tooltip` — and rejects a key it does not
-know, so a misspelling is an error rather than a setting that quietly does
-nothing. Those keys belong *inside* `popup=`; passed to `add_markers` directly
-they would be taken for style keys. `tooltip=` takes a property name, a list
-of names, `True` to put every configured popup field in the tip, or `False` to
-turn it off.
+`body_expression`, `show_feature_id`, `max_width`, `image_height`, `tooltip` —
+and rejects a key it does not know, so a misspelling is an error rather than a
+setting that quietly does nothing. Those keys belong *inside* `popup=`; passed
+to `add_markers` directly they would be taken for style keys. The two sizes are
+the exception: `popup_max_width=` and `popup_image_height=` work as top-level
+arguments on every `add_*` method too, for when a wider popup is the only
+change you want. `tooltip=` takes a property name, a list of names, `True` to
+put every configured popup field in the tip, or `False` to turn it off.
 
 A field's `kind` decides how the value renders:
 
@@ -400,11 +402,47 @@ A field's `kind` decides how the value renders:
 | `link` | An `http(s)` value becomes a link, labelled `link_label`. |
 | `image` | An `http(s)` value or inline base64 raster data URL becomes a thumbnail. |
 
+### Sizing the popup and its pictures
+
+The popup is 520 px wide by default (420 px when it carries a picture, which it
+lets you drag wider), and a picture inside it draws at most `min(50vh, 420px)`
+tall. `max_width` and `image_height` change both, in CSS pixels:
+
+```python
+m.add_markers(
+    sites,
+    shape="pin", color="#e11d48", size=32,
+    popup={
+        "title": "name",
+        "max_width": 640,       # 288–1200; the viewport still caps it
+        "image_height": 420,    # 40–1200
+        "fields": [
+            {"field": "photo", "kind": "image", "label": "Photo"},
+            {"field": "url", "kind": "link", "link_label": "Read more"},
+        ],
+    },
+    tooltip="name",
+)
+
+# The same two settings as top-level arguments, on any add_* method:
+m.add_markers(sites, popup=["name", "photo"], popup_max_width=640, popup_image_height=420)
+
+# Or on a layer that already exists (merge=True keeps the fields):
+m.set_popup("Sites", max_width=640, image_height=420, merge=True)
+```
+
+A thumbnail keeps its aspect ratio, so a landscape photo needs the **width** to
+grow before it can use the extra height — raise `max_width` alongside
+`image_height`. A size outside the range the app renders is an error rather
+than a value silently clamped on the map, and clicking a picture still opens it
+full-size in a lightbox whatever the popup's own size is.
+
 Two rules worth knowing before you port a popup from another library:
 
-- **Raw HTML in a property is not rendered as markup.** A popup value that
-  arrives from a GeoJSON file is untrusted, so it is written as text rather
-  than parsed. Use `kind="image"` and `kind="link"` for pictures and links, and
+- **Raw HTML in a property is not rendered as markup, and neither is Markdown.**
+  A popup value that arrives from a GeoJSON file is untrusted, so it is written
+  as text rather than parsed. Use `kind="image"` and `kind="link"` for pictures
+  and links, and
   `body_expression` (a [MapLibre expression](https://maplibre.org/maplibre-style-spec/expressions/),
   as JSON text) when you want a composed sentence instead of a table:
   `body_expression='["concat", ["get", "name"], " — ", ["get", "county"], " County"]'`.
@@ -557,7 +595,7 @@ pip install -e python    # editable install for development
 Changes to the Python code are picked up on kernel restart. Changes to the app
 (TypeScript) require re-running `npm run build:embed` and restarting the kernel.
 
-## Cesium and mixed pane layouts
+## Rendering engines and mixed pane layouts
 
 ```python
 m = Map(renderer="cesium", center=(-100, 40), zoom=4)
@@ -567,7 +605,8 @@ m.set_renderer("cesium", pane_id=pane_id)
 assert m.get_renderer() == "cesium"
 ```
 
-Renderer choices are `"maplibre"` and `"cesium"`. Omitting `pane_id` targets the
+Renderer choices are `"maplibre"`, `"mapbox"`, `"cesium"`, and `"arcgis"`.
+Omitting `pane_id` targets the
 primary map. Grid dimensions are 1–4; `view_kinds` contains one renderer per
 pane, primary first. Existing pane IDs, cameras, and visibility overrides survive
 layout resizing. Save the project normally to preserve `primaryRenderer` and

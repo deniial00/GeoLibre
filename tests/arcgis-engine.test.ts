@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { beforeEach, describe, it } from "node:test";
 import { parseHTML } from "linkedom";
+import type { Map as MapLibreMap } from "maplibre-gl";
 import {
   BLANK_BASEMAP,
   DEFAULT_LAYER_STYLE,
@@ -44,6 +45,7 @@ function makeSdk() {
   const widgets: { kind: string; props: Record<string, unknown>; destroyed: boolean }[] = [];
   const goTo: unknown[] = [];
   let watchers: (() => void)[] = [];
+  const viewHandlers = new Map<string, Set<(event: Record<string, unknown>) => void>>();
   const syncWatchers = new Set<() => void>();
   const layerClass = (kind: string) =>
     class {
@@ -214,7 +216,12 @@ function makeSdk() {
     toMap: (p: { x: number; y: number }) => ({ longitude: p.x, latitude: p.y, x: p.x, y: p.y }),
     hitTest: async () => ({ results: hitResults, screenPoint: { x: 0, y: 0 } }),
     takeScreenshot: async () => ({ dataUrl: "data:image/png;base64,", data: {} as ImageData }),
-    on: (_type: string, _handler: unknown) => ({ remove: () => {} }),
+    on: (type: string, handler: (event: Record<string, unknown>) => void) => {
+      const handlers = viewHandlers.get(type) ?? new Set();
+      handlers.add(handler);
+      viewHandlers.set(type, handlers);
+      return { remove: () => handlers.delete(handler) };
+    },
     destroy: () => {
       view.destroyed = true;
     },
@@ -346,6 +353,9 @@ function makeSdk() {
     uiAdds,
     layers,
     fireWatchers: () => watchers.forEach((w) => w()),
+    fireViewEvent: (type: string, event: Record<string, unknown>) => {
+      for (const handler of viewHandlers.get(type) ?? []) handler(event);
+    },
     setHitResults: (results: unknown[]) => {
       hitResults = results;
     },
@@ -451,6 +461,26 @@ const SQUARE = geojsonLayer({
 });
 
 describe("ArcgisEngine camera conventions", () => {
+  it("publishes geographic map clicks and removes the listener on cleanup", () => {
+    const { engine, fireViewEvent, rawView } = makeEngine();
+    // Screen and geographic coordinates differ, so forwarding event.x/y fails.
+    rawView.toMap = (p: { x: number; y: number }) => ({
+      longitude: p.x / 10,
+      latitude: p.y / 10,
+      x: p.x,
+      y: p.y,
+    });
+    const clicks: [number, number][] = [];
+    const unsubscribe = engine.onMapClick((lngLat) => clicks.push(lngLat));
+
+    fireViewEvent("click", { x: -765, y: 392.5 });
+    assert.deepEqual(clicks, [[-76.5, 39.25]]);
+
+    unsubscribe();
+    fireViewEvent("click", { x: 10, y: 20 });
+    assert.deepEqual(clicks, [[-76.5, 39.25]]);
+  });
+
   it("maps MapLibre bearings to SDK rotations and back", () => {
     assert.equal(bearingToRotation(0), 0);
     assert.equal(bearingToRotation(90), 270);
@@ -473,6 +503,11 @@ describe("ArcgisEngine camera conventions", () => {
     // An identical view is not re-applied.
     engine.applyView({ center: [1, 2], zoom: 7, bearing: 45, pitch: 0 });
     assert.equal(goTo.length, 1);
+  });
+  it("returns no coordinate for a screen point that has no map location", () => {
+    const { engine, rawView } = makeSceneEngine();
+    rawView.toMap = () => null;
+    assert.equal(engine.getRenderSurface()?.unproject([10, 20]), null);
   });
   it("clamps saved views against the project preferences before the jump", () => {
     const { engine, goTo } = makeEngine();
@@ -593,9 +628,9 @@ describe("ArcgisEngine controls", () => {
     assert.equal(engine.setBuiltInControlPosition("scale", "bottom-right"), true);
     assert.equal(engine.getBuiltInControlPosition("scale"), "bottom-right");
     assert.equal(uiAdds.at(-1)?.position, "bottom-right");
-    // Plugin IControls have no host here.
+    // Missing controls are rejected before consulting the plugin control host.
     assert.equal(engine.addControl(), false);
-    assert.equal(engine.capabilities.domControls, false);
+    assert.equal(engine.capabilities.domControls, true);
   });
   it("forwards the scale unit and compass label to the widgets", () => {
     const { engine, widgets } = makeEngine();
@@ -674,10 +709,10 @@ describe("ArcgisEngine layer sync", () => {
       name: "Archive",
       geojson: undefined,
       type: "pmtiles",
-      source: { url: "https://x/a.pmtiles" },
+      source: { url: "https://x/a.pmtiles", encoding: "mlt" },
     });
     engine.syncLayers([archive]);
-    assert.match(engine.getRenderStatus().errors.join(), /Archive: pmtiles archives/);
+    assert.match(engine.getRenderStatus().errors.join(), /Archive: ArcGIS requires MVT/);
     engine.syncLayers([{ ...archive, visible: false }]);
     assert.deepEqual(engine.getRenderStatus().errors, []);
   });
@@ -835,15 +870,23 @@ describe("ArcgisEngine picking and highlight", () => {
     assert.deepEqual(feature.properties, { OBJECTID: 7, NAME: "Parcel" });
     assert.equal(feature.geometry?.type, "Polygon");
   });
-  it("returns nothing from a hit test that outlives the engine", async () => {
+  it("keeps synchronous control results when a native hit test outlives the engine", async () => {
+    const { setArcgisControlPicker } = await import("../packages/map/src/arcgis-control-adapters");
     const { engine, setHitResults } = makeEngine();
+    const external = {
+      layerId: "query",
+      featureId: "12",
+      properties: { NAME: "station" },
+      geometry: null,
+    };
+    setArcgisControlPicker(engine.getView()!, () => [external]);
     engine.syncLayers([SQUARE]);
     setHitResults([
       { type: "graphic", graphic: { attributes: { [ARCGIS_ID_FIELD]: "sq" }, layer: null } },
     ]);
     const pending = engine.identifyFeaturesAt({ x: 0.5, y: 0.5 });
     engine.destroy();
-    assert.deepEqual(await pending, []);
+    assert.deepEqual(await pending, [external]);
   });
   it("draws the selection as a graphics layer on top and clears it", () => {
     const { engine, layers } = makeEngine();
@@ -1120,6 +1163,24 @@ describe("ArcgisEngine native style plans", () => {
   });
 });
 
+it("identifies adapted controls when no native SDK layer is present and clears them on teardown", async () => {
+  const { setArcgisControlPicker } = await import("../packages/map/src/arcgis-control-adapters");
+  const { engine } = makeEngine();
+  const feature = {
+    layerId: "query",
+    featureId: "12",
+    properties: { NAME: "station" },
+    geometry: null,
+  };
+  setArcgisControlPicker(engine.getView()!, (_point, layerId) =>
+    !layerId || layerId === "query" ? [feature] : [],
+  );
+  assert.deepEqual(await engine.identifyFeaturesAt({ x: 1, y: 2 }, "query"), [feature]);
+  assert.deepEqual(await engine.identifyFeaturesAt({ x: 1, y: 2 }, "other"), []);
+  engine.destroy();
+  assert.deepEqual(await engine.identifyFeaturesAt({ x: 1, y: 2 }, "query"), []);
+});
+
 it("commits native visibility before an unrelated store sync can overwrite the toggle", () => {
   let layer = SQUARE;
   const changes: boolean[] = [];
@@ -1138,4 +1199,241 @@ it("commits native visibility before an unrelated store sync can overwrite the t
   assert.equal(native.visible, false);
   assert.deepEqual(changes, [false]);
   engine.destroy();
+});
+
+it("refreshes Zarr time slices without replacing the native layer", () => {
+  const { engine, sdk, created } = makeEngine();
+  let refreshes = 0;
+  sdk.layers.BaseTileLayer = {
+    createSubclass(definition: Record<string, unknown>) {
+      class Native extends sdk.layers.WebTileLayer {
+        refresh() {
+          refreshes++;
+        }
+      }
+      Object.assign(Native.prototype, definition);
+      return Native;
+    },
+  } as unknown as ArcgisSdk["layers"]["BaseTileLayer"];
+  const layer = geojsonLayer({
+    type: "zarr",
+    geojson: undefined,
+    source: { url: "https://example.test/data.zarr", variable: "air", selector: { time: 0 } },
+  });
+  engine.syncLayers([layer]);
+  const native = created.at(-1)!;
+  assert.equal(refreshes, 0);
+  const next = { ...layer, source: { ...layer.source, selector: { time: 1 } } };
+  engine.syncLayers([next]);
+  assert.equal(created.at(-1), native);
+  assert.equal(native.destroyed, false);
+  assert.equal(refreshes, 1);
+  engine.syncLayers([next]);
+  assert.equal(refreshes, 1, "unchanged selectors do not refresh");
+  engine.syncLayers([{ ...next, source: { ...next.source, variable: "other" } }]);
+  assert.equal(native.destroyed, true, "changing the variable rebuilds the grid");
+  engine.destroy();
+});
+
+describe("ArcGIS custom terrain ownership", () => {
+  function terrainHarness() {
+    const { engine } = makeEngine();
+    type Registration = Awaited<
+      ReturnType<typeof import("../packages/map/src/cog-dem-source").registerCogDemSource>
+    >;
+    const pending = new Map<
+      string,
+      {
+        resolve: (registration: Registration) => void;
+        reject: (error: Error) => void;
+      }
+    >();
+    (
+      engine as unknown as {
+        openCogDem: (source: string) => Promise<Registration>;
+      }
+    ).openCogDem = (source) =>
+      new Promise((resolve, reject) => {
+        pending.set(source, { resolve, reject });
+      });
+    const registration = (): Registration & { readonly disposals: number } => {
+      let disposals = 0;
+      return {
+        tiles: ["unused"],
+        renderTile: async () => new Uint8ClampedArray(256 * 256 * 4),
+        dispose: () => {
+          disposals++;
+        },
+        get disposals() {
+          return disposals;
+        },
+      };
+    };
+    return { engine, pending, registration };
+  }
+
+  it("keeps the newest source and disposes a superseded pending source", async () => {
+    const { engine, pending, registration } = terrainHarness();
+    const first = engine.setTerrainCogSource("first");
+    const second = engine.setTerrainCogSource("second");
+    const old = registration(),
+      latest = registration();
+    pending.get("second")!.resolve(latest);
+    assert.equal(await second, true);
+    pending.get("first")!.resolve(old);
+    assert.equal(await first, false);
+    assert.equal(engine.getTerrainCogSource(), "second");
+    assert.equal(old.disposals, 1);
+    assert.equal(latest.disposals, 0);
+    engine.destroy();
+    assert.equal(latest.disposals, 1);
+  });
+
+  it("preserves working terrain after a failed replacement and disposes on clear", async () => {
+    const { engine, pending, registration } = terrainHarness();
+    const first = engine.setTerrainCogSource("working");
+    const working = registration();
+    pending.get("working")!.resolve(working);
+    await first;
+    const failed = engine.setTerrainCogSource("offline");
+    pending.get("offline")!.reject(new Error("Network unavailable"));
+    await assert.rejects(failed, /Network unavailable/);
+    assert.equal(engine.getTerrainCogSource(), "working");
+    assert.equal(working.disposals, 0);
+    assert.equal(await engine.setTerrainCogSource(null), true);
+    assert.equal(engine.hasCustomTerrainSource(), false);
+    assert.equal(working.disposals, 1);
+    engine.destroy();
+    assert.equal(working.disposals, 1);
+  });
+
+  it("disposes a registration that completes after the view is destroyed", async () => {
+    const { engine, pending, registration } = terrainHarness();
+    const loading = engine.setTerrainCogSource("late");
+    engine.destroy();
+    const late = registration();
+    pending.get("late")!.resolve(late);
+    assert.equal(await loading, false);
+    assert.equal(late.disposals, 1);
+  });
+});
+
+describe("ArcGIS archive interceptor ownership", () => {
+  const archive = () =>
+    geojsonLayer({
+      geojson: undefined,
+      type: "pmtiles",
+      source: {
+        url: "https://example.test/archive.pmtiles",
+        sourceLayers: ["buildings"],
+        type: "vector",
+      },
+    });
+  it("replaces interceptors on restyle and removes them with the layer", () => {
+    const { engine, sdk, created } = makeEngine();
+    const layer = archive();
+    engine.syncLayers([layer]);
+    assert.equal(sdk.config.request.interceptors.length, 1);
+    const old = sdk.config.request.interceptors[0];
+    const native = created.at(-1)!;
+    engine.syncLayers([{ ...layer, style: { ...layer.style, fillColor: "#ff0000" } }]);
+    assert.equal(sdk.config.request.interceptors.length, 1);
+    assert.notEqual(sdk.config.request.interceptors[0], old);
+    assert.equal(native.destroyed, true);
+    engine.syncLayers([]);
+    assert.equal(sdk.config.request.interceptors.length, 0);
+    engine.destroy();
+  });
+  it("cleans up the interceptor when adding a constructed layer fails", () => {
+    const { engine, sdk, map, created } = makeEngine();
+    map.add = () => {
+      throw new Error("SDK add failed");
+    };
+    engine.syncLayers([archive()]);
+    assert.equal(sdk.config.request.interceptors.length, 0);
+    assert.equal(created.at(-1)!.destroyed, true);
+    assert.ok(engine.getRenderStatus().errors.some((error) => error.includes("SDK add failed")));
+    engine.destroy();
+  });
+});
+
+it("hosts DOM controls with instant jumps, navigation events and complete cleanup", () => {
+  const { document, HTMLElement } = parseHTML("<html><body></body></html>").window;
+  const previous = { document: globalThis.document, HTMLElement: globalThis.HTMLElement };
+  Object.assign(globalThis, { document, HTMLElement });
+  const { engine, rawView, goTo, uiAdds, fireWatchers } = makeEngine();
+  rawView.container = document.body;
+  const builtInCount = uiAdds.length;
+  let facade!: MapLibreMap;
+  let removed = 0;
+  const control = {
+    onAdd(map: MapLibreMap) {
+      facade = map;
+      return document.createElement("div");
+    },
+    onRemove() {
+      removed++;
+    },
+  };
+  try {
+    assert.equal(engine.addControl(control, "bottom-right"), true);
+    assert.equal(engine.addControl(control, "bottom-right"), true);
+    assert.equal(uiAdds.length, builtInCount + 1);
+    assert.equal(uiAdds.at(-1)!.position, "bottom-right");
+    assert.ok(
+      (uiAdds.at(-1)!.component as HTMLElement).classList.contains("maplibregl-ctrl-bottom-right"),
+    );
+    assert.equal(facade.hasControl(control), true);
+    assert.deepEqual(facade.unproject([3, 4]).toArray(), [3, 4]);
+    rawView.toMap = () => null;
+    assert.deepEqual(facade.unproject([3, 4]).toArray(), engine.readView().center);
+    facade.jumpTo({ center: { lng: 3, lat: 4 }, zoom: 9 });
+    assert.deepEqual(goTo.at(-1), {
+      target: { center: [3, 4], zoom: 9, rotation: 0 },
+      options: { animate: false },
+    });
+    facade.easeTo({ zoom: 10 });
+    assert.equal((goTo.at(-1) as { options: { duration: number } }).options.duration, 500);
+    const events: string[] = [];
+    for (const event of ["movestart", "moveend", "idle", "remove"])
+      facade.on(event, () => events.push(event));
+    rawView.stationary = false;
+    fireWatchers();
+    rawView.stationary = true;
+    fireWatchers();
+    assert.deepEqual(events, ["movestart", "moveend", "idle"]);
+    engine.removeControl(control);
+    assert.equal(facade.hasControl(control), false);
+    assert.equal(removed, 1);
+    assert.equal(uiAdds.length, builtInCount);
+    let failedCleanup = 0;
+    const broken = {
+      onAdd(): HTMLElement {
+        throw new Error("Control initialization failed");
+      },
+      onRemove() {
+        failedCleanup++;
+      },
+    };
+    const warn = console.warn;
+    console.warn = () => {};
+    try {
+      assert.equal(engine.addControl(broken), false);
+      assert.equal(failedCleanup, 1);
+      assert.equal(facade.hasControl(broken), false);
+      assert.equal(uiAdds.length, builtInCount);
+    } finally {
+      console.warn = warn;
+    }
+    engine.addControl(control);
+    engine.destroy();
+    assert.equal(removed, 2);
+    assert.equal(uiAdds.length, builtInCount);
+    assert.deepEqual(events, ["movestart", "moveend", "idle", "remove"]);
+    fireWatchers();
+    assert.equal(events.length, 4, "destroy removes the SDK event subscriptions");
+  } finally {
+    engine.destroy();
+    Object.assign(globalThis, previous);
+  }
 });

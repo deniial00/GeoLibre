@@ -22,6 +22,7 @@
     "noMatches": "Keine Treffer.",
     "addFailed": "Diese Datenquelle konnte nicht hinzugefügt werden.",
     "builtinBadge": "integriert",
+    "configBadge": "Konfig",
     "newConnection": "Neue {{kind}}-Verbindung",
     "loadingTables": "Tabellen werden geladen…",
     "files": "Dateien",
@@ -359,6 +360,10 @@
       "kml": {
         "label": "KML / KMZ",
         "description": "KML oder KMZ mit nativen Stilen, Overlays und Netzwerklinks auf dem Globus laden."
+      },
+      "wcs": {
+        "description": "Numerischen GeoTIFF-Ausschnitt von einem WCS-1.0.0-Dienst laden.",
+        "label": "WCS-Ebene"
       }
     },
     "shared": {
@@ -398,6 +403,7 @@
       "loadAria": "Einen gespeicherten Dienst laden",
       "loadPlaceholder": "Einen gespeicherten Dienst laden…",
       "builtin": "{{name}} (integriert)",
+      "config": "{{name}} (Konfig)",
       "deleteAria": "Gespeicherten Dienst löschen",
       "empty": "Noch keine gespeicherten Dienste — füllen Sie das Formular aus und wählen Sie „Aktuellen speichern“.",
       "name": "Name",
@@ -423,7 +429,11 @@
       "kindImagery": "Bilddaten",
       "altitudeOffset": "Höhenversatz (m)",
       "quickPicks": "Schnellauswahl",
+      "quickPicksPlaceholder": "Asset auswählen…",
+      "quickPicksGlobal": "In jedem ion-Konto enthalten",
+      "quickPicksDepot": "Asset-Depot-Beispiele",
       "hint": "Asset-IDs finden Sie unter „My Assets“ auf ion.cesium.com. Das Asset muss für das in den Einstellungen konfigurierte Token freigegeben sein.",
+      "depotHint": "Asset-Depot-Beispiele werden erst gestreamt, wenn Sie sie unter ion.cesium.com → Asset Depot Ihrem Konto hinzufügen.",
       "errorAssetId": "Geben Sie eine Cesium-Ion-Asset-ID ein (eine positive ganze Zahl).",
       "errorAltitude": "Geben Sie den Höhenversatz als Zahl in Metern ein.",
       "tokenMissing": "Es ist kein Cesium-Ion-Token konfiguriert. Fügen Sie eines unter Einstellungen → Umgebungsvariablen (VITE_CESIUM_TOKEN) hinzu, sonst kann das Asset nicht geladen werden."
@@ -508,6 +518,7 @@
       "selectType_one": "Aus {{count}} Feature-Typ auswählen",
       "selectType_other": "Aus {{count}} Feature-Typen auswählen",
       "noTypesFound": "Für diesen Dienst wurden keine Feature-Typen gefunden.",
+      "errorNoFeatures": "Dieser Feature-Typ hat keine Objekte zurückgegeben.",
       "retrieveError": "Feature-Typen konnten nicht von diesem Dienst abgerufen werden."
     },
     "wmts": {
@@ -966,7 +977,42 @@
       "modelTooLarge": "Dieses Modell überschreitet das Limit von {{limit}} MB für die Einbettung in ein Projekt. Hosten Sie es stattdessen und fügen Sie es per URL hinzu.",
       "modelFileError": "Dieses Modell konnte nicht gelesen werden. Wählen Sie eine gültige glTF-2.0- oder GLB-Datei aus."
     },
-    "nonGeographicCoordinates": "Die Koordinaten in {{names}} sind keine geografische Länge/Breite, daher wird nichts auf der Karte gezeichnet. Das CRS ist falsch angegeben — projizieren Sie die Daten um (oder korrigieren Sie die .prj) und laden Sie sie erneut."
+    "nonGeographicCoordinates": "Die Koordinaten in {{names}} sind keine geografische Länge/Breite, daher wird nichts auf der Karte gezeichnet. Das CRS ist falsch angegeben — projizieren Sie die Daten um (oder korrigieren Sie die .prj) und laden Sie sie erneut.",
+    "pmtiles": {
+      "errorUrl": "Geben Sie eine gültige HTTP- oder HTTPS-URL für PMTiles ein.",
+      "errorMlt": "ArcGIS benötigt MVT-Vektorkacheln, nicht MLT."
+    },
+    "lidar": {
+      "errorUrl": "Geben Sie eine gültige HTTP- oder HTTPS-URL für LiDAR ein."
+    },
+    "zarr": {
+      "errorUrl": "Geben Sie eine gültige HTTP- oder HTTPS-URL für Zarr ein.",
+      "errorColorLimits": "Der obere Farbgrenzwert muss größer als der untere sein."
+    },
+    "raster": {
+      "errorSource": "Geben Sie eine GeoTIFF-URL ein oder wählen Sie eine Datei."
+    },
+    "wcs": {
+      "coverage": "Coverage",
+      "retrieve": "Coverages abrufen",
+      "select": "Coverage auswählen",
+      "extent": "Coverage-Ausdehnung verwenden",
+      "width": "Breite (Pixel)",
+      "height": "Höhe (Pixel)",
+      "hint": "Lädt ein GeoTIFF in EPSG:4326 mit den gewählten Pixelmaßen herunter. Werte können neu abgetastet werden. Speichern Sie das Raster, um die Daten zu behalten.",
+      "errors": {
+        "xml": "Der Dienst hat ungültiges XML zurückgegeben.",
+        "version": "Diese Quelle benötigt WCS 1.0.0. Der Dienst hat eine nicht unterstützte Antwort zurückgegeben.",
+        "empty": "Keine passenden Coverages verfügbar.",
+        "format": "Die Coverage bietet keine GeoTIFF-Ausgabe an.",
+        "crs": "Die Coverage muss EPSG:4326 für Anfragen und Ausgabe unterstützen.",
+        "size": "Wählen Sie Abmessungen von 1 bis 4096 Pixeln. Downloads sind auf 128 MB begrenzt.",
+        "metadata": "Der Dienst hat mehr Metadaten zurückgegeben, als GeoLibre laden kann. Metadaten-Antworten sind auf 32 MB begrenzt.",
+        "response": "Der Dienst hat kein gültiges GeoTIFF zurückgegeben.",
+        "bounds": "Geben Sie einen gültigen Rahmen ein: West/Ost zwischen -180 und 180, Süd/Nord zwischen -90 und 90, mit West < Ost und Süd < Nord.",
+        "url": "Geben Sie eine WCS-Dienst-URL ein."
+      }
+    }
   },
   "offline": {
     "title": "Offline-Bereich herunterladen",
@@ -1931,7 +1977,7 @@
     "only3d": "Nur 3D",
     "noMapbox": "Kein Mapbox",
     "noArcgis": "Kein ArcGIS",
-    "cesiumTokenHint": "Fügen Sie in den Einstellungen ein Cesium-Ion-Token für Gelände und Ion-Bilder hinzu"
+    "cesiumTokenHint": "Fügen Sie unter <settingsLink>Einstellungen → Umgebungsvariablen</settingsLink> ein Cesium-Ion-Token für Gelände und Ion-Bilder hinzu"
   },
   "renderer": {
     "basemap": "Hintergrundkarte",
@@ -1941,6 +1987,7 @@
     "layerCesiumOnly": "Wird nur vom 3D-Globus dargestellt",
     "layerMapboxUnsupported": "Wird vom Mapbox-Renderer nicht dargestellt",
     "layerArcgisUnsupported": "Wird vom ArcGIS-Renderer nicht dargestellt",
+    "layerArcgisViewUnsupported": "In dieser ArcGIS-Ansicht nicht dargestellt",
     "resetView": "Ansicht zurücksetzen",
     "scene3D": "3D-Globus",
     "scene2D": "2D-Karte",
@@ -2320,6 +2367,55 @@
       }
     }
   },
+  "panel": {
+    "godsEyeView": {
+      "description": "Live-Ereignisse auf der Erde mit Zeitbezug aus öffentlichen Datenfeeds.",
+      "globeOnly": "Live-Globusfeeds werden auf dem Cesium-Globus dargestellt. Wechseln Sie zum 3D-Globus, um sie anzuzeigen.",
+      "groups": {
+        "movement": "Bewegung",
+        "cameras": "Kameras",
+        "infrastructure": "Infrastruktur",
+        "events": "Ereignisse",
+        "utilities": "Dienstprogramme"
+      },
+      "earthquakes": "Erdbeben",
+      "spaceMissions": "Weltraummissionen (30 Tage)",
+      "satellites": "Satelliten",
+      "flights": "Live-Flüge",
+      "militaryFlights": "Militärflüge",
+      "bikeShare": "Bikesharing",
+      "transit": "Live-Nahverkehr",
+      "streetTraffic": "Simulierter Straßenverkehr",
+      "mappedAlpr": "Kartierte Kennzeichenkameras",
+      "cctv": "Öffentliche CCTV-Kameras",
+      "cctvPopup": {
+        "liveSnapshot": "Livebild",
+        "provider": "Anbieter",
+        "attribution": "Quellenangabe",
+        "privacy": "Datenschutz"
+      },
+      "radio": "Radiosender",
+      "datacenters": "Rechenzentren",
+      "dams": "Staudämme",
+      "cables": "Seekabel",
+      "osmInfrastructure": "OSM-Infrastruktur",
+      "loading": "Wird aktualisiert…",
+      "updateFailed": "Aktualisierung fehlgeschlagen",
+      "noneInView": "Für diese Ebene wurden im aktuellen Kartenausschnitt keine Objekte gefunden.",
+      "never": "Nie",
+      "lastUpdated": "Zuletzt aktualisiert: {{time}}",
+      "speed": "Geschwindigkeit",
+      "speedRealTime": "Echtzeit (1×)",
+      "speedMultiple": "{{factor}}×",
+      "denseSatellites": "Dichter Satellitenkatalog",
+      "denseLoading": "DENSE ···",
+      "denseFailed": "DENSE !",
+      "denseCount": "DENSE · {{count}}",
+      "dense": "DENSE",
+      "denseError": "Der Starlink-Katalog konnte nicht geladen werden: {{error}}. Zum erneuten Versuch auswählen.",
+      "denseDescription": "Die vollständige Starlink-Konstellation als ressourcenschonende Punkte anzeigen (ohne Beschriftungen oder Tabellenzeilen)."
+    }
+  },
   "toolbar": {
     "menu": {
       "project": "Projekt",
@@ -2561,7 +2657,8 @@
       "czml": "Dynamische CZML-3D-Szene",
       "gltfModel": "3D-Modell (glTF)",
       "postgres": "PostgreSQL-Ebene",
-      "iceberg": "Apache-Iceberg-Ebene"
+      "iceberg": "Apache-Iceberg-Ebene",
+      "wcs": "WCS-Ebene"
     },
     "conversion": {
       "vectorToVector": "Vektor zu Vektor",
@@ -3029,6 +3126,8 @@
       "maplibre-gl-esri-wayback": "Historische Bilder",
       "maplibre-gl-openaerialmap": "OpenAerialMap",
       "maplibre-gl-arcgis-hub": "ArcGIS Hub",
+      "geolibre-osm-downloader": "OSM-Downloader",
+      "geolibre-ign-lidar-hd": "IGN LiDAR HD Downloader",
       "geolibre-stac-catalogs": "STAC-Kataloge",
       "geolibre-planet-open-data": "Offene Daten von Planet",
       "maplibre-gl-source-coop": "Source Cooperative",
@@ -3040,6 +3139,7 @@
       "maplibre-gl-huggingface": "Hugging Face",
       "carto-light": "Carto Light Basiskarte",
       "geolibre-flight-simulator": "Flugsimulator",
+      "gods-eye-view": "Gottesansicht",
       "geolibre-route-animation": "Routenanimation",
       "geolibre-sun": "Sonnensimulation",
       "maplibre-atmosphere-effects": "Atmosphärische Effekte",
@@ -4598,6 +4698,10 @@
       "errorStartSidecar": "GeoLibre-Sidecar konnte nicht gestartet werden.",
       "errorStopSidecar": "GeoLibre-Sidecar konnte nicht gestoppt werden.",
       "noToolsFound": "Keine Werkzeuge gefunden.",
+      "searchToolsByMeaning": "Werkzeuge suchen oder Aufgabe beschreiben",
+      "searchingByMeaning": "Katalog wird nach Bedeutung durchsucht",
+      "bestMatches": "Beste Treffer",
+      "otherMatches": "Weitere Treffer",
       "noParameters": "Dieses Werkzeug hat keine Parameter.",
       "noOutput": "Noch keine Ausgabe.",
       "enabled": "Aktiviert",
@@ -7055,6 +7159,11 @@
       "invalidExpression": "Ungültiger Ausdruck",
       "openBuilder": "Ausdruckseditor öffnen",
       "showFeatureId": "Zeile mit der Objekt-ID anzeigen",
+      "maxWidth": "Popup-Breite (px)",
+      "maxWidthPlaceholder": "Standard",
+      "imageHeight": "Bildhöhe (px)",
+      "imageHeightPlaceholder": "Standard",
+      "sizeHint": "Leer lassen für den Standardwert. Ein Bild behält sein Seitenverhältnis, daher kann ein Foto die zusätzliche Höhe erst nutzen, wenn das Popup breiter wird.",
       "fields": "Felder",
       "allFields": "Keine Felder ausgewählt, daher werden alle sichtbaren Felder in der Reihenfolge der Daten angezeigt.",
       "addField": "Feld hinzufügen…",
@@ -7423,6 +7532,7 @@
     "viewportStretchNoRange": "Die Werte der Ansicht ergeben keinen Wertebereich.",
     "viewportStretchMoved": "Die Karte wurde bewegt, bevor das Lesen abgeschlossen war. Wenden Sie sie erneut an.",
     "index": "Index",
+    "opacityClasses": "Deckkraftklassen",
     "classifyToggle": "In diskrete Klassen einteilen",
     "method": "Methode",
     "methodEqualInterval": "Gleiches Intervall",
@@ -7984,5 +8094,77 @@
     "catalogHuc12pp": "HUC12-Abflusspunkte",
     "catalogNmwdiSt": "Wassermessstellen in New Mexico",
     "catalogFlowlines": "NHDPlus-Gewässerlinien"
+  },
+  "plugin": {
+    "3d-tiles": {
+      "arcgisSourceUnsupported": "Verwenden Sie in dieser ArcGIS-Ansicht eine 3D-Tiles-URL für tileset.json. Google Photorealistic- und I3S-Kacheln benötigen eine andere Render-Engine.",
+      "globeGoogleKeyRequired": "Google Photorealistic 3D Tiles benötigen einen Google-Maps-API-Schlüssel in den Einstellungen, um auf dem Globus zu laden."
+    },
+    "geolibre-osm-downloader": {
+      "title": "OSM Downloader",
+      "hint": "Laden Sie OpenStreetMap-Features aus dem aktuellen Kartenbereich über die öffentliche Overpass API herunter.",
+      "attribution": "Daten © OpenStreetMap-Mitwirkende, unter der ODbL verfügbar.",
+      "featureType": "Feature-Typ",
+      "presetBuildings": "Gebäude",
+      "presetRoads": "Straßen",
+      "presetAmenities": "Annehmlichkeiten",
+      "presetWaterways": "Wasserwege",
+      "presetLanduse": "Landnutzung",
+      "presetCustom": "Benutzerdefiniertes Tag",
+      "presetAll": "Alle markierten Features",
+      "tagKey": "Tag-Schlüssel",
+      "tagValue": "Tag-Wert",
+      "tagKeyPlaceholder": "z. B. shop",
+      "tagValuePlaceholder": "optional, z. B. Bäckerei",
+      "west": "Westen",
+      "south": "Süden",
+      "east": "Osten",
+      "north": "Norden",
+      "useMapExtent": "Kartenbereich verwenden",
+      "download": "OSM-Daten herunterladen",
+      "ready": "Wählen Sie einen Bereich und Feature-Typ aus.",
+      "exportGeoJson": "GeoJSON speichern",
+      "mapUnavailable": "Der Kartenbereich ist noch nicht verfügbar.",
+      "extentApplied": "Kartenbereich angewendet.",
+      "downloading": "Von OpenStreetMap herunterladen…",
+      "noFeatures": "In diesem Bereich wurden keine passenden Features gefunden.",
+      "error": "OSM-Daten konnten nicht heruntergeladen werden: {{message}}",
+      "added": "{{count}} Features zur Karte hinzugefügt."
+    },
+    "geolibre-ign-lidar-hd": {
+      "title": "IGN LiDAR HD",
+      "hint": "Durchsuchen Sie die IGN LiDAR HD-Kachelabdeckung für den aktuellen Kartenbereich, fügen Sie Kacheln als Punktwolken zur Karte hinzu oder laden Sie ihre COPC-LAZ-Dateien von den Servern des IGN herunter.",
+      "attribution": "Daten © IGN — LiDAR HD, veröffentlicht unter der Licence Ouverte 2.0.",
+      "west": "Westen",
+      "south": "Süden",
+      "east": "Osten",
+      "north": "Norden",
+      "useMapExtent": "Kartenbereich verwenden",
+      "search": "Kacheln suchen",
+      "addToMap": "Zur Karte hinzufügen",
+      "download": "Herunterladen",
+      "ready": "Wählen Sie einen Bereich aus und suchen Sie nach LiDAR HD-Kacheln.",
+      "mapUnavailable": "Der Kartenbereich ist noch nicht verfügbar.",
+      "extentApplied": "Kartenbereich angewendet.",
+      "searching": "IGN LiDAR HD-Kacheln werden gesucht…",
+      "noTiles": "In diesem Bereich wurden keine LiDAR HD-Kacheln gefunden.",
+      "noDownload": "keine Punktwolke veröffentlicht",
+      "layerName": "IGN LiDAR HD-Kacheln",
+      "found": "{{count}} Kachel(n) gefunden.",
+      "foundTruncated": "Die ersten {{count}} von {{matched}} Kacheln werden angezeigt. Grenzen Sie den Suchbereich ein, um den Rest zu sehen.",
+      "addedToMap": "{{name}} zur Karte hinzugefügt.",
+      "alreadyOnMap": "{{name}} befindet sich bereits auf der Karte.",
+      "unsupportedRenderer": "Punktwolken erfordern den MapLibre- oder Mapbox-Renderer.",
+      "addError": "{{name}} konnte nicht zur Karte hinzugefügt werden: {{message}}",
+      "error": "IGN LiDAR HD-Kacheln konnten nicht durchsucht werden: {{message}}",
+      "selectAll": "Alle auswählen",
+      "selectTile": "{{name}} auswählen",
+      "addSelectedToMap": "Auswahl zur Karte hinzufügen",
+      "addSelectedToMapCount": "{{count}} ausgewählte zur Karte hinzufügen",
+      "addingSelected": "{{count}} Kachel(n) werden zur Karte hinzugefügt…",
+      "addedSelectedCount": "{{count}} Kachel(n) zur Karte hinzugefügt.",
+      "alreadyOnMapCountPlural": "{{count}} Kachel(n) befanden sich bereits auf der Karte.",
+      "addSelectedFailedCount": "{{count}} Kachel(n) konnten nicht hinzugefügt werden."
+    }
   }
 }

@@ -60,7 +60,7 @@ add_raster_layer(path, name, url, bands=None, colormap=None, rescale=None,
 add_tile_layer(path, name, url, tile_size=256, attribution=None, index=None)
 add_ogc_layer(path, name, service, endpoint, layers=None, styles="",
               image_format="image/png", transparent=True, tile_size=256,
-              version="1.1.1", bounds=None, index=None)
+              version="1.1.1", crs=None, bounds=None, index=None)
 add_tiles_layer(path, name, url, kind="pmtiles", tile_type="vector",
                 source_layers=None, style=None, index=None)
 add_3d_tiles_layer(path, name, url=None, ion_asset_id=None, altitude_offset=0, index=None)
@@ -87,7 +87,13 @@ add_cesium_kml_layer(path, name, url=None, data=None, index=None)
   `ows:WGS84BoundingBox` for WMTS, which is where the WMS element is absent.
   Both are already lon/lat, unlike a WMS 1.3.0 `BoundingBox CRS="EPSG:4326"`,
   whose axis order servers often get wrong. Passing anything other than four
-  values is an error rather than a silently dropped extent.
+  values is an error rather than a silently dropped extent. `crs` is the CRS
+  WMS tiles are requested in, `EPSG:3857` when omitted: check that the layer
+  lists it in the capabilities, because a server without Web Mercator answers
+  every tile with an XML exception and the layer stays blank. For such a
+  server pass a geographic CRS it does list (`EPSG:4326`, `EPSG:4258`,
+  `EPSG:6706`, or `CRS:84` with `version="1.3.0"`): the desktop app redraws those tiles into Web
+  Mercator, while the web build and `export_html` pages cannot show them.
 
 ### Editing
 
@@ -97,7 +103,8 @@ remove_layer(path, layer)
 style_layer(path, layer, style)
 set_layer_popup(path, layer, fields=None, click=None, title=None,
                 title_expression=None, body_expression=None,
-                show_feature_id=None, tooltip=None, merge=False)
+                show_feature_id=None, max_width=None, image_height=None,
+                tooltip=None, merge=False)
 classify_layer(path, layer, column, class_count=5, colormap="viridis",
                scheme="equal-interval")
 list_layer_properties(path, layer)
@@ -118,9 +125,12 @@ entry is a property name or an object with `field` plus any of `label`, `kind`,
 `link_label`. `kind` is `auto`, `text`, `number`, `date`, `link` (an http(s) URL
 becomes an anchor) or `image` (an http(s) URL or inline base64 raster data URL
 becomes a thumbnail). `tooltip` takes the property names to put in the hover
-tip; `[]` turns the tip off. `merge=True` edits the existing config in place, so
-a tooltip can be added without restating the fields. Run
-`list_layer_properties` first to get the real column names.
+tip; `[]` turns the tip off. `max_width` (288–1200) is how wide the click popup
+may draw and `image_height` (40–1200) how tall an `image` field's thumbnail may
+draw inside it, both in CSS pixels; a thumbnail keeps its aspect ratio, so raise
+`max_width` too for a landscape photo to use the extra height. `merge=True`
+edits the existing config in place, so a tooltip can be added without restating
+the fields. Run `list_layer_properties` first to get the real column names.
 
 `classify_layer` clamps `class_count` to 2–12. `scheme` is `equal-interval`
 (even value ranges) or `quantile` (even feature counts per class). It needs an

@@ -1,15 +1,12 @@
 import { arcgisOpacity, arcgisVectorStyle } from "./arcgis-vector-style";
 import {
-  compileFeatureExpression,
   compileLayerFilters,
   controlRendersLayer,
   DEFAULT_LAYER_STYLE,
   generatorCircleRadiusValue,
-  formatLabelNumber,
   geojsonHasZCoordinates,
   getExternalNativePaintBridge,
   labelFieldTextField,
-  resolveLabelNumberLocale,
   pluginOwnsPaint,
   proportionalRadiusExpression,
   ruleBasedVisibilityFilter,
@@ -17,9 +14,7 @@ import {
   styleValue,
   type ExternalNativePaintBridge,
   type GeoLibreLayer,
-  type LabelStyle,
   type LayerStyle,
-  validateMapExpression,
   documentLocale,
 } from "@geolibre/core";
 import {
@@ -31,6 +26,19 @@ import {
   pmtilesVectorLayerId,
 } from "./pmtiles-layer";
 import { encodeVectorTileLayerPart } from "./vector-tile-layer-ids";
+import {
+  DEDUPED_LABEL_PROPERTY,
+  GEOMAN_SHAPE_PROPERTY,
+  getDedupedLabelFeatures,
+  parseLabelOverride,
+  TEXT_MARKER_SHAPE,
+  TEXT_MARKER_SHAPE_FILTER,
+} from "./label-style";
+import {
+  authoredClusterInput,
+  hasZoomDependentClusterFilter,
+  resolveVectorRenderMode,
+} from "./cluster-input";
 import { addProtocol, config } from "maplibre-gl";
 import type { GeoJSON } from "geojson";
 import type * as maplibregl from "maplibre-gl";
@@ -67,7 +75,6 @@ import {
   sourceId,
   textLayerId,
 } from "./geojson-loader";
-import { buildDedupedLabelFeatures } from "./label-dedup";
 import {
   buildGeneratedGeometry,
   buildInvertedMask,
@@ -101,6 +108,9 @@ import {
 import { isViteDevServer, proxyWmsTileUrl, proxyWmsTiles } from "./wms-proxy";
 import { resolveTextFontFromStyleLayers } from "./text-font";
 
+// Existing importers (MapController, tests) read it from here.
+export { hasZoomDependentClusterFilter };
+
 /**
  * Notified of the computed `beforeId` for a deck.gl-backed external custom layer
  * (a `maplibre-gl-raster` COG) whenever layers are synced. Such a layer is not a
@@ -123,8 +133,6 @@ const PMTILES_PROTOCOL_GLOBAL_KEY = "__geolibrePMTilesProtocol";
 const PMTILES_ARCHIVE_KEYS_GLOBAL_KEY = "__geolibrePMTilesArchiveKeys";
 const MIN_LAYER_ZOOM = DEFAULT_LAYER_STYLE.minZoom;
 const MAX_LAYER_ZOOM = DEFAULT_LAYER_STYLE.maxZoom;
-const TEXT_MARKER_SHAPE = "text_marker";
-const GEOMAN_SHAPE_PROPERTY = "__gm_shape";
 const GEOMAN_TEXT_PROPERTY = "__gm_text";
 
 const pointGeometryFilter: maplibregl.FilterSpecification = [
@@ -135,11 +143,7 @@ const pointGeometryFilter: maplibregl.FilterSpecification = [
   false,
 ];
 
-const textMarkerShapeFilter: maplibregl.FilterSpecification = [
-  "any",
-  ["==", ["get", GEOMAN_SHAPE_PROPERTY], TEXT_MARKER_SHAPE],
-  ["==", ["get", "shape"], TEXT_MARKER_SHAPE],
-];
+const textMarkerShapeFilter = TEXT_MARKER_SHAPE_FILTER as maplibregl.ExpressionSpecification;
 
 const textMarkerFilter: maplibregl.FilterSpecification = [
   "all",
@@ -426,91 +430,6 @@ function applyExternalNativeFeatureFilters(
 // back to the full [0, 24] window.
 const managedZoomRangeLayerIds = new Set<string>();
 const geoJsonSourceData = new WeakMap<maplibregl.GeoJSONSource, GeoJSON>();
-const clusteredFilterInputs = new WeakMap<
-  GeoJSON.FeatureCollection,
-  { key: string; value: GeoJSON.FeatureCollection }
->();
-
-/** Whether an expression reads `["zoom"]`, and so cannot be evaluated once. */
-function expressionUsesZoom(node: unknown): boolean {
-  if (!Array.isArray(node)) return false;
-  // `["literal", …]` wraps data, not operators, and a categorical Quick Filter
-  // compiles its selected values into one. A field value that happens to be
-  // the string "zoom" is not the zoom operator, so do not walk inside.
-  if (node[0] === "literal") return false;
-  // The operator takes no arguments; a longer array starting with "zoom" is a
-  // value list, not a call.
-  if (node[0] === "zoom" && node.length === 1) return true;
-  return node.some((entry) => expressionUsesZoom(entry));
-}
-
-/**
- * Whether any layer needs its clustered source re-derived as the camera moves.
- * Pre-filtering a clustered source is a one-shot evaluation, so a filter that
- * reads `["zoom"]` only stays truthful if something re-runs it — see
- * {@link authoredClusterInput}. Callers use this to decide whether a zoom
- * listener is worth attaching at all; the ordinary layer pays nothing.
- */
-export function hasZoomDependentClusterFilter(layers: GeoLibreLayer[]): boolean {
-  return layers.some((layer) => {
-    if (!layer.geojson) return false;
-    // Ask the cheap question first. `detectGeometryProfile` walks every feature
-    // and this runs on every sync pass, including ones with no filter in sight
-    // (a drag, an opacity nudge), so the scan is paid only by a layer that
-    // already carries a zoom-dependent authored filter.
-    const filter = compileLayerFilters(layer);
-    if (filter === null || !expressionUsesZoom(filter)) return false;
-    const { wantCluster } = resolveVectorRenderMode(layer, detectGeometryProfile(layer.geojson));
-    return wantCluster;
-  });
-}
-
-/** Whether two feature lists hold the same feature objects in the same order. */
-function sameFeatureList(left: GeoJSON.Feature[], right: GeoJSON.Feature[]): boolean {
-  return left.length === right.length && left.every((feature, index) => feature === right[index]);
-}
-
-/**
- * Narrow a cluster renderer's source data by the layer's authored filters.
- * MapLibre clusters before evaluating style-layer filters, so applying the
- * expression only to the unclustered circle would leave hidden points in
- * cluster bubbles and counts. Only the current filter's result is cached per
- * source object, so ordinary sync ticks keep a stable data reference while
- * iterating on a filter does not retain a copy of the dataset per attempt.
- *
- * Unlike a style-layer filter, which MapLibre re-evaluates against the live
- * camera, this runs once per sync, so `zoom` is passed in and joined to the
- * cache key. A zoom-dependent filter therefore needs a sync per zoom (see
- * {@link hasZoomDependentClusterFilter}); when the outcome is unchanged the
- * previous collection is returned so the source is not needlessly re-clustered.
- */
-function authoredClusterInput(layer: GeoLibreLayer, zoom: number): GeoJSON.FeatureCollection {
-  const geojson = layer.geojson!;
-  const filter = compileLayerFilters(layer);
-  if (!filter) return geojson;
-
-  const source = JSON.stringify(filter);
-  const filterKey = expressionUsesZoom(filter) ? `${source}@${zoom}` : source;
-  const cached = clusteredFilterInputs.get(geojson);
-  if (cached?.key === filterKey) return cached.value;
-
-  const compiled = compileFeatureExpression(source, { expectedType: "boolean", zoom });
-  if (!compiled.ok || !compiled.evaluate) return geojson;
-  const evaluate = compiled.evaluate;
-  const features = geojson.features.filter((feature) => {
-    try {
-      return evaluate(feature) === true;
-    } catch {
-      return false;
-    }
-  });
-  // A zoom tick that changes nothing must not hand back a new object: the
-  // inline path would call setData and MapLibre would re-cluster from scratch.
-  const reused = cached && sameFeatureList(cached.value.features, features);
-  const filtered = reused ? cached.value : { ...geojson, features };
-  clusteredFilterInputs.set(geojson, { key: filterKey, value: filtered });
-  return filtered;
-}
 
 function rememberGeoJsonData(map: maplibregl.Map, sourceId: string, data: GeoJSON): void {
   const source = map.getSource(sourceId);
@@ -1955,29 +1874,6 @@ function setExternalNativeLayerPaint(
   }
 }
 
-// Resolve the point renderer and clustering parameters from a layer's style.
-// The heatmap and cluster renderers only make sense for point geometry, so the
-// setting is ignored on layers that also carry lines/polygons. Shared by the
-// inline and tiled geojson paths so renderer detection lives in one place.
-function resolveVectorRenderMode(
-  layer: GeoLibreLayer,
-  profile: ReturnType<typeof detectGeometryProfile>,
-): {
-  renderer: string;
-  wantCluster: boolean;
-  clusterRadius: number;
-  clusterMaxZoom: number;
-} {
-  const pointOnly = profile.hasPoint && !profile.hasLine && !profile.hasPolygon;
-  const renderer = pointOnly ? styleValue(layer.style, "pointRenderer") : "single";
-  return {
-    renderer,
-    wantCluster: renderer === "cluster",
-    clusterRadius: styleValue(layer.style, "clusterRadius"),
-    clusterMaxZoom: styleValue(layer.style, "clusterMaxZoom"),
-  };
-}
-
 function syncGeoJsonLayer(map: maplibregl.Map, layer: GeoLibreLayer, beforeId?: string): void {
   const src = sourceId(layer.id);
   const profile = detectGeometryProfile(layer.geojson!);
@@ -2601,7 +2497,7 @@ function applyVectorDataRenderLayers(
     let textField: maplibregl.ExpressionSpecification | string;
     if (dedupedLabelFc) {
       // The aggregated source carries the resolved label in `__geolibre_label`.
-      textField = ["get", "__geolibre_label"] as unknown as maplibregl.ExpressionSpecification;
+      textField = ["get", DEDUPED_LABEL_PROPERTY] as unknown as maplibregl.ExpressionSpecification;
     } else {
       try {
         if (labels.expression.trim()) {
@@ -2673,7 +2569,9 @@ function applyVectorDataRenderLayers(
       // spec, so an unchecked type-mismatched value would reject the entire
       // label layer on first add rather than just that property.
       const labelOverride = (source: string, expectedType: "number" | "color" | "boolean") =>
-        dedupedLabelFc ? null : parseLabelOverride(source, expectedType);
+        (dedupedLabelFc
+          ? null
+          : parseLabelOverride(source, expectedType)) as maplibregl.ExpressionSpecification | null;
       const sizeOverride = labelOverride(labels.sizeExpression, "number");
       const colorOverride = labelOverride(labels.colorExpression, "color");
       const opacityOverride = labelOverride(labels.opacityExpression, "number");
@@ -2874,86 +2772,8 @@ function applyGeometryGeneratorLayers(
 // collection reference — the store replaces the object on every mutation.
 const textMarkerCache = new WeakMap<GeoJSON.FeatureCollection, boolean>();
 
-// Deduplicated label features are also O(n) over the source, so memoize them by
-// collection reference (keyed by the field + mode, since both change the result)
-// to avoid rebuilding on every rapid sync.
-const dedupedLabelCache = new WeakMap<
-  GeoJSON.FeatureCollection,
-  Map<string, GeoJSON.FeatureCollection | null>
->();
-
-function getDedupedLabelFeatures(
-  collection: GeoJSON.FeatureCollection,
-  labels: LabelStyle,
-): GeoJSON.FeatureCollection | null {
-  let byKey = dedupedLabelCache.get(collection);
-  if (!byKey) {
-    byKey = new Map();
-    dedupedLabelCache.set(collection, byKey);
-  }
-  // Number formatting is part of the key: it changes the aggregated label
-  // text, and "unique"/"concatenate" group on that text. The key carries the
-  // *effective* locale, resolved the same way the formatter resolves it, so a
-  // stored tag the formatter rejects (malformed, or one the map cannot draw)
-  // does not pin the cache to a locale the labels were never formatted with,
-  // and switching the app language reformats labels that follow it
-  // (`numberLocale: ""`) instead of serving the previous language's separators.
-  const locale = documentLocale();
-  const key = [
-    labels.dedupe,
-    labels.numberFormatEnabled
-      ? `${labels.numberDecimals}:${resolveLabelNumberLocale(labels.numberLocale, locale) ?? ""}`
-      : "raw",
-    labels.field,
-  ].join("|");
-  if (byKey.has(key)) return byKey.get(key) ?? null;
-  const result = buildDedupedLabelFeatures(collection, labels.field, labels.dedupe, (value) =>
-    formatLabelNumber(value, labels, locale),
-  );
-  byKey.set(key, result);
-  return result;
-}
-
 function removeSourceIfExists(map: maplibregl.Map, id: string): void {
   if (map.getSource(id)) map.removeSource(id);
-}
-
-// Data-defined label overrides are re-read on every sync (which can fire per
-// frame, e.g. while dragging the opacity slider), and validating through the
-// style spec is far more expensive than the reads, so results are memoized by
-// expected type + source. Bounded so a pathological stream of distinct
-// expressions cannot grow it without limit.
-const labelOverrideCache = new Map<string, maplibregl.ExpressionSpecification | null>();
-const LABEL_OVERRIDE_CACHE_MAX = 256;
-
-/**
- * Parses and validates a data-defined label override (a MapLibre expression
- * stored as a JSON string) against its destination's expected result type.
- * Returns null — falling back to the literal control — for anything invalid:
- * malformed JSON, a non-expression value, or a type the destination cannot
- * accept. The `|| ""` guards against a hand-edited project file storing null
- * for an expression field (the type says string, but the value comes from
- * untrusted JSON).
- */
-function parseLabelOverride(
-  source: string,
-  expectedType: "number" | "color" | "boolean",
-): maplibregl.ExpressionSpecification | null {
-  const trimmed = (source || "").trim();
-  if (!trimmed) return null;
-  const key = `${expectedType}:${trimmed}`;
-  const cached = labelOverrideCache.get(key);
-  if (cached !== undefined) return cached;
-  const validation = validateMapExpression(trimmed, { expectedType });
-  const result =
-    validation.ok && validation.parsed
-      ? (validation.parsed as unknown as maplibregl.ExpressionSpecification)
-      : null;
-  if (labelOverrideCache.size >= LABEL_OVERRIDE_CACHE_MAX) {
-    labelOverrideCache.clear();
-  }
-  labelOverrideCache.set(key, result);
-  return result;
 }
 
 // Keep this predicate aligned with textMarkerFilter: any text-marker-shaped

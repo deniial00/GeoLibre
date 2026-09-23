@@ -3,6 +3,7 @@ import { describe, it } from "node:test";
 import {
   CESIUM_ION_QUICK_PICKS,
   CESIUM_ION_SOURCE_KIND,
+  CESIUM_GOOGLE_PHOTOREALISTIC_ASSET_ID,
   CESIUM_OSM_BUILDINGS_ASSET_ID,
   cesiumIonAssetId,
   cesiumIonAssetKind,
@@ -76,7 +77,36 @@ describe("cesium-ion layer builder", () => {
     };
     assert.equal(cesiumIonAssetId(plain), null, "the source kind is the contract, not the field");
     assert.equal(isCesiumOnlyLayer(plain), false);
+  });
+
+  it("offers quick picks with unique ids, valid groups, and the expected depot ids", () => {
     assert.ok(CESIUM_ION_QUICK_PICKS.some((p) => p.assetId === CESIUM_OSM_BUILDINGS_ASSET_ID));
+    const google = CESIUM_ION_QUICK_PICKS.find(
+      (p) => p.assetId === CESIUM_GOOGLE_PHOTOREALISTIC_ASSET_ID,
+    );
+    assert.equal(google?.kind, "3d-tiles", "Google Photorealistic tiles load as a tileset");
+    assert.equal(
+      new Set(CESIUM_ION_QUICK_PICKS.map((p) => p.assetId)).size,
+      CESIUM_ION_QUICK_PICKS.length,
+      "asset ids are the dropdown option values, so they must be unique",
+    );
+    // Every pick lands in one of the two optgroups the dialog renders, and
+    // both groups are non-empty so neither renders as an empty heading.
+    for (const pick of CESIUM_ION_QUICK_PICKS) {
+      assert.ok(
+        pick.group === "global" || pick.group === "depot",
+        `${pick.name} needs a quick-pick group`,
+      );
+      assert.ok(Number.isInteger(pick.assetId) && pick.assetId > 0, `${pick.name} needs an id`);
+    }
+    assert.ok(CESIUM_ION_QUICK_PICKS.some((p) => p.group === "global"));
+    assert.ok(CESIUM_ION_QUICK_PICKS.some((p) => p.group === "depot"));
+    const depot = CESIUM_ION_QUICK_PICKS.filter((p) => p.group === "depot");
+    assert.deepEqual(
+      depot.map((p) => p.assetId),
+      [2602291, 69380, 43978, 28945, 75343, 3827],
+      "Asset Depot sample ids are the ones Cesium's own samples use",
+    );
   });
 });
 
@@ -86,6 +116,7 @@ function makeGlobe() {
     ionImagery: [] as Array<{ assetId: number; token?: string }>,
     tilesetUrls: [] as unknown[],
     primitives: [] as unknown[],
+    flights: [] as unknown[],
     imagery: [] as Array<{ provider: unknown; show: boolean; alpha: number }>,
   };
   const Cesium = {
@@ -127,7 +158,15 @@ function makeGlobe() {
   };
   const viewer = {
     clock: { currentTime: { dayNumber: 0, secondsOfDay: 0 } },
-    camera: { moveEnd: new Cesium.Event(), changed: new Cesium.Event() },
+    camera: {
+      moveEnd: new Cesium.Event(),
+      changed: new Cesium.Event(),
+      flyTo: (options: unknown) => calls.flights.push(options),
+    },
+    flyTo: async (target: unknown) => {
+      calls.flights.push(target);
+      return true;
+    },
     scene: {
       canvas: { clientWidth: 800, clientHeight: 600, width: 800, height: 600 },
       primitives: {
@@ -209,6 +248,66 @@ describe("CesiumLayerSync with Ion assets", () => {
     const status = sync.getRenderStatus();
     assert.equal(status.errors.length, 2);
     assert.match(status.errors[0], /Ion token is not configured/);
+    sync.destroy();
+  });
+
+  it("fits a layer that has no store bounds once its Cesium object loads", async () => {
+    const g = makeGlobe();
+    const sync = new CesiumLayerSync(g.Cesium as never, g.viewer as never, () => 10, {
+      ionToken: () => "tok",
+    });
+    const layer = createCesiumIonLayer({ id: "b", name: "B", assetId: 96188, kind: "3d-tiles" });
+    sync.sync([layer]);
+    // The Add Data dialog asks for the fit the moment the layer is added, long
+    // before the tileset exists: the request waits rather than being dropped.
+    sync.zoomToLayer("b");
+    assert.deepEqual(g.calls.flights, [], "nothing to fly to yet");
+    for (let i = 0; i < 4; i++) await flush();
+    assert.equal(g.calls.flights.length, 1, "flew once the tileset loaded");
+    assert.equal(g.calls.flights[0], g.calls.primitives[0], "framed the loaded tileset");
+
+    // A later request, with the handle in hand, flies straight away.
+    sync.zoomToLayer("b");
+    assert.equal(g.calls.flights.length, 2);
+    sync.destroy();
+  });
+
+  it("reports a layer that fails to load so the app can surface it", async () => {
+    const g = makeGlobe();
+    g.Cesium.IonResource.fromAssetId = async () => {
+      throw new Error("Resource Not Found");
+    };
+    const errors: Array<{ layerName: string; message: string }> = [];
+    const sync = new CesiumLayerSync(g.Cesium as never, g.viewer as never, () => 10, {
+      ionToken: () => "tok",
+      onLayerError: ({ layerName, message }) => errors.push({ layerName, message }),
+    });
+    sync.sync([
+      createCesiumIonLayer({
+        id: "j",
+        name: "Japan 3D Building Data",
+        assetId: 2602291,
+        kind: "3d-tiles",
+      }),
+    ]);
+    for (let i = 0; i < 4; i++) await flush();
+    assert.equal(errors.length, 1);
+    assert.equal(errors[0].layerName, "Japan 3D Building Data");
+    assert.match(errors[0].message, /Resource Not Found/);
+    assert.deepEqual(g.calls.flights, [], "a failed layer has no extent to fit");
+    sync.destroy();
+  });
+
+  it("drops a pending fit when its layer is removed before it loads", async () => {
+    const g = makeGlobe();
+    const sync = new CesiumLayerSync(g.Cesium as never, g.viewer as never, () => 10, {
+      ionToken: () => "tok",
+    });
+    sync.sync([createCesiumIonLayer({ id: "b", name: "B", assetId: 96188, kind: "3d-tiles" })]);
+    sync.zoomToLayer("b");
+    sync.sync([]);
+    for (let i = 0; i < 4; i++) await flush();
+    assert.deepEqual(g.calls.flights, [], "the layer the fit targeted is gone");
     sync.destroy();
   });
 });

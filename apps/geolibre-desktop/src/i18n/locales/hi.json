@@ -22,6 +22,7 @@
     "noMatches": "कोई मेल नहीं मिला।",
     "addFailed": "यह डेटा स्रोत नहीं जोड़ा जा सका।",
     "builtinBadge": "अंतर्निहित",
+    "configBadge": "कॉन्फ़िग",
     "newConnection": "नया {{kind}} कनेक्शन",
     "loadingTables": "टेबल लोड हो रही हैं…",
     "files": "फ़ाइलें",
@@ -359,6 +360,10 @@
       "kml": {
         "label": "KML / KMZ",
         "description": "ग्लोब पर मूल शैलियों, ओवरले और नेटवर्क लिंक के साथ KML या KMZ लोड करें।"
+      },
+      "wcs": {
+        "description": "WCS 1.0.0 सेवा से संख्यात्मक GeoTIFF उपसमुच्चय लोड करें।",
+        "label": "WCS लेयर"
       }
     },
     "shared": {
@@ -398,6 +403,7 @@
       "loadAria": "एक सहेजी गई सेवा लोड करें",
       "loadPlaceholder": "एक सहेजी गई सेवा लोड करें…",
       "builtin": "{{name}} (अंतर्निहित)",
+      "config": "{{name}} (कॉन्फ़िग)",
       "deleteAria": "सहेजी गई सेवा हटाएँ",
       "empty": "अभी तक कोई सहेजी गई सेवा नहीं है — फ़ॉर्म भरें और \"वर्तमान सहेजें\" चुनें।",
       "name": "नाम",
@@ -423,7 +429,11 @@
       "kindImagery": "इमेजरी",
       "altitudeOffset": "ऊँचाई ऑफ़सेट (मी)",
       "quickPicks": "त्वरित चयन",
+      "quickPicksPlaceholder": "एक एसेट चुनें…",
+      "quickPicksGlobal": "हर ion खाते में शामिल",
+      "quickPicksDepot": "Asset Depot नमूने",
       "hint": "एसेट id ion.cesium.com पर My Assets के अंतर्गत मिलते हैं। एसेट को सेटिंग्स में कॉन्फ़िगर किए गए टोकन के साथ साझा किया गया होना चाहिए।",
+      "depotHint": "Asset Depot नमूने तभी स्ट्रीम होते हैं जब आप उन्हें ion.cesium.com → Asset Depot से अपने खाते में जोड़ते हैं।",
       "errorAssetId": "एक Cesium Ion एसेट id दर्ज करें (एक धनात्मक पूर्ण संख्या)।",
       "errorAltitude": "ऊँचाई ऑफ़सेट को मीटर की संख्या के रूप में दर्ज करें।",
       "tokenMissing": "कोई Cesium Ion टोकन कॉन्फ़िगर नहीं है। सेटिंग्स → एनवायरनमेंट वेरिएबल (VITE_CESIUM_TOKEN) में एक जोड़ें, अन्यथा एसेट लोड नहीं होगा।"
@@ -508,6 +518,7 @@
       "selectType_one": "{{count}} फ़ीचर टाइप में से चुनें",
       "selectType_other": "{{count}} फ़ीचर टाइप में से चुनें",
       "noTypesFound": "इस सेवा के लिए कोई फ़ीचर टाइप नहीं मिला।",
+      "errorNoFeatures": "इस फ़ीचर टाइप ने कोई फ़ीचर नहीं लौटाया।",
       "retrieveError": "इस सेवा से फ़ीचर टाइप प्राप्त नहीं हो सके।"
     },
     "wmts": {
@@ -966,7 +977,42 @@
       "modelTooLarge": "यह मॉडल प्रोजेक्ट में एम्बेड करने की {{limit}} MB सीमा से बड़ा है। इसके बजाय इसे होस्ट करें और URL से जोड़ें।",
       "modelFileError": "यह मॉडल नहीं पढ़ा जा सका। एक मान्य glTF 2.0 या GLB फ़ाइल चुनें।"
     },
-    "nonGeographicCoordinates": "{{names}} के निर्देशांक देशांतर/अक्षांश नहीं हैं, इसलिए मानचित्र पर कुछ भी नहीं बनेगा। CRS ग़लत दर्ज है — डेटा को पुनःप्रक्षेपित करें (या .prj ठीक करें) और दोबारा लोड करें।"
+    "nonGeographicCoordinates": "{{names}} के निर्देशांक देशांतर/अक्षांश नहीं हैं, इसलिए मानचित्र पर कुछ भी नहीं बनेगा। CRS ग़लत दर्ज है — डेटा को पुनःप्रक्षेपित करें (या .prj ठीक करें) और दोबारा लोड करें।",
+    "pmtiles": {
+      "errorUrl": "एक मान्य HTTP या HTTPS PMTiles URL दर्ज करें।",
+      "errorMlt": "ArcGIS को MVT वेक्टर टाइलों की आवश्यकता है, MLT की नहीं।"
+    },
+    "lidar": {
+      "errorUrl": "एक मान्य HTTP या HTTPS LiDAR URL दर्ज करें।"
+    },
+    "zarr": {
+      "errorUrl": "एक मान्य HTTP या HTTPS Zarr URL दर्ज करें।",
+      "errorColorLimits": "रंग की अधिकतम सीमा न्यूनतम सीमा से अधिक होनी चाहिए।"
+    },
+    "raster": {
+      "errorSource": "GeoTIFF URL दर्ज करें या फ़ाइल चुनें।"
+    },
+    "wcs": {
+      "coverage": "कवरेज",
+      "retrieve": "कवरेज प्राप्त करें",
+      "select": "कवरेज चुनें",
+      "extent": "कवरेज विस्तार का उपयोग करें",
+      "width": "चौड़ाई (पिक्सेल)",
+      "height": "ऊँचाई (पिक्सेल)",
+      "hint": "चुने हुए पिक्सेल आयामों पर EPSG:4326 में GeoTIFF डाउनलोड करता है। मानों का पुनः नमूनाकरण हो सकता है। डाउनलोड किया गया डेटा रखने के लिए रास्टर सहेजें।",
+      "errors": {
+        "xml": "सेवा ने अमान्य XML लौटाया।",
+        "version": "इस स्रोत के लिए WCS 1.0.0 आवश्यक है। सेवा ने असमर्थित उत्तर लौटाया।",
+        "empty": "कोई मेल खाता कवरेज उपलब्ध नहीं है।",
+        "format": "कवरेज GeoTIFF आउटपुट की घोषणा नहीं करता।",
+        "crs": "कवरेज को अनुरोध और आउटपुट दोनों के लिए EPSG:4326 का समर्थन करना चाहिए।",
+        "size": "1 से 4096 पिक्सेल के आयाम चुनें। डाउनलोड 128 MB तक सीमित हैं।",
+        "metadata": "सेवा ने GeoLibre की लोड करने की क्षमता से अधिक मेटाडेटा लौटाया। मेटाडेटा प्रतिक्रियाएँ 32 MB तक सीमित हैं।",
+        "response": "सेवा ने मान्य GeoTIFF नहीं लौटाया।",
+        "bounds": "एक मान्य बॉक्स दर्ज करें: पश्चिम/पूर्व -180 से 180 के भीतर, दक्षिण/उत्तर -90 से 90 के भीतर, जहाँ पश्चिम < पूर्व और दक्षिण < उत्तर।",
+        "url": "एक WCS सेवा URL दर्ज करें।"
+      }
+    }
   },
   "offline": {
     "title": "ऑफ़लाइन क्षेत्र डाउनलोड करें",
@@ -1931,7 +1977,7 @@
     "only3d": "केवल 3D",
     "noMapbox": "Mapbox नहीं",
     "noArcgis": "ArcGIS नहीं",
-    "cesiumTokenHint": "टेरेन और Ion इमेजरी के लिए सेटिंग्स में Cesium Ion टोकन जोड़ें"
+    "cesiumTokenHint": "टेरेन और Ion इमेजरी के लिए <settingsLink>सेटिंग्स → एनवायरनमेंट वेरिएबल</settingsLink> में Cesium Ion टोकन जोड़ें"
   },
   "renderer": {
     "basemap": "बेसमैप",
@@ -1941,6 +1987,7 @@
     "layerCesiumOnly": "केवल 3D ग्लोब द्वारा रेंडर किया गया",
     "layerMapboxUnsupported": "Mapbox इंजन द्वारा रेंडर नहीं किया गया",
     "layerArcgisUnsupported": "ArcGIS इंजन द्वारा रेंडर नहीं किया गया",
+    "layerArcgisViewUnsupported": "इस ArcGIS दृश्य में रेंडर नहीं किया जाता",
     "resetView": "दृश्य रीसेट करें",
     "scene3D": "3D ग्लोब",
     "scene2D": "2D मानचित्र",
@@ -2320,6 +2367,55 @@
       }
     }
   },
+  "panel": {
+    "godsEyeView": {
+      "description": "सार्वजनिक डेटा फ़ीड से लाइव, समय-संबंधी पृथ्वी घटनाएँ।",
+      "globeOnly": "लाइव ग्लोब फ़ीड Cesium ग्लोब पर दिखाई देती हैं। इन्हें देखने के लिए 3D ग्लोब पर जाएँ।",
+      "groups": {
+        "movement": "आवागमन",
+        "cameras": "कैमरे",
+        "infrastructure": "बुनियादी ढाँचा",
+        "events": "घटनाएँ",
+        "utilities": "उपयोगिताएँ"
+      },
+      "earthquakes": "भूकंप",
+      "spaceMissions": "अंतरिक्ष मिशन (30 दिन)",
+      "satellites": "उपग्रह",
+      "flights": "लाइव उड़ानें",
+      "militaryFlights": "सैन्य उड़ानें",
+      "bikeShare": "बाइक शेयर",
+      "transit": "लाइव सार्वजनिक परिवहन",
+      "streetTraffic": "सिम्युलेटेड सड़क यातायात",
+      "mappedAlpr": "मानचित्रित नंबर प्लेट कैमरे",
+      "cctv": "सार्वजनिक सीसीटीवी कैमरे",
+      "cctvPopup": {
+        "liveSnapshot": "लाइव छवि",
+        "provider": "प्रदाता",
+        "attribution": "श्रेय",
+        "privacy": "गोपनीयता"
+      },
+      "radio": "रेडियो स्टेशन",
+      "datacenters": "डेटा केंद्र",
+      "dams": "बाँध",
+      "cables": "समुद्री केबल",
+      "osmInfrastructure": "OSM अवसंरचना",
+      "loading": "अपडेट हो रहा है…",
+      "updateFailed": "अपडेट विफल",
+      "noneInView": "इस लेयर के लिए वर्तमान दृश्य में कोई फ़ीचर नहीं मिला।",
+      "never": "कभी नहीं",
+      "lastUpdated": "अंतिम अपडेट: {{time}}",
+      "speed": "गति",
+      "speedRealTime": "वास्तविक समय (1×)",
+      "speedMultiple": "{{factor}}×",
+      "denseSatellites": "सघन उपग्रह कैटलॉग",
+      "denseLoading": "DENSE ···",
+      "denseFailed": "DENSE !",
+      "denseCount": "DENSE · {{count}}",
+      "dense": "DENSE",
+      "denseError": "Starlink कैटलॉग लोड नहीं हो सका: {{error}}। फिर प्रयास करने के लिए चुनें।",
+      "denseDescription": "पूरे Starlink समूह को हल्के बिंदुओं के रूप में दिखाएँ (बिना लेबल या तालिका पंक्तियों के)।"
+    }
+  },
   "toolbar": {
     "menu": {
       "project": "प्रोजेक्ट",
@@ -2561,7 +2657,8 @@
       "czml": "CZML डायनामिक 3D दृश्य",
       "gltfModel": "3D मॉडल (glTF)",
       "postgres": "PostgreSQL लेयर",
-      "iceberg": "Apache Iceberg लेयर"
+      "iceberg": "Apache Iceberg लेयर",
+      "wcs": "WCS लेयर"
     },
     "conversion": {
       "vectorToVector": "वेक्टर से वेक्टर",
@@ -3029,6 +3126,8 @@
       "maplibre-gl-esri-wayback": "ऐतिहासिक इमेजरी",
       "maplibre-gl-openaerialmap": "OpenAerialMap",
       "maplibre-gl-arcgis-hub": "ArcGIS Hub",
+      "geolibre-osm-downloader": "OSM डाउनलोडर",
+      "geolibre-ign-lidar-hd": "IGN LiDAR HD Downloader",
       "geolibre-stac-catalogs": "STAC कैटलॉग",
       "geolibre-planet-open-data": "Planet खुला डेटा",
       "maplibre-gl-source-coop": "Source Cooperative",
@@ -3040,6 +3139,7 @@
       "maplibre-gl-huggingface": "Hugging Face",
       "carto-light": "Carto Light बेसमैप",
       "geolibre-flight-simulator": "फ़्लाइट सिम्युलेटर",
+      "gods-eye-view": "ईश्वरीय दृष्टि",
       "geolibre-route-animation": "मार्ग एनिमेशन",
       "geolibre-sun": "सूर्य सिमुलेशन",
       "maplibre-atmosphere-effects": "वायुमंडलीय प्रभाव",
@@ -4598,6 +4698,10 @@
       "errorStartSidecar": "GeoLibre साइडकार शुरू नहीं हो सका।",
       "errorStopSidecar": "GeoLibre साइडकार रोका नहीं जा सका।",
       "noToolsFound": "कोई टूल नहीं मिला।",
+      "searchToolsByMeaning": "टूल खोजें या कोई कार्य बताएं",
+      "searchingByMeaning": "अर्थ के आधार पर कैटलॉग खोजा जा रहा है",
+      "bestMatches": "सर्वोत्तम मिलान",
+      "otherMatches": "अन्य मिलान",
       "noParameters": "इस टूल में कोई पैरामीटर नहीं है।",
       "noOutput": "अभी कोई आउटपुट नहीं।",
       "enabled": "सक्षम",
@@ -7055,6 +7159,11 @@
       "invalidExpression": "अमान्य एक्सप्रेशन",
       "openBuilder": "एक्सप्रेशन बिल्डर खोलें",
       "showFeatureId": "फ़ीचर आईडी की पंक्ति दिखाएँ",
+      "maxWidth": "पॉपअप की चौड़ाई (px)",
+      "maxWidthPlaceholder": "डिफ़ॉल्ट",
+      "imageHeight": "छवि की ऊँचाई (px)",
+      "imageHeightPlaceholder": "डिफ़ॉल्ट",
+      "sizeHint": "डिफ़ॉल्ट मान के लिए इन्हें खाली छोड़ें। छवि अपना अनुपात बनाए रखती है, इसलिए पॉपअप चौड़ा करने पर ही कोई फ़ोटो अतिरिक्त ऊँचाई का उपयोग कर पाती है।",
       "fields": "फ़ील्ड",
       "allFields": "कोई फ़ील्ड नहीं चुनी गई, इसलिए सभी दृश्य फ़ील्ड डेटा के अपने क्रम में दिखाई जाती हैं।",
       "addField": "फ़ील्ड जोड़ें…",
@@ -7423,6 +7532,7 @@
     "viewportStretchNoRange": "व्यूपोर्ट के मान कोई रेंज परिभाषित नहीं करते।",
     "viewportStretchMoved": "पढ़ना पूरा होने से पहले मानचित्र हिल गया। फिर से लागू करें।",
     "index": "सूचकांक",
+    "opacityClasses": "अपारदर्शिता वर्ग",
     "classifyToggle": "असतत वर्गों में वर्गीकृत करें",
     "method": "विधि",
     "methodEqualInterval": "समान अंतराल",
@@ -7984,5 +8094,77 @@
     "catalogHuc12pp": "HUC12 निकास बिंदु",
     "catalogNmwdiSt": "न्यू मैक्सिको जल स्थल",
     "catalogFlowlines": "NHDPlus प्रवाह-रेखाएँ"
+  },
+  "plugin": {
+    "3d-tiles": {
+      "arcgisSourceUnsupported": "इस ArcGIS दृश्य में 3D Tiles की tileset.json URL का उपयोग करें। Google Photorealistic और I3S टाइलों के लिए दूसरा रेंडरिंग इंजन आवश्यक है।",
+      "globeGoogleKeyRequired": "ग्लोब पर Google Photorealistic 3D Tiles लोड करने के लिए सेटिंग्स में Google Maps API कुंजी आवश्यक है।"
+    },
+    "geolibre-osm-downloader": {
+      "title": "ओएसएम डाउनलोडर",
+      "hint": "पब्लिक ओवरपास एपीआई के माध्यम से वर्तमान मैप क्षेत्र से ओपन स्ट्रीट मैप फीचर डाउनलोड करें।",
+      "attribution": "डेटा © ओपन स्ट्रीट मैप के योगदानकर्ताओं, ODbL के तहत उपलब्ध है।",
+      "featureType": "फीचर प्रकार",
+      "presetBuildings": "बिल्डिंग्स",
+      "presetRoads": "रोड्स",
+      "presetAmenities": "एमेनिटीज",
+      "presetWaterways": "वॉटरवे",
+      "presetLanduse": "लैंड यूज़",
+      "presetCustom": "कस्टम टैग",
+      "presetAll": "सभी टैग किए गए फीचर",
+      "tagKey": "टैग की",
+      "tagValue": "टैग मूल्य",
+      "tagKeyPlaceholder": "उदाहरण: शॉप",
+      "tagValuePlaceholder": "वैकल्पिक, उदाहरण: बेकरी",
+      "west": "पश्चिम",
+      "south": "दक्षिण",
+      "east": "पूर्व",
+      "north": "उत्तर",
+      "useMapExtent": "मैप एक्सटेंट का उपयोग करें",
+      "download": "ओएसएम डेटा डाउनलोड करें",
+      "ready": "क्षेत्र और फीचर प्रकार का चयन करें।",
+      "exportGeoJson": "GeoJSON सहेजें",
+      "mapUnavailable": "मैप एक्सटेंट अभी उपलब्ध नहीं है।",
+      "extentApplied": "मैप एक्सटेंट लागू किया गया।",
+      "downloading": "ओपन स्ट्रीट मैप से डाउनलोड कर रहे हैं…",
+      "noFeatures": "इस क्षेत्र में मेल नहीं खाते फीचर नहीं मिले।",
+      "error": "ओएसएम डेटा डाउनलोड नहीं किया जा सकता: {{message}}",
+      "added": "{{count}} फीचर मैप में जोड़े गए।"
+    },
+    "geolibre-ign-lidar-hd": {
+      "title": "IGN LiDAR HD",
+      "hint": "वर्तमान मैप क्षेत्र के लिए IGN LiDAR HD टाइल कवरेज खोजें, टाइलों को पॉइंट क्लाउड के रूप में मैप में जोड़ें, या IGN के सर्वर से उनकी COPC LAZ फ़ाइलें डाउनलोड करें।",
+      "attribution": "डेटा © IGN — LiDAR HD, Licence Ouverte 2.0 के तहत प्रकाशित।",
+      "west": "पश्चिम",
+      "south": "दक्षिण",
+      "east": "पूर्व",
+      "north": "उत्तर",
+      "useMapExtent": "मैप एक्सटेंट का उपयोग करें",
+      "search": "टाइलें खोजें",
+      "addToMap": "मैप में जोड़ें",
+      "download": "डाउनलोड करें",
+      "ready": "एक क्षेत्र चुनें और LiDAR HD टाइलें खोजें।",
+      "mapUnavailable": "मैप एक्सटेंट अभी उपलब्ध नहीं है।",
+      "extentApplied": "मैप एक्सटेंट लागू किया गया।",
+      "searching": "IGN LiDAR HD टाइलें खोजी जा रही हैं…",
+      "noTiles": "इस क्षेत्र में कोई LiDAR HD टाइल नहीं मिली।",
+      "noDownload": "कोई पॉइंट क्लाउड प्रकाशित नहीं",
+      "layerName": "IGN LiDAR HD टाइलें",
+      "found": "{{count}} टाइल मिलीं।",
+      "foundTruncated": "{{matched}} में से पहली {{count}} टाइलें दिखाई जा रही हैं। शेष देखने के लिए खोज क्षेत्र सीमित करें।",
+      "addedToMap": "{{name}} मैप में जोड़ी गई।",
+      "alreadyOnMap": "{{name}} पहले से ही मैप पर है।",
+      "unsupportedRenderer": "पॉइंट क्लाउड के लिए MapLibre या Mapbox रेंडरर आवश्यक है।",
+      "addError": "{{name}} को मैप में नहीं जोड़ा जा सका: {{message}}",
+      "error": "IGN LiDAR HD टाइलें खोजी नहीं जा सकीं: {{message}}",
+      "selectAll": "सभी चुनें",
+      "selectTile": "{{name}} चुनें",
+      "addSelectedToMap": "चयनित को मैप में जोड़ें",
+      "addSelectedToMapCount": "{{count}} चयनित को मैप में जोड़ें",
+      "addingSelected": "{{count}} टाइलें मैप में जोड़ी जा रही हैं…",
+      "addedSelectedCount": "{{count}} टाइलें मैप में जोड़ी गईं।",
+      "alreadyOnMapCountPlural": "{{count}} टाइलें पहले से मैप पर थीं।",
+      "addSelectedFailedCount": "{{count}} टाइलें नहीं जोड़ी जा सकीं।"
+    }
   }
 }

@@ -130,6 +130,7 @@ fi
 # the generated script.
 python -c '
 import json
+import math
 import os
 import re
 import base64
@@ -145,6 +146,87 @@ browser_globals = {}
 if os.environ.get("GEOLIBRE_AI_URL"):
     deployment["VITE_GEOLIBRE_AI_URL"] = os.environ["GEOLIBRE_AI_URL"]
     deployment["VITE_GEOLIBRE_AI_MODEL"] = os.environ["GEOLIBRE_AI_MODEL"]
+
+# Optional deployment service catalog. Read the mounted file on every startup;
+# only the catalog fields below are public, never the file path or other keys.
+services_file = os.environ.get("GEOLIBRE_SERVICES_FILE", "")
+builtins_hidden = os.environ.get("GEOLIBRE_BUILTIN_SERVICES", "").strip().lower() == "off"
+if services_file:
+    def invalid_json_constant(value):
+        raise ValueError("non-finite JSON number")
+
+    try:
+        with open(services_file, encoding="utf-8") as source:
+            catalog = json.load(source, parse_constant=invalid_json_constant)
+    except OSError as error:
+        raise SystemExit(
+            "ERROR: GEOLIBRE_SERVICES_FILE cannot be read. Check the mounted file path and read permissions."
+        ) from error
+    except (ValueError, UnicodeError) as error:
+        raise SystemExit(
+            "ERROR: GEOLIBRE_SERVICES_FILE must contain valid UTF-8 JSON with a services array."
+        ) from error
+    if not isinstance(catalog, dict) or not isinstance(catalog.get("services"), list):
+        raise SystemExit(
+            "ERROR: GEOLIBRE_SERVICES_FILE must contain an object with a services array."
+        )
+    services = []
+    service_ids = set()
+    service_kinds = ("wms", "wfs", "wmts", "xyz", "arcgis", "csw")
+    for index, entry in enumerate(catalog["services"], start=1):
+        prefix = f"ERROR: GEOLIBRE_SERVICES_FILE services entry {index}"
+        if not isinstance(entry, dict):
+            raise SystemExit(prefix + " must be an object.")
+        for key in ("id", "name"):
+            if not isinstance(entry.get(key), str) or not entry[key].strip():
+                raise SystemExit(prefix + f" must have a nonblank string {key}.")
+        service_id = entry["id"].strip()
+        if service_id in service_ids:
+            raise SystemExit(prefix + " has a duplicate trimmed id; give every service a unique stable id.")
+        if entry.get("kind") not in service_kinds:
+            raise SystemExit(prefix + " kind must be one of: " + ", ".join(service_kinds) + ".")
+        if "category" in entry and not isinstance(entry["category"], str):
+            raise SystemExit(prefix + " category must be a string when present.")
+        fields = entry.get("fields")
+        if not isinstance(fields, dict) or not fields or any(
+            not isinstance(value, (str, int, float, bool))
+            or (
+                isinstance(value, int)
+                and not isinstance(value, bool)
+                and abs(value) > 2**53 - 1
+            )
+            or (isinstance(value, float) and not math.isfinite(value))
+            for value in fields.values()
+        ):
+            raise SystemExit(
+                prefix + " fields must be a nonempty object of strings, booleans, or finite numbers with integers within the safe-integer range."
+            )
+        service_ids.add(service_id)
+        service = {
+            "id": service_id,
+            "name": entry["name"].strip(),
+            "kind": entry["kind"],
+            "fields": fields,
+        }
+        if "category" in entry:
+            service["category"] = entry["category"]
+        services.append(service)
+    deployment["VITE_GEOLIBRE_SERVICES"] = json.dumps(
+        {"services": services}, separators=(",", ":"), allow_nan=False
+    )
+
+# Optional hide of the built-in starter service library: with
+# GEOLIBRE_BUILTIN_SERVICES=off the Browser and the service pickers show the
+# configured catalog and personal entries only, so an entirely org-curated
+# deployment never offers the built-in presets. Any other nonempty value fails
+# the boot rather than silently keeping the built-ins (same discipline as
+# GEOLIBRE_SERVICES_FILE).
+if os.environ.get("GEOLIBRE_BUILTIN_SERVICES", "").strip() and not builtins_hidden:
+    raise SystemExit(
+        "ERROR: GEOLIBRE_BUILTIN_SERVICES must be \"off\" to hide the built-in starter services, or unset to keep them."
+    )
+if builtins_hidden:
+    deployment["VITE_GEOLIBRE_BUILTIN_SERVICES"] = "off"
 
 # Optional Clerk sign-in gate. The publishable key is intentionally public and
 # is all the browser needs; Clerk secrets never enter the image or runtime
@@ -271,7 +353,7 @@ def service_url(name, value, schemes, loopback_schemes, loopback_hosts):
     # ws://localhost:8080"; ... with hostname "localhost", which would match the
     # loopback allowlist while netloc still carried the rest.
     #
-    # Credentials: both values are echoed to stdout further down, so a credentialed
+    # Service URLs are echoed to stdout further down, so a credentialed
     # URL would also land in the container logs.
     if parsed.username or parsed.password:
         raise SystemExit(f"ERROR: {name} must not embed credentials.")
@@ -366,6 +448,29 @@ if collab_url:
         "GEOLIBRE_COLLAB_URL", collab_url, ("wss",), ("ws",), ("localhost", "127.0.0.1", "::1")
     )
 
+# Default GeoLens catalog. Unset lets the plugin try the browser origin, which
+# is the zero-config path when GeoLibre and GeoLens share a reverse proxy.
+geolens_url = os.environ.get("GEOLIBRE_GEOLENS_URL", "").strip()
+if geolens_url:
+    geolens_setting = geolens_url.lower()
+    if geolens_setting in ("off", "same-origin"):
+        deployment["VITE_GEOLENS_DEFAULT_URL"] = geolens_setting
+    else:
+        if re.fullmatch(r"[A-Za-z0-9.-]+(?::[0-9]+)?(?:/.*)?", geolens_url):
+            geolens_url = f"https://{geolens_url}"
+        parsed_geolens_url = urlsplit(geolens_url)
+        if parsed_geolens_url.query or parsed_geolens_url.fragment:
+            raise SystemExit(
+                "ERROR: GEOLIBRE_GEOLENS_URL must not include query parameters or a fragment."
+            )
+        deployment["VITE_GEOLENS_DEFAULT_URL"] = service_url(
+            "GEOLIBRE_GEOLENS_URL",
+            geolens_url,
+            ("https",),
+            ("http",),
+            ("localhost", "127.0.0.1", "::1"),
+        )
+
 with open("/usr/share/nginx/html/geolibre-runtime-config.js", "w") as output:
     output.write("window.__GEOLIBRE_DEPLOYMENT_ENV__ = ")
     json.dump(deployment, output, separators=(",", ":"))
@@ -397,6 +502,14 @@ if [ -n "$(trim "${GEOLIBRE_COLLAB_URL:-}")" ]; then
   echo "Collaboration relay: $(trim "$GEOLIBRE_COLLAB_URL")"
 fi
 
+if [ -n "$(trim "${GEOLIBRE_GEOLENS_URL:-}")" ]; then
+  GEOLENS_URL_LOG=$(trim "$GEOLIBRE_GEOLENS_URL")
+  case "$GEOLENS_URL_LOG" in
+    [oO][fF][fF]) echo "GeoLens disabled (GEOLIBRE_GEOLENS_URL=off)." ;;
+    *) echo "GeoLens server: $GEOLENS_URL_LOG" ;;
+  esac
+fi
+
 if [ -n "$(trim "${GEOLIBRE_NASA_OPERA_NEWS_PROXY_ENDPOINT:-}")" ]; then
   echo "NASA OPERA news proxy: $(trim "$GEOLIBRE_NASA_OPERA_NEWS_PROXY_ENDPOINT")"
 elif [ -n "${GEOLIBRE_AI_URL:-}" ]; then
@@ -408,6 +521,10 @@ fi
 
 if [ -n "${GEOLIBRE_EMBED_ORIGINS:-}" ]; then
   echo "Embed postMessage API enabled for: $GEOLIBRE_EMBED_ORIGINS"
+fi
+
+if [ "$(printf '%s' "$(trim "${GEOLIBRE_BUILTIN_SERVICES:-}")" | tr '[:upper:]' '[:lower:]')" = "off" ]; then
+  echo "Built-in starter services: hidden (GEOLIBRE_BUILTIN_SERVICES=off)"
 fi
 
 if [ -n "$(trim "${GEOLIBRE_CLERK_PUBLISHABLE_KEY:-}")" ]; then

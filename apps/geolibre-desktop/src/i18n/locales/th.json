@@ -22,6 +22,7 @@
     "noMatches": "ไม่พบรายการที่ตรงกัน",
     "addFailed": "ไม่สามารถเพิ่มแหล่งข้อมูลนี้ได้",
     "builtinBadge": "ในตัว",
+    "configBadge": "คอนฟิก",
     "newConnection": "การเชื่อมต่อ {{kind}} ใหม่",
     "loadingTables": "กำลังโหลดตาราง…",
     "files": "ไฟล์",
@@ -357,6 +358,10 @@
       "kml": {
         "label": "KML / KMZ",
         "description": "โหลด KML หรือ KMZ บนลูกโลกโดยคงรูปแบบต้นฉบับ ภาพซ้อนทับ และลิงก์เครือข่าย"
+      },
+      "wcs": {
+        "description": "โหลดข้อมูลตัวเลข GeoTIFF บางส่วนจากบริการ WCS 1.0.0",
+        "label": "เลเยอร์ WCS"
       }
     },
     "shared": {
@@ -396,6 +401,7 @@
       "loadAria": "โหลดบริการที่บันทึกไว้",
       "loadPlaceholder": "โหลดบริการที่บันทึกไว้…",
       "builtin": "{{name}} (ในตัว)",
+      "config": "{{name}} (คอนฟิก)",
       "deleteAria": "ลบบริการที่บันทึกไว้",
       "empty": "ยังไม่มีบริการที่บันทึกไว้ — กรอกแบบฟอร์มแล้วเลือก “บันทึกรายการปัจจุบัน”",
       "name": "ชื่อ",
@@ -419,7 +425,11 @@
       "kindImagery": "ภาพถ่าย",
       "altitudeOffset": "ค่าชดเชยความสูง (ม.)",
       "quickPicks": "ตัวเลือกด่วน",
+      "quickPicksPlaceholder": "เลือกแอสเซ็ต…",
+      "quickPicksGlobal": "มีในทุกบัญชี ion",
+      "quickPicksDepot": "ตัวอย่างจาก Asset Depot",
       "hint": "ดู id ของแอสเซ็ตได้ที่ My Assets บน ion.cesium.com แอสเซ็ตต้องถูกแชร์กับโทเค็นที่ตั้งค่าไว้ในการตั้งค่า",
+      "depotHint": "ตัวอย่างจาก Asset Depot จะสตรีมได้ก็ต่อเมื่อเพิ่มลงในบัญชีของคุณที่ ion.cesium.com → Asset Depot แล้ว",
       "errorAssetId": "ป้อน id ของแอสเซ็ต Cesium Ion (จำนวนเต็มบวก)",
       "errorAltitude": "ป้อนค่าชดเชยความสูงเป็นตัวเลขหน่วยเมตร",
       "tokenMissing": "ยังไม่ได้ตั้งค่าโทเค็น Cesium Ion โปรดเพิ่มในการตั้งค่า → ตัวแปรสภาพแวดล้อม (VITE_CESIUM_TOKEN) มิฉะนั้นจะโหลดแอสเซ็ตไม่สำเร็จ"
@@ -502,6 +512,7 @@
       "retrievedTypes": "ชนิดฟีเจอร์ที่ดึงมาได้",
       "selectType_other": "เลือกจากชนิดฟีเจอร์ทั้งหมด {{count}} ชนิด",
       "noTypesFound": "ไม่พบชนิดฟีเจอร์สำหรับบริการนี้",
+      "errorNoFeatures": "ชนิดฟีเจอร์นี้ไม่ส่งคืนฟีเจอร์ใด ๆ",
       "retrieveError": "ไม่สามารถดึงชนิดฟีเจอร์จากบริการนี้ได้"
     },
     "wmts": {
@@ -945,7 +956,42 @@
       "modelTooLarge": "โมเดลนี้มีขนาดเกินขีดจำกัด {{limit}} MB สำหรับการฝังในโปรเจกต์ โปรดโฮสต์ไฟล์แล้วเพิ่มผ่าน URL แทน",
       "modelFileError": "ไม่สามารถอ่านโมเดลนี้ได้ โปรดเลือกไฟล์ glTF 2.0 หรือ GLB ที่ถูกต้อง"
     },
-    "nonGeographicCoordinates": "พิกัดใน {{names}} ไม่ใช่ลองจิจูด/ละติจูด จึงจะไม่มีสิ่งใดถูกวาดบนแผนที่ ระบบพิกัดระบุไว้ผิด — โปรดฉายพิกัดข้อมูลใหม่ (หรือแก้ไฟล์ .prj) แล้วโหลดอีกครั้ง"
+    "nonGeographicCoordinates": "พิกัดใน {{names}} ไม่ใช่ลองจิจูด/ละติจูด จึงจะไม่มีสิ่งใดถูกวาดบนแผนที่ ระบบพิกัดระบุไว้ผิด — โปรดฉายพิกัดข้อมูลใหม่ (หรือแก้ไฟล์ .prj) แล้วโหลดอีกครั้ง",
+    "pmtiles": {
+      "errorUrl": "โปรดป้อน URL ของ PMTiles แบบ HTTP หรือ HTTPS ที่ถูกต้อง",
+      "errorMlt": "ArcGIS ต้องใช้ไทล์เวกเตอร์ MVT ไม่ใช่ MLT"
+    },
+    "lidar": {
+      "errorUrl": "โปรดป้อน URL ของ LiDAR แบบ HTTP หรือ HTTPS ที่ถูกต้อง"
+    },
+    "zarr": {
+      "errorUrl": "โปรดป้อน URL ของ Zarr แบบ HTTP หรือ HTTPS ที่ถูกต้อง",
+      "errorColorLimits": "ค่าสีสูงสุดต้องมากกว่าค่าสีต่ำสุด"
+    },
+    "raster": {
+      "errorSource": "ป้อน URL ของ GeoTIFF หรือเลือกไฟล์"
+    },
+    "wcs": {
+      "coverage": "คัฟเวอเรจ",
+      "retrieve": "ดึงข้อมูลคัฟเวอเรจ",
+      "select": "เลือกคัฟเวอเรจ",
+      "extent": "ใช้ขอบเขตคัฟเวอเรจ",
+      "width": "ความกว้าง (พิกเซล)",
+      "height": "ความสูง (พิกเซล)",
+      "hint": "ดาวน์โหลด GeoTIFF ใน EPSG:4326 ตามขนาดพิกเซลที่เลือก ค่าอาจถูกสุ่มตัวอย่างใหม่ บันทึกแรสเตอร์เพื่อเก็บข้อมูลที่ดาวน์โหลด",
+      "errors": {
+        "xml": "บริการส่งคืน XML ที่ไม่ถูกต้อง",
+        "version": "แหล่งข้อมูลนี้ต้องใช้ WCS 1.0.0 บริการส่งคืนการตอบกลับที่ไม่รองรับ",
+        "empty": "ไม่มีคัฟเวอเรจที่ตรงกัน",
+        "format": "คัฟเวอเรจไม่ได้ประกาศรองรับเอาต์พุต GeoTIFF",
+        "crs": "คัฟเวอเรจต้องรองรับ EPSG:4326 สำหรับทั้งคำขอและเอาต์พุต",
+        "size": "เลือกขนาดตั้งแต่ 1 ถึง 4096 พิกเซล จำกัดการดาวน์โหลดที่ 128 MB",
+        "metadata": "บริการส่งคืนเมทาดาทามากเกินกว่าที่ GeoLibre จะโหลดได้ จำกัดการตอบกลับเมทาดาทาที่ 32 MB",
+        "response": "บริการไม่ได้ส่งคืน GeoTIFF ที่ถูกต้อง",
+        "bounds": "ป้อนกรอบที่ถูกต้อง: ตะวันตก/ตะวันออกอยู่ในช่วง -180 ถึง 180 ใต้/เหนืออยู่ในช่วง -90 ถึง 90 โดยตะวันตก < ตะวันออก และใต้ < เหนือ",
+        "url": "ป้อน URL ของบริการ WCS"
+      }
+    }
   },
   "offline": {
     "title": "ดาวน์โหลดพื้นที่แบบออฟไลน์",
@@ -1885,7 +1931,7 @@
     "only3d": "3 มิติเท่านั้น",
     "noMapbox": "ไม่รองรับ Mapbox",
     "noArcgis": "ไม่รองรับ ArcGIS",
-    "cesiumTokenHint": "เพิ่มโทเค็น Cesium Ion ในการตั้งค่าเพื่อใช้ข้อมูลภูมิประเทศและภาพถ่ายจาก Ion"
+    "cesiumTokenHint": "เพิ่มโทเค็น Cesium Ion ใน<settingsLink>การตั้งค่า → ตัวแปรสภาพแวดล้อม</settingsLink> เพื่อใช้ข้อมูลภูมิประเทศและภาพถ่ายจาก Ion"
   },
   "renderer": {
     "basemap": "แผนที่ฐาน",
@@ -1895,6 +1941,7 @@
     "layerCesiumOnly": "แสดงผลบนลูกโลก 3 มิติเท่านั้น",
     "layerMapboxUnsupported": "ไม่แสดงผลบนเอนจิน Mapbox",
     "layerArcgisUnsupported": "ไม่แสดงผลบนเอนจิน ArcGIS",
+    "layerArcgisViewUnsupported": "ไม่แสดงผลในมุมมอง ArcGIS นี้",
     "resetView": "รีเซ็ตมุมมอง",
     "scene3D": "ลูกโลก 3 มิติ",
     "scene2D": "แผนที่ 2 มิติ",
@@ -2272,6 +2319,55 @@
       }
     }
   },
+  "panel": {
+    "godsEyeView": {
+      "description": "เหตุการณ์บนโลกแบบสดและอิงเวลาจากฟีดข้อมูลสาธารณะ",
+      "globeOnly": "ฟีดโลกแบบสดจะแสดงบนลูกโลก Cesium โปรดสลับไปยังลูกโลก 3 มิติเพื่อดูข้อมูล",
+      "groups": {
+        "movement": "การเคลื่อนไหว",
+        "cameras": "กล้อง",
+        "infrastructure": "โครงสร้างพื้นฐาน",
+        "events": "เหตุการณ์",
+        "utilities": "เครื่องมือ"
+      },
+      "earthquakes": "แผ่นดินไหว",
+      "spaceMissions": "ภารกิจอวกาศ (30 วัน)",
+      "satellites": "ดาวเทียม",
+      "flights": "เที่ยวบินสด",
+      "militaryFlights": "เที่ยวบินทหาร",
+      "bikeShare": "จักรยานสาธารณะ",
+      "transit": "ระบบขนส่งสาธารณะแบบเรียลไทม์",
+      "streetTraffic": "การจราจรบนถนนจำลอง",
+      "mappedAlpr": "กล้องอ่านป้ายทะเบียนที่ทำแผนที่ไว้",
+      "cctv": "กล้องวงจรปิดสาธารณะ",
+      "cctvPopup": {
+        "liveSnapshot": "ภาพสด",
+        "provider": "ผู้ให้บริการ",
+        "attribution": "การระบุแหล่งที่มา",
+        "privacy": "ความเป็นส่วนตัว"
+      },
+      "radio": "สถานีวิทยุ",
+      "datacenters": "ศูนย์ข้อมูล",
+      "dams": "เขื่อน",
+      "cables": "สายเคเบิลใต้น้ำ",
+      "osmInfrastructure": "โครงสร้างพื้นฐาน OSM",
+      "loading": "กำลังอัปเดต…",
+      "updateFailed": "อัปเดตไม่สำเร็จ",
+      "noneInView": "ไม่พบฟีเจอร์ของเลเยอร์นี้ในมุมมองปัจจุบัน",
+      "never": "ไม่เคย",
+      "lastUpdated": "อัปเดตล่าสุด: {{time}}",
+      "speed": "ความเร็ว",
+      "speedRealTime": "เวลาจริง (1×)",
+      "speedMultiple": "{{factor}}×",
+      "denseSatellites": "แค็ตตาล็อกดาวเทียมแบบหนาแน่น",
+      "denseLoading": "DENSE ···",
+      "denseFailed": "DENSE !",
+      "denseCount": "DENSE · {{count}}",
+      "dense": "DENSE",
+      "denseError": "ไม่สามารถโหลดแค็ตตาล็อก Starlink ได้: {{error}} เลือกเพื่อลองอีกครั้ง",
+      "denseDescription": "แสดงกลุ่มดาวเทียม Starlink ทั้งหมดเป็นจุดแบบน้ำหนักเบา (ไม่มีป้ายกำกับหรือแถวตาราง)"
+    }
+  },
   "toolbar": {
     "menu": {
       "project": "โปรเจกต์",
@@ -2513,7 +2609,8 @@
       "czml": "ฉาก 3 มิติไดนามิก CZML",
       "gltfModel": "โมเดล 3 มิติ (glTF)",
       "postgres": "เลเยอร์ PostgreSQL",
-      "iceberg": "เลเยอร์ Apache Iceberg"
+      "iceberg": "เลเยอร์ Apache Iceberg",
+      "wcs": "เลเยอร์ WCS"
     },
     "conversion": {
       "vectorToVector": "เวกเตอร์เป็นเวกเตอร์",
@@ -2978,6 +3075,8 @@
       "maplibre-gl-esri-wayback": "ภาพถ่ายย้อนหลัง",
       "maplibre-gl-openaerialmap": "OpenAerialMap",
       "maplibre-gl-arcgis-hub": "ArcGIS Hub",
+      "geolibre-osm-downloader": "ตัวดาวน์โหลด OSM",
+      "geolibre-ign-lidar-hd": "IGN LiDAR HD Downloader",
       "geolibre-stac-catalogs": "แคตตาล็อก STAC",
       "geolibre-planet-open-data": "ข้อมูลเปิดของ Planet",
       "maplibre-gl-source-coop": "Source Cooperative",
@@ -2989,6 +3088,7 @@
       "maplibre-gl-huggingface": "Hugging Face",
       "carto-light": "แผนที่ฐาน Carto Light",
       "geolibre-flight-simulator": "เครื่องจำลองการบิน",
+      "gods-eye-view": "มุมมองรอบรู้",
       "geolibre-route-animation": "แอนิเมชันเส้นทาง",
       "geolibre-sun": "การจำลองดวงอาทิตย์",
       "maplibre-atmosphere-effects": "เอฟเฟกต์ชั้นบรรยากาศ",
@@ -4525,6 +4625,10 @@
       "errorStartSidecar": "ไม่สามารถเริ่ม GeoLibre sidecar ได้",
       "errorStopSidecar": "ไม่สามารถหยุด GeoLibre sidecar ได้",
       "noToolsFound": "ไม่พบเครื่องมือ",
+      "searchToolsByMeaning": "ค้นหาเครื่องมือหรืออธิบายงาน",
+      "searchingByMeaning": "กำลังค้นหาแค็ตตาล็อกตามความหมาย",
+      "bestMatches": "ผลลัพธ์ที่ตรงที่สุด",
+      "otherMatches": "ผลลัพธ์อื่น ๆ",
       "noParameters": "เครื่องมือนี้ไม่มีพารามิเตอร์",
       "noOutput": "ยังไม่มีผลลัพธ์",
       "enabled": "เปิดใช้งาน",
@@ -6975,6 +7079,11 @@
       "invalidExpression": "นิพจน์ไม่ถูกต้อง",
       "openBuilder": "เปิดตัวสร้างนิพจน์",
       "showFeatureId": "แสดงแถวรหัสฟีเจอร์",
+      "maxWidth": "ความกว้างของป๊อปอัป (พิกเซล)",
+      "maxWidthPlaceholder": "ค่าเริ่มต้น",
+      "imageHeight": "ความสูงของรูปภาพ (พิกเซล)",
+      "imageHeightPlaceholder": "ค่าเริ่มต้น",
+      "sizeHint": "เว้นว่างไว้เพื่อใช้ค่าเริ่มต้น รูปภาพจะคงสัดส่วนเดิมไว้ ดังนั้นต้องขยายป๊อปอัปให้กว้างขึ้น รูปถ่ายจึงจะใช้ความสูงที่เพิ่มมาได้",
       "fields": "ฟิลด์",
       "allFields": "ยังไม่ได้เลือกฟิลด์ใด จึงแสดงฟิลด์ที่มองเห็นได้ทั้งหมดตามลำดับของข้อมูลเอง",
       "addField": "เพิ่มฟิลด์…",
@@ -7342,6 +7451,7 @@
     "viewportStretchNoRange": "ค่าในมุมมองไม่สามารถกำหนดช่วงได้",
     "viewportStretchMoved": "แผนที่เลื่อนก่อนที่การอ่านจะเสร็จ โปรดใช้อีกครั้ง",
     "index": "ดัชนี",
+    "opacityClasses": "ชั้นความทึบแสง",
     "classifyToggle": "จัดเป็นชั้นข้อมูลแบบไม่ต่อเนื่อง",
     "method": "วิธีการ",
     "methodEqualInterval": "ช่วงเท่ากัน",
@@ -7897,5 +8007,77 @@
     "catalogHuc12pp": "จุดระบายน้ำ HUC12",
     "catalogNmwdiSt": "สถานีตรวจวัดน้ำในรัฐนิวเม็กซิโก",
     "catalogFlowlines": "เส้นทางน้ำ NHDPlus"
+  },
+  "plugin": {
+    "3d-tiles": {
+      "arcgisSourceUnsupported": "ใช้ URL tileset.json ของ 3D Tiles ในมุมมอง ArcGIS นี้ ไทล์ Google Photorealistic และ I3S ต้องใช้เอนจินเรนเดอร์อื่น",
+      "globeGoogleKeyRequired": "การโหลด Google Photorealistic 3D Tiles บนลูกโลกต้องใช้คีย์ API ของ Google Maps ในการตั้งค่า"
+    },
+    "geolibre-osm-downloader": {
+      "title": "ตัวดาวน์โหลด OSM",
+      "hint": "ดาวน์โหลดข้อมูล OpenStreetMap จากพื้นที่บนแผนที่ปัจจุบันผ่าน Overpass API สาธารณะ",
+      "attribution": "ข้อมูล © ผู้มีส่วนร่วมใน OpenStreetMap ใช้งานภายใต้สัญญาอนุญาต ODbL",
+      "featureType": "ประเภทฟีเจอร์",
+      "presetBuildings": "อาคาร",
+      "presetRoads": "ถนน",
+      "presetAmenities": "สิ่งอำนวยความสะดวก",
+      "presetWaterways": "ทางน้ำ",
+      "presetLanduse": "การใช้ที่ดิน",
+      "presetCustom": "แท็กกำหนดเอง",
+      "presetAll": "ฟีเจอร์ที่มีแท็กทั้งหมด",
+      "tagKey": "คีย์แท็ก",
+      "tagValue": "ค่าแท็ก",
+      "tagKeyPlaceholder": "เช่น shop",
+      "tagValuePlaceholder": "ไม่บังคับ เช่น bakery",
+      "west": "ทิศตะวันตก",
+      "south": "ทิศใต้",
+      "east": "ทิศตะวันออก",
+      "north": "ทิศเหนือ",
+      "useMapExtent": "ใช้ขอบเขตแผนที่",
+      "download": "ดาวน์โหลดข้อมูล OSM",
+      "ready": "เลือกพื้นที่และประเภทฟีเจอร์",
+      "exportGeoJson": "บันทึกเป็น GeoJSON",
+      "mapUnavailable": "ยังไม่มีขอบเขตแผนที่",
+      "extentApplied": "ใช้ขอบเขตแผนที่แล้ว",
+      "downloading": "กำลังดาวน์โหลดจาก OpenStreetMap…",
+      "noFeatures": "ไม่พบฟีเจอร์ที่ตรงกันในพื้นที่นี้",
+      "error": "ไม่สามารถดาวน์โหลดข้อมูล OSM ได้: {{message}}",
+      "added": "เพิ่มฟีเจอร์ {{count}} รายการลงบนแผนที่"
+    },
+    "geolibre-ign-lidar-hd": {
+      "title": "IGN LiDAR HD",
+      "hint": "ค้นหาขอบเขตไทล์ IGN LiDAR HD สำหรับพื้นที่แผนที่ปัจจุบัน เพิ่มไทล์ลงในแผนที่เป็นพอยต์คลาวด์ หรือดาวน์โหลดไฟล์ COPC LAZ จากเซิร์ฟเวอร์ของ IGN",
+      "attribution": "ข้อมูล © IGN — LiDAR HD เผยแพร่ภายใต้ Licence Ouverte 2.0",
+      "west": "ทิศตะวันตก",
+      "south": "ทิศใต้",
+      "east": "ทิศตะวันออก",
+      "north": "ทิศเหนือ",
+      "useMapExtent": "ใช้ขอบเขตแผนที่",
+      "search": "ค้นหาไทล์",
+      "addToMap": "เพิ่มลงในแผนที่",
+      "download": "ดาวน์โหลด",
+      "ready": "เลือกพื้นที่แล้วค้นหาไทล์ LiDAR HD",
+      "mapUnavailable": "ยังไม่มีขอบเขตแผนที่",
+      "extentApplied": "ใช้ขอบเขตแผนที่แล้ว",
+      "searching": "กำลังค้นหาไทล์ IGN LiDAR HD…",
+      "noTiles": "ไม่พบไทล์ LiDAR HD ในพื้นที่นี้",
+      "noDownload": "ไม่มีพอยต์คลาวด์เผยแพร่",
+      "layerName": "ไทล์ IGN LiDAR HD",
+      "found": "พบ {{count}} ไทล์",
+      "foundTruncated": "กำลังแสดง {{count}} ไทล์แรกจากทั้งหมด {{matched}} ไทล์ ลดพื้นที่ค้นหาเพื่อดูที่เหลือ",
+      "addedToMap": "เพิ่ม {{name}} ลงในแผนที่แล้ว",
+      "alreadyOnMap": "{{name}} อยู่บนแผนที่แล้ว",
+      "unsupportedRenderer": "พอยต์คลาวด์ต้องใช้ตัวเรนเดอร์ MapLibre หรือ Mapbox",
+      "addError": "ไม่สามารถเพิ่ม {{name}} ลงในแผนที่ได้: {{message}}",
+      "error": "ไม่สามารถค้นหาไทล์ IGN LiDAR HD ได้: {{message}}",
+      "selectAll": "เลือกทั้งหมด",
+      "selectTile": "เลือก {{name}}",
+      "addSelectedToMap": "เพิ่มรายการที่เลือกลงในแผนที่",
+      "addSelectedToMapCount": "เพิ่ม {{count}} รายการที่เลือกลงในแผนที่",
+      "addingSelected": "กำลังเพิ่ม {{count}} ไทล์ลงในแผนที่…",
+      "addedSelectedCount": "เพิ่ม {{count}} ไทล์ลงในแผนที่แล้ว",
+      "alreadyOnMapCountPlural": "{{count}} ไทล์อยู่บนแผนที่แล้ว",
+      "addSelectedFailedCount": "ไม่สามารถเพิ่ม {{count}} ไทล์ได้"
+    }
   }
 }

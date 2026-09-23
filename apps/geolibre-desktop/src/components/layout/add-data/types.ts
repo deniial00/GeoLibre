@@ -4,6 +4,7 @@
 
 export type AddDataKind =
   | "xyz"
+  | "wcs"
   | "wms"
   | "csw"
   | "wfs"
@@ -11,11 +12,15 @@ export type AddDataKind =
   | "ogc-features"
   | "ogc-vector-tiles"
   | "gpx"
+  | "landxml"
   | "georss"
   | "delimited-text"
   | "cad"
   | "gdb"
   | "photos"
+  | "raster"
+  | "zarr"
+  | "pmtiles"
   | "mbtiles"
   | "polyline"
   | "arcgis"
@@ -31,6 +36,7 @@ export type AddDataKind =
 export type FeedMode = "url" | "file";
 export type GpxMode = FeedMode;
 export type GpxLayerKind = "waypoints" | "tracks" | "trackPoints" | "routes" | "routePoints";
+export type LandXmlMode = FeedMode;
 export type GeoRssMode = FeedMode;
 export type DelimitedTextMode = FeedMode;
 export type DelimitedTextDelimiter = "comma" | "tab" | "semicolon" | "pipe" | "custom";

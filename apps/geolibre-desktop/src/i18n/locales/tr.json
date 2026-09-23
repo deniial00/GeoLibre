@@ -22,6 +22,7 @@
     "noMatches": "Eşleşme yok.",
     "addFailed": "Bu veri kaynağı eklenemedi.",
     "builtinBadge": "yerleşik",
+    "configBadge": "konfig",
     "newConnection": "Yeni {{kind}} bağlantısı",
     "loadingTables": "Tablolar yükleniyor…",
     "files": "Dosyalar",
@@ -359,6 +360,10 @@
       "kml": {
         "label": "KML / KMZ",
         "description": "KML veya KMZ dosyalarını özgün stiller, kaplamalar ve ağ bağlantılarıyla küreye yükleyin."
+      },
+      "wcs": {
+        "description": "WCS 1.0.0 servisinden sayısal bir GeoTIFF alt kümesi yükleyin.",
+        "label": "WCS Katmanı"
       }
     },
     "shared": {
@@ -398,6 +403,7 @@
       "loadAria": "Kayıtlı bir servis yükle",
       "loadPlaceholder": "Kayıtlı bir servis yükle…",
       "builtin": "{{name}} (yerleşik)",
+      "config": "{{name}} (konfig)",
       "deleteAria": "Kayıtlı servisi sil",
       "empty": "Henüz kayıtlı servis yok — formu doldurun ve “Mevcut olanı kaydet”i seçin.",
       "name": "Ad",
@@ -423,7 +429,11 @@
       "kindImagery": "Görüntü",
       "altitudeOffset": "Yükseklik kaydırması (m)",
       "quickPicks": "Hızlı seçimler",
+      "quickPicksPlaceholder": "Bir varlık seçin…",
+      "quickPicksGlobal": "Her ion hesabında bulunur",
+      "quickPicksDepot": "Asset Depot örnekleri",
       "hint": "Varlık kimliklerini ion.cesium.com adresindeki My Assets altında bulabilirsiniz. Varlık, Ayarlar'da yapılandırılan belirteçle paylaşılmış olmalıdır.",
+      "depotHint": "Asset Depot örnekleri yalnızca ion.cesium.com → Asset Depot üzerinden hesabınıza ekledikten sonra yayınlanır.",
       "errorAssetId": "Bir Cesium Ion varlık kimliği girin (pozitif bir tam sayı).",
       "errorAltitude": "Yükseklik kaydırmasını metre cinsinden bir sayı olarak girin.",
       "tokenMissing": "Yapılandırılmış bir Cesium Ion belirteci yok. Ayarlar → Ortam değişkenleri (VITE_CESIUM_TOKEN) altından bir tane ekleyin, aksi halde varlık yüklenemez."
@@ -508,6 +518,7 @@
       "selectType_one": "{{count}} öğe türünden seç",
       "selectType_other": "{{count}} öğe türünden seç",
       "noTypesFound": "Bu servis için öğe türü bulunamadı.",
+      "errorNoFeatures": "Bu öğe türü hiç öğe döndürmedi.",
       "retrieveError": "Bu servisten öğe türleri alınamadı."
     },
     "wmts": {
@@ -966,7 +977,42 @@
       "modelTooLarge": "Bu model, bir projeye gömme için {{limit}} MB sınırından büyük. Bunun yerine bir sunucuda barındırıp URL ile ekleyin.",
       "modelFileError": "Bu model okunamadı. Geçerli bir glTF 2.0 veya GLB dosyası seçin."
     },
-    "nonGeographicCoordinates": "{{names}} içindeki koordinatlar boylam/enlem değil, bu yüzden haritaya hiçbir şey çizilmeyecek. CRS bilgisi yanlış — verileri yeniden projelendirin (veya .prj dosyasını düzeltin) ve tekrar yükleyin."
+    "nonGeographicCoordinates": "{{names}} içindeki koordinatlar boylam/enlem değil, bu yüzden haritaya hiçbir şey çizilmeyecek. CRS bilgisi yanlış — verileri yeniden projelendirin (veya .prj dosyasını düzeltin) ve tekrar yükleyin.",
+    "pmtiles": {
+      "errorUrl": "Geçerli bir HTTP veya HTTPS PMTiles URL’si girin.",
+      "errorMlt": "ArcGIS, MLT değil MVT vektör karoları gerektirir."
+    },
+    "lidar": {
+      "errorUrl": "Geçerli bir HTTP veya HTTPS LiDAR URL’si girin."
+    },
+    "zarr": {
+      "errorUrl": "Geçerli bir HTTP veya HTTPS Zarr URL’si girin.",
+      "errorColorLimits": "En yüksek renk sınırı en düşük sınırdan büyük olmalıdır."
+    },
+    "raster": {
+      "errorSource": "Bir GeoTIFF URL’si girin veya dosya seçin."
+    },
+    "wcs": {
+      "coverage": "Kapsam",
+      "retrieve": "Kapsamları getir",
+      "select": "Bir kapsam seçin",
+      "extent": "Kapsam sınırlarını kullan",
+      "width": "Genişlik (piksel)",
+      "height": "Yükseklik (piksel)",
+      "hint": "Seçilen piksel boyutlarında EPSG:4326 GeoTIFF indirir. Değerler yeniden örneklenebilir. İndirilen verileri korumak için rasteri kaydedin.",
+      "errors": {
+        "xml": "Servis geçersiz XML döndürdü.",
+        "version": "Bu kaynak WCS 1.0.0 gerektirir. Servis desteklenmeyen bir yanıt döndürdü.",
+        "empty": "Eşleşen kapsam bulunmuyor.",
+        "format": "Kapsam GeoTIFF çıktısı bildirmiyor.",
+        "crs": "Kapsam hem istekler hem de çıktı için EPSG:4326 desteklemelidir.",
+        "size": "1 ile 4096 piksel arasında boyutlar seçin. İndirmeler 128 MB ile sınırlıdır.",
+        "metadata": "Servis GeoLibre'nin yükleyebileceğinden daha fazla meta veri döndürdü. Meta veri yanıtları 32 MB ile sınırlıdır.",
+        "response": "Servis geçerli bir GeoTIFF döndürmedi.",
+        "bounds": "Geçerli bir kutu girin: batı/doğu -180 ile 180 arasında, güney/kuzey -90 ile 90 arasında, batı < doğu ve güney < kuzey olacak şekilde.",
+        "url": "Bir WCS servis URL'si girin."
+      }
+    }
   },
   "offline": {
     "title": "Çevrimdışı Alan İndir",
@@ -1931,7 +1977,7 @@
     "only3d": "Yalnızca 3B",
     "noMapbox": "Mapbox yok",
     "noArcgis": "ArcGIS yok",
-    "cesiumTokenHint": "Arazi ve Ion görüntüleri için Ayarlar'dan bir Cesium Ion belirteci ekleyin"
+    "cesiumTokenHint": "Arazi ve Ion görüntüleri için <settingsLink>Ayarlar → Ortam değişkenleri</settingsLink> bölümünden bir Cesium Ion belirteci ekleyin"
   },
   "renderer": {
     "basemap": "Altlık harita",
@@ -1941,6 +1987,7 @@
     "layerCesiumOnly": "Yalnızca 3B küre tarafından çiziliyor",
     "layerMapboxUnsupported": "Mapbox motoru tarafından çizilmiyor",
     "layerArcgisUnsupported": "ArcGIS motoru tarafından çizilmiyor",
+    "layerArcgisViewUnsupported": "Bu ArcGIS görünümünde çizilmiyor",
     "resetView": "Görünümü Sıfırla",
     "scene3D": "3B küre",
     "scene2D": "2B harita",
@@ -2320,6 +2367,55 @@
       }
     }
   },
+  "panel": {
+    "godsEyeView": {
+      "description": "Herkese açık veri akışlarından canlı, zamana bağlı Dünya olayları.",
+      "globeOnly": "Canlı küre akışları Cesium küresinde görüntülenir. Görmek için 3B küreye geçin.",
+      "groups": {
+        "movement": "Hareket",
+        "cameras": "Kameralar",
+        "infrastructure": "Altyapı",
+        "events": "Olaylar",
+        "utilities": "Yardımcı Araçlar"
+      },
+      "earthquakes": "Depremler",
+      "spaceMissions": "Uzay Görevleri (30 gün)",
+      "satellites": "Uydular",
+      "flights": "Canlı Uçuşlar",
+      "militaryFlights": "Askerî Uçuşlar",
+      "bikeShare": "Bisiklet Paylaşımı",
+      "transit": "Canlı toplu taşıma",
+      "streetTraffic": "Simüle Edilmiş Sokak Trafiği",
+      "mappedAlpr": "Haritalanmış Plaka Okuma Kameraları",
+      "cctv": "Halka Açık CCTV Kameraları",
+      "cctvPopup": {
+        "liveSnapshot": "Canlı görüntü",
+        "provider": "Sağlayıcı",
+        "attribution": "Atıf",
+        "privacy": "Gizlilik"
+      },
+      "radio": "Radyo İstasyonları",
+      "datacenters": "Veri Merkezleri",
+      "dams": "Barajlar",
+      "cables": "Denizaltı Kabloları",
+      "osmInfrastructure": "OSM Altyapısı",
+      "loading": "Güncelleniyor…",
+      "updateFailed": "Güncelleme başarısız",
+      "noneInView": "Bu katman için mevcut görünümde öğe bulunamadı.",
+      "never": "Hiçbir zaman",
+      "lastUpdated": "Son güncelleme: {{time}}",
+      "speed": "Hız",
+      "speedRealTime": "Gerçek zamanlı (1×)",
+      "speedMultiple": "{{factor}}×",
+      "denseSatellites": "Yoğun uydu kataloğu",
+      "denseLoading": "DENSE ···",
+      "denseFailed": "DENSE !",
+      "denseCount": "DENSE · {{count}}",
+      "dense": "DENSE",
+      "denseError": "Starlink kataloğu yüklenemedi: {{error}}. Yeniden denemek için seçin.",
+      "denseDescription": "Starlink uydu ağının tamamını hafif noktalar olarak gösterin (etiket veya tablo satırı olmadan)."
+    }
+  },
   "toolbar": {
     "menu": {
       "project": "Proje",
@@ -2561,7 +2657,8 @@
       "czml": "CZML Dinamik 3B Sahne",
       "gltfModel": "3D Model (glTF)",
       "postgres": "PostgreSQL Katmanı",
-      "iceberg": "Apache Iceberg Katmanı"
+      "iceberg": "Apache Iceberg Katmanı",
+      "wcs": "WCS Katmanı"
     },
     "conversion": {
       "vectorToVector": "Vektörden Vektöre",
@@ -3029,6 +3126,8 @@
       "maplibre-gl-esri-wayback": "Tarihsel Görüntüler",
       "maplibre-gl-openaerialmap": "OpenAerialMap",
       "maplibre-gl-arcgis-hub": "ArcGIS Hub",
+      "geolibre-osm-downloader": "OSM İndirici",
+      "geolibre-ign-lidar-hd": "IGN LiDAR HD Downloader",
       "geolibre-stac-catalogs": "STAC Katalogları",
       "geolibre-planet-open-data": "Planet Açık Verileri",
       "maplibre-gl-source-coop": "Source Cooperative",
@@ -3040,6 +3139,7 @@
       "maplibre-gl-huggingface": "Hugging Face",
       "carto-light": "Carto Light Temel Harita",
       "geolibre-flight-simulator": "Uçuş Simülatörü",
+      "gods-eye-view": "Tanrısal Bakış",
       "geolibre-route-animation": "Rota Animasyonu",
       "geolibre-sun": "Güneş Simülasyonu",
       "maplibre-atmosphere-effects": "Atmosfer Efektleri",
@@ -4598,6 +4698,10 @@
       "errorStartSidecar": "GeoLibre sidecar'ı başlatılamadı.",
       "errorStopSidecar": "GeoLibre sidecar'ı durdurulamadı.",
       "noToolsFound": "Araç bulunamadı.",
+      "searchToolsByMeaning": "Araçları ara veya bir görev tanımla",
+      "searchingByMeaning": "Katalog anlama göre aranıyor",
+      "bestMatches": "En iyi eşleşmeler",
+      "otherMatches": "Diğer eşleşmeler",
       "noParameters": "Bu aracın parametresi yok.",
       "noOutput": "Henüz çıktı yok.",
       "enabled": "Etkin",
@@ -7055,6 +7159,11 @@
       "invalidExpression": "Geçersiz ifade",
       "openBuilder": "İfade oluşturucuyu aç",
       "showFeatureId": "Öğe kimliği satırını göster",
+      "maxWidth": "Açılır pencere genişliği (px)",
+      "maxWidthPlaceholder": "Varsayılan",
+      "imageHeight": "Görsel yüksekliği (px)",
+      "imageHeightPlaceholder": "Varsayılan",
+      "sizeHint": "Varsayılan için ikisini de boş bırakın. Görsel en boy oranını korur; bu nedenle bir fotoğrafın fazladan yüksekliği kullanabilmesi için açılır pencereyi genişletmeniz gerekir.",
       "fields": "Alanlar",
       "allFields": "Hiçbir alan seçilmedi, bu yüzden görünür tüm alanlar verinin kendi sırasında gösterilir.",
       "addField": "Alan ekle…",
@@ -7423,6 +7532,7 @@
     "viewportStretchNoRange": "Görünümdeki değerler bir aralık tanımlamıyor.",
     "viewportStretchMoved": "Okuma bitmeden harita hareket etti. Yeniden uygulayın.",
     "index": "İndeks",
+    "opacityClasses": "Opaklık sınıfları",
     "classifyToggle": "Ayrık sınıflara ayır",
     "method": "Yöntem",
     "methodEqualInterval": "Eşit aralık",
@@ -7984,5 +8094,77 @@
     "catalogHuc12pp": "HUC12 çıkış noktaları",
     "catalogNmwdiSt": "New Mexico su istasyonları",
     "catalogFlowlines": "NHDPlus akış hatları"
+  },
+  "plugin": {
+    "3d-tiles": {
+      "arcgisSourceUnsupported": "Bu ArcGIS görünümünde bir 3D Tiles tileset.json URL’si kullanın. Google Photorealistic ve I3S karoları başka bir işleme motoru gerektirir.",
+      "globeGoogleKeyRequired": "Google Photorealistic 3D Tiles’in küre üzerinde yüklenmesi için Ayarlar’da bir Google Maps API anahtarı gerekir."
+    },
+    "geolibre-osm-downloader": {
+      "title": "OSM İndirici",
+      "hint": "Güncel harita alanındaki OpenStreetMap özelliklerini genel Overpass API ile indirin.",
+      "attribution": "Veri © OpenStreetMap katkıda bulunanlar, ODbL altında kullanılabilir.",
+      "featureType": "Özellik türü",
+      "presetBuildings": "Binalar",
+      "presetRoads": "Yollar",
+      "presetAmenities": "Tesisler",
+      "presetWaterways": "Su yolları",
+      "presetLanduse": "Arazi kullanımı",
+      "presetCustom": "Özel etiket",
+      "presetAll": "Tüm etiketli özellikler",
+      "tagKey": "Etiket anahtarı",
+      "tagValue": "Etiket değeri",
+      "tagKeyPlaceholder": "örn. shop",
+      "tagValuePlaceholder": "isteğe bağlı, örn. bakery",
+      "west": "Batı",
+      "south": "Güney",
+      "east": "Doğu",
+      "north": "Kuzey",
+      "useMapExtent": "Harita kapsamını kullan",
+      "download": "OSM verilerini indir",
+      "ready": "Bir alan ve özellik türü seçin.",
+      "exportGeoJson": "GeoJSON olarak kaydet",
+      "mapUnavailable": "Harita kapsamı henüz kullanılamıyor.",
+      "extentApplied": "Harita kapsamı uygulandı.",
+      "downloading": "OpenStreetMap'ten indiriliyor…",
+      "noFeatures": "Bu alanda eşleşen özellik bulunamadı.",
+      "error": "OSM verileri indirilemedi: {{message}}",
+      "added": "{{count}} özellik haritaya eklendi."
+    },
+    "geolibre-ign-lidar-hd": {
+      "title": "IGN LiDAR HD",
+      "hint": "Geçerli harita alanı için IGN LiDAR HD karo kapsamını arayın, karoları nokta bulutu olarak haritaya ekleyin veya COPC LAZ dosyalarını IGN sunucularından indirin.",
+      "attribution": "Veri © IGN — LiDAR HD, Licence Ouverte 2.0 kapsamında yayımlanmıştır.",
+      "west": "Batı",
+      "south": "Güney",
+      "east": "Doğu",
+      "north": "Kuzey",
+      "useMapExtent": "Harita kapsamını kullan",
+      "search": "Karoları ara",
+      "addToMap": "Haritaya ekle",
+      "download": "İndir",
+      "ready": "Bir alan seçin ve LiDAR HD karolarını arayın.",
+      "mapUnavailable": "Harita kapsamı henüz kullanılamıyor.",
+      "extentApplied": "Harita kapsamı uygulandı.",
+      "searching": "IGN LiDAR HD karoları aranıyor…",
+      "noTiles": "Bu alanda LiDAR HD karosu bulunamadı.",
+      "noDownload": "yayımlanmış nokta bulutu yok",
+      "layerName": "IGN LiDAR HD karoları",
+      "found": "{{count}} karo bulundu.",
+      "foundTruncated": "{{matched}} karodan ilk {{count}} tanesi gösteriliyor. Kalanını görmek için arama alanını daraltın.",
+      "addedToMap": "{{name}} haritaya eklendi.",
+      "alreadyOnMap": "{{name}} zaten haritada.",
+      "unsupportedRenderer": "Nokta bulutları MapLibre veya Mapbox render motorunu gerektirir.",
+      "addError": "{{name}} haritaya eklenemedi: {{message}}",
+      "error": "IGN LiDAR HD karoları aranamadı: {{message}}",
+      "selectAll": "Tümünü seç",
+      "selectTile": "{{name}} öğesini seç",
+      "addSelectedToMap": "Seçilenleri haritaya ekle",
+      "addSelectedToMapCount": "Seçilen {{count}} öğeyi haritaya ekle",
+      "addingSelected": "{{count}} karo haritaya ekleniyor…",
+      "addedSelectedCount": "{{count}} karo haritaya eklendi.",
+      "alreadyOnMapCountPlural": "{{count}} karo zaten haritadaydı.",
+      "addSelectedFailedCount": "{{count}} karo eklenemedi."
+    }
   }
 }

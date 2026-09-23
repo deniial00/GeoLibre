@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type RefObject } from "react";
 import { applyGroupEffects, useAppStore, type MapProjection } from "@geolibre/core";
 import type { MapEngine } from "./map-engine";
+import { CogDemError } from "./cog-dem-source";
 import {
   ArcgisEngine,
   arcgisSceneMode,
@@ -59,6 +60,11 @@ export function ArcgisCanvas({
   const container = useRef<HTMLDivElement>(null);
   // Views replaced by a 2D/3D switch, kept on screen until the new view draws.
   const retiring = useRef<{ element: HTMLElement; engine: ArcgisEngine }[]>([]);
+  const terrainSource = useRef<{ source: string | Blob | null; band: number }>({
+    source: null,
+    band: 1,
+  });
+  const terrainExaggeration = useRef(1);
   const readyCallback = useRef(onEngineReady);
   readyCallback.current = onEngineReady;
   // Read through a ref so a language change reaches the next popup without
@@ -75,6 +81,7 @@ export function ArcgisCanvas({
   const sceneMode = arcgisSceneMode(projection, terrainEnabled);
   useEffect(() => {
     let cancelled = false;
+    let terrainRestoreError: string | null = null;
     let engine: ArcgisEngine | undefined;
     let cleanup = () => {};
     setError(null);
@@ -139,7 +146,15 @@ export function ArcgisCanvas({
               constraints: { snapToZoom: false, rotationEnabled: true },
             });
         engine = new ArcgisEngine(sdk, map, mapView, {
+          deckOverlay: !viewId,
+          domControls: !viewId,
           hasApiKey: Boolean(apiKey?.trim()),
+          onTerrainSourceChange: (source, band) => {
+            if (!cancelled) {
+              terrainSource.current = { source, band };
+              terrainRestoreError = null;
+            }
+          },
           onLayerVisibilityChange: (id, visible) => {
             if (cancelled) return;
             const store = useAppStore.getState();
@@ -170,6 +185,39 @@ export function ArcgisCanvas({
           },
         });
         const current = engine;
+        let restoringTerrain = false;
+        const restoreTerrain = () => {
+          const remembered = terrainSource.current;
+          if (
+            cancelled ||
+            !mapView.ready ||
+            !scene ||
+            restoringTerrain ||
+            !useAppStore.getState().preferences.map.terrainEnabled ||
+            !remembered.source ||
+            current.hasCustomTerrainSource()
+          )
+            return;
+          restoringTerrain = true;
+          // DEM metadata can be slow or unavailable; the camera and map remain usable.
+          void current
+            .setTerrainCogSource(remembered.source, remembered.band)
+            .catch((error: unknown) => {
+              if (cancelled) return;
+              // Invalid sources cannot be retried. Network failures retain the
+              // selection so enabling terrain again can retry it.
+              if (error instanceof CogDemError && terrainSource.current === remembered)
+                terrainSource.current = { source: null, band: 1 };
+              terrainRestoreError = redactArcgisError(
+                error instanceof Error ? error.message : String(error),
+              );
+              setError(terrainRestoreError);
+            })
+            .finally(() => {
+              restoringTerrain = false;
+            });
+        };
+        current.setTerrainExaggeration(terrainExaggeration.current);
         let applying = false;
         // Until the initial camera has landed, `stationary` reports the view's
         // default camera, which must not be written back to the store.
@@ -179,6 +227,15 @@ export function ArcgisCanvas({
         const removePopup = () => {
           popupDispose?.();
           popupDispose = null;
+        };
+        const setIdentifyCursor = (active: boolean) => {
+          const cursor = active ? "crosshair" : "";
+          element.style.cursor = cursor;
+          // The SDK inserts its pointer target below the supplied container.
+          // Set it explicitly because ArcGIS themes may give the surface its
+          // own cursor instead of inheriting ours.
+          const surface = element.querySelector<HTMLElement>(".esri-view-surface");
+          if (surface) surface.style.cursor = cursor;
         };
         const update = (next: typeof state, previous?: typeof state) => {
           if (cancelled) return;
@@ -194,6 +251,11 @@ export function ArcgisCanvas({
               current.setBasemap(next.basemapStyleUrl, next.preferences.map.arcgisBasemap);
             if (!previous || next.preferences.map !== previous.preferences.map)
               current.applyMapPreferences(next.preferences.map);
+            if (
+              !previous ||
+              (!previous.preferences.map.terrainEnabled && next.preferences.map.terrainEnabled)
+            )
+              restoreTerrain();
             if (!previous || next.basemapVisible !== previous.basemapVisible)
               current.setBasemapVisible(next.basemapVisible);
             if (!previous || next.basemapOpacity !== previous.basemapOpacity)
@@ -241,7 +303,7 @@ export function ArcgisCanvas({
               // the same selection only redraws the highlight.
               const key =
                 next.selectedLayerId && ids !== null && (Array.isArray(ids) ? ids.length : true)
-                  ? `${next.selectedLayerId}:${Array.isArray(ids) ? ids.join("\u0000") : ids}`
+                  ? JSON.stringify([next.selectedLayerId, Array.isArray(ids) ? ids : [ids]])
                   : null;
               const fit = Boolean(
                 next.ui.zoomToSelectedFeature && key && key !== selectionKey && previous,
@@ -253,7 +315,10 @@ export function ArcgisCanvas({
                 { fit },
               );
             }
-            if (previous && next.identifyLayerId !== previous.identifyLayerId) removePopup();
+            if (!viewId && (!previous || next.identifyLayerId !== previous.identifyLayerId)) {
+              if (previous) removePopup();
+              setIdentifyCursor(Boolean(next.identifyLayerId));
+            }
           } finally {
             applying = false;
           }
@@ -351,6 +416,8 @@ export function ArcgisCanvas({
           .when()
           .then(() => {
             if (cancelled) return;
+            if (!viewId) setIdentifyCursor(Boolean(useAppStore.getState().identifyLayerId));
+            restoreTerrain();
             const latest = useAppStore.getState();
             const pane = latest.secondaryMapViews.find((p) => p.id === viewId);
             return current.settleView(
@@ -385,7 +452,9 @@ export function ArcgisCanvas({
           });
         const status = window.setInterval(() => {
           if (cancelled) return;
-          const errors = current.getRenderStatus().errors;
+          const errors = [...current.getRenderStatus().errors];
+          if (terrainRestoreError && useAppStore.getState().preferences.map.terrainEnabled)
+            errors.push(terrainRestoreError);
           setError(errors.length ? errors.join("; ") : null);
         }, 1000);
         // The SDK ships one stylesheet per theme; follow the app's dark-mode
@@ -413,6 +482,7 @@ export function ArcgisCanvas({
       });
     return () => {
       cancelled = true;
+      if (engine) terrainExaggeration.current = engine.getTerrainExaggeration();
       cleanup();
       if (engineRef && engineRef.current === engine) engineRef.current = null;
       if (engine) {

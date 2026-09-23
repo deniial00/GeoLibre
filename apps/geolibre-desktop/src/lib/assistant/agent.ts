@@ -1,7 +1,17 @@
 import { getAssistantToolsVersion } from "@geolibre/plugins/assistant-tool-registry";
-import { useAppStore } from "@geolibre/core";
-import { Agent } from "@strands-agents/sdk";
-import { configForProvider, createModel, resolveProviderConfig } from "./provider";
+import { OPENFREEMAP_BASEMAPS, useAppStore } from "@geolibre/core";
+import { Agent, type Tool } from "@strands-agents/sdk";
+import i18next from "i18next";
+import { configForProvider, createModel, readRuntimeEnv, resolveProviderConfig } from "./provider";
+import { NAMED_TILE_BASEMAPS } from "./basemaps";
+import {
+  resolveFastPathAction,
+  runToolDirectly,
+  type FastPathAction,
+  type FastPathState,
+} from "./fast-path";
+import { resolveSystemOneEndpoint } from "./system-one";
+import { typesafeFetch } from "./typesafe-fetch";
 import {
   assistantSelectionKey,
   configForProfile,
@@ -15,7 +25,46 @@ import { createAssistantTools, type AssistantToolDeps } from "./tools";
 /** A streamed update surfaced to the chat UI. */
 export type AssistantStreamEvent =
   | { type: "text"; text: string }
-  | { type: "tool"; name: string; input: unknown; error?: string };
+  | {
+      type: "tool";
+      name: string;
+      input: unknown;
+      error?: string;
+      /**
+       * True when the fast path routed this call instead of the model.
+       *
+       * Surfaced because the feature is built to fail silently: without a mark
+       * on the turn, "the fast path is off" and "the fast path is not helping"
+       * look identical, which is how a misbuilt endpoint URL survived a whole
+       * benchmarking round.
+       */
+      routed?: boolean;
+    };
+
+/**
+ * The live map state the fast path routes against.
+ *
+ * Only the layers the user could name are offered: a layer the model cannot see
+ * is one it cannot pick by mistake, and the choice list is what bounds the
+ * request's size.
+ */
+function fastPathState(): FastPathState {
+  return {
+    layers: useAppStore.getState().layers.map((layer) => ({
+      id: layer.id,
+      name: layer.name,
+      type: layer.type,
+    })),
+    styleBasemaps: OPENFREEMAP_BASEMAPS.map((basemap) => ({
+      id: basemap.id,
+      name: basemap.name,
+    })),
+    tileBasemaps: NAMED_TILE_BASEMAPS.map((basemap) => ({
+      id: basemap.id,
+      name: basemap.label,
+    })),
+  };
+}
 
 /**
  * A long-lived assistant session wrapping a Strands {@link Agent}. The agent is
@@ -44,6 +93,11 @@ export class AssistantSession {
    * matching the initial `selection`/`profile` state above.
    */
   private selectionKey: string = assistantSelectionKey(null);
+  /** Aborts an in-flight fast-path request when the user stops the run. */
+  private fastPathAbort: AbortController | null = null;
+  /** Tool instances for direct (non-model) invocation by the fast path. */
+  private cachedTools: Tool[] | null = null;
+  private cachedToolsVersion = -1;
 
   constructor(private readonly deps: AssistantToolDeps) {}
 
@@ -90,7 +144,71 @@ export class AssistantSession {
 
   /** Cancel the in-flight model/tool run, if any. */
   cancel(): void {
+    this.fastPathAbort?.abort();
     this.agent?.cancel();
+  }
+
+  /**
+   * Try to answer the prompt without the model, yielding the events the agent
+   * would have produced. Returns false when the request is not a fast-path one,
+   * which is the common case and must cost nothing but the routing request.
+   */
+  private async *streamFastPath(prompt: string): AsyncGenerator<AssistantStreamEvent, boolean> {
+    const endpoint = resolveSystemOneEndpoint(readRuntimeEnv());
+    if (!endpoint) return false;
+
+    const state = fastPathState();
+    const abort = new AbortController();
+    this.fastPathAbort = abort;
+    let action: FastPathAction | null = null;
+    try {
+      action = await resolveFastPathAction({
+        prompt,
+        state,
+        endpoint,
+        fetchImpl: await typesafeFetch(),
+        signal: abort.signal,
+      });
+    } finally {
+      this.fastPathAbort = null;
+    }
+    // `resolveFastPathAction` reports a cancelled request the same way as a
+    // timeout or a refusal — as "no action" — so the abort has to be read from
+    // the signal. Falling through here would send the prompt to the model the
+    // user just pressed Stop on, and on the first turn of a session
+    // `agent?.cancel()` is a no-op because no agent exists yet. Only `cancel()`
+    // touches this signal; the routing timeout aborts a controller of its own.
+    if (abort.signal.aborted) return true;
+    if (!action) return false;
+
+    const tool = this.toolNamed(action.tool);
+    // A tool the fast path names but the registry does not hold would be a bug,
+    // not a user-visible failure: fall through rather than surface it.
+    if (!tool) return false;
+
+    const error = await runToolDirectly(tool, action.input);
+    console.debug(
+      `[geolibre] assistant fast path: ${action.tool} ${JSON.stringify(action.input)}` +
+        (error ? ` — failed: ${error}` : ""),
+    );
+    yield { type: "tool", name: action.tool, input: action.input, error, routed: true };
+    // The transcript already shows the call; this line is what voice mode reads
+    // back, so a silent success would leave a hands-free user with no answer.
+    yield {
+      type: "text",
+      text: error ? i18next.t("assistant.fastPath.failed") : i18next.t("assistant.fastPath.done"),
+    };
+    return true;
+  }
+
+  /** The host tool with this name, from a cache shared across prompts. */
+  private toolNamed(name: string): Tool | null {
+    const version = getAssistantToolsVersion();
+    if (!this.cachedTools || this.cachedToolsVersion !== version) {
+      this.cachedTools = createAssistantTools(this.deps);
+      this.cachedToolsVersion = version;
+    }
+    return this.cachedTools.find((tool) => tool.name === name) ?? null;
   }
 
   private async ensureAgent(): Promise<Agent> {
@@ -148,6 +266,12 @@ export class AssistantSession {
     if (this.streaming) throw new Error("An assistant response is already in progress.");
     this.streaming = true;
     try {
+      // Simple map commands are routed and executed without the model at all.
+      // This runs before ensureAgent so it also works while no LLM provider is
+      // configured — and, crucially, before any conversation state is touched,
+      // so a fast-path turn leaves the agent's history exactly as it found it.
+      if (yield* this.streamFastPath(prompt)) return;
+
       const agent = await this.ensureAgent();
       // Only prepend the layer context when it changed since the last message, so
       // long conversations don't re-send the full layer list on every turn.

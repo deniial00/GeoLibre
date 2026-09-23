@@ -14,6 +14,7 @@ import {
   RASTER_SOURCE_KIND,
   isRasterControlStoreLayer,
   isRasterStoreSyncSuspended,
+  savedRasterState,
 } from "./raster-layer-sync";
 import { colormapColors, warmColormapColors } from "./colormap-colors";
 
@@ -52,6 +53,7 @@ type RasterInfoLike = {
 
 type ClassificationEntry = {
   symbology: RasterSymbology;
+  state: ReturnType<typeof savedRasterState>;
   /** Whether the ramp is reversed (from `rasterState.reversed`); baked into
    * the injected texture. */
   reversed: boolean;
@@ -65,14 +67,9 @@ function hasCustomColors(symbology: RasterSymbology): boolean {
   return (symbology.customColors?.length ?? 0) >= RASTER_MIN_CUSTOM_COLORS;
 }
 
-/**
- * Whether a single-band layer needs a GeoLibre-injected colormap texture: a
- * stepped lookup when classified, or a smooth gradient when a custom ramp is
- * applied to a continuous layer. A built-in continuous ramp renders through
- * the upstream sprite (including its native `reversed`), so it needs no texture.
- */
+/** Whether classification, custom colors or value opacity needs a GPU texture. */
 function needsTexture(symbology: RasterSymbology): boolean {
-  return symbology.classified || hasCustomColors(symbology);
+  return symbology.classified || hasCustomColors(symbology) || !!symbology.classOpacities;
 }
 
 /** Reads `rasterState.reversed` from a store layer's metadata. */
@@ -106,8 +103,18 @@ const statsCache = new Map<string, AutoStats>();
 const statsInflight = new Map<string, AbortController>();
 let storeUnsubscribe: (() => void) | null = null;
 
-function symbologyKey(symbology: RasterSymbology, reversed: boolean): string {
+function symbologyKey(
+  symbology: RasterSymbology,
+  reversed: boolean,
+  state: ReturnType<typeof savedRasterState>,
+): string {
   return JSON.stringify([
+    symbology.classified,
+    // The renderer's value window only reaches the continuous branch (it maps
+    // texture columns back to data values for opacity). A stepped colormap
+    // ignores it, so leaving it out of the key keeps rescale / stretch / gamma
+    // edits from needlessly rebuilding a classified layer's GPU texture.
+    symbology.classified ? null : [state.rescale, state.stretch, state.gamma],
     symbology.breaks,
     symbology.ramp,
     symbology.customColors ?? null,
@@ -120,10 +127,9 @@ function symbologyKey(symbology: RasterSymbology, reversed: boolean): string {
  * Installs the per-layer symbology injection on a raster control. Wraps the
  * LayerManager's `_renderTileFor` so a single-band layer renders through the
  * unchanged upstream pipeline (composite / nodata / rescale / stretch) but,
- * when classified or using a custom ramp, samples a GeoLibre-built colormap
+ * when classified, using a custom ramp or range opacity, samples a GeoLibre-built colormap
  * texture instead of the shared named-colormap sprite (reversal baked in).
- * Built-in continuous ramps -- including their reversal via
- * `rasterState.reversed` -- render through the upstream control untouched.
+ * Built-in continuous ramps without range opacity use the upstream control.
  * Idempotent and feature-detected: if the private surface is missing it warns
  * once and leaves the control untouched.
  *
@@ -148,9 +154,7 @@ export function installRasterClassification(control: unknown): void {
     manager._renderTileFor = (layer: RasterLayerLike): RenderTileFn => {
       const renderTile = originalRenderTileFor(layer);
       const entry = entries.get(layer.id);
-      // A texture is injected only for classified / custom ramps. A built-in
-      // continuous ramp (including its reversal) renders through the upstream
-      // sprite via rasterState.reversed, so it has no entry and passes through.
+      // Plain named ramps pass through; range opacity also needs a texture.
       if (
         layer.state?.mode !== "single" ||
         !entry ||
@@ -194,22 +198,16 @@ export function installRasterClassification(control: unknown): void {
 }
 
 function ensureTexture(manager: RasterLayerManager, entry: ClassificationEntry): GpuTexture | null {
-  const key = symbologyKey(entry.symbology, entry.reversed);
+  const key = symbologyKey(entry.symbology, entry.reversed, entry.state);
   if (entry.texture && entry.key === key) return entry.texture;
   entry.texture?.destroy?.();
   try {
     const { classified, breaks, ramp, customColors, classOpacities } = entry.symbology;
     const reversed = entry.reversed;
-    // Classified ramps step through the class breaks; a custom continuous ramp
-    // is a smooth gradient of the user's colors. (A built-in continuous ramp
-    // never reaches here -- it has no texture.) For a named sprite colormap the
-    // colors come from the warmed cache; until it resolves, colormapColors is
-    // null and buildSteppedColormapRgba falls back (reconcile rebuilds on warm).
+    // Resolve both named and custom colors for the injected texture. Sprite
+    // ramps may need warming; reconcile invalidates the fallback when ready.
     const custom =
       customColors && customColors.length >= RASTER_MIN_CUSTOM_COLORS ? customColors : undefined;
-    // The continuous branch only runs for a custom ramp (needsTexture), so
-    // `custom` is set; the grayscale fallback just keeps the contract explicit
-    // rather than producing a silent all-black gradient.
     const rgba = classified
       ? buildSteppedColormapRgba(
           breaks,
@@ -218,7 +216,17 @@ function ensureTexture(manager: RasterLayerManager, entry: ClassificationEntry):
           custom ?? colormapColors(ramp) ?? undefined,
           classOpacities,
         )
-      : buildContinuousColormapRgba(custom ?? ["#000000", "#ffffff"], reversed);
+      : buildContinuousColormapRgba(
+          custom ?? colormapColors(ramp) ?? ["#000000", "#ffffff"],
+          reversed,
+          {
+            breaks,
+            classOpacities,
+            range: entry.state.rescale?.[0],
+            stretch: entry.state.stretch,
+            gamma: entry.state.gamma,
+          },
+        );
     // The DOM ImageData ctor types its buffer as ArrayBuffer (not the wider
     // ArrayBufferLike the Uint8ClampedArray generic carries); the runtime
     // buffer is a plain ArrayBuffer, so narrow it for the type checker.
@@ -259,9 +267,7 @@ function reconcile(control: unknown): void {
     const symbology = savedRasterSymbology(layer);
     const existing = entries.get(layer.id);
 
-    // Track the layer only while it needs an injected texture (classified or a
-    // custom ramp). A built-in continuous ramp -- reversed or not -- renders
-    // through the upstream sprite, so drop any stale entry.
+    // Drop stale textures when the layer returns to a plain named ramp.
     if (!symbology || !needsTexture(symbology)) {
       if (existing) {
         existing.texture?.destroy?.();
@@ -287,26 +293,24 @@ function reconcile(control: unknown): void {
     // Reverse lives on rasterState (the control renders it for built-in ramps;
     // the injected texture bakes it here for classified / custom).
     const reversed = readRasterReversed(layer);
-    const key = symbologyKey(symbology, reversed);
+    const state = savedRasterState(layer);
+    const key = symbologyKey(symbology, reversed, state);
     if (!existing) {
-      entries.set(layer.id, { symbology, reversed, key });
+      entries.set(layer.id, { symbology, reversed, state, key });
       changed = true;
     } else if (existing.key !== key) {
       existing.symbology = symbology;
+      existing.state = state;
       existing.reversed = reversed;
       // Texture rebuilt lazily on next render via ensureTexture's key check.
       changed = true;
     }
 
-    // A classified sprite colormap (named, not a built-in ramp, no custom
+    // An injected sprite colormap (named, not a built-in ramp, no custom
     // colors) needs its colors sampled from the renderer's sprite. Warm the
     // cache and, once the colors arrive, drop the stale fallback texture and
     // re-render. symbologyKey can't see the async colors, so invalidate here.
-    if (
-      symbology.classified &&
-      !hasCustomColors(symbology) &&
-      colormapColors(symbology.ramp) === null
-    ) {
+    if (!hasCustomColors(symbology) && colormapColors(symbology.ramp) === null) {
       const id = layer.id;
       const ramp = symbology.ramp;
       void warmColormapColors(ramp).then((colors) => {

@@ -17,8 +17,19 @@ import { consoleDeps, runConsoleCode } from "../pyodide/pyodide-console";
 import { cleanStatement, maskSqlLiterals, runSqlQuery } from "../sql-workspace";
 import { createXyzTileUrlTemplate } from "../xyz-url";
 import { findNamedTileBasemap, NAMED_TILE_BASEMAPS } from "./basemaps";
+import {
+  CATALOG_MAX_KEYWORD_CANDIDATES,
+  mergeCatalogMatches,
+  selectCatalogTools,
+  type CatalogMatch,
+  type CatalogTool,
+} from "./catalog-select";
 import { describeLayers, summarizeLayers } from "./layer-summary";
 import { buildSymbologyStyle } from "./symbology";
+import { readRuntimeEnv } from "./provider";
+import { resolveSystemOneEndpoint } from "./system-one";
+import { typesafeFetch } from "./typesafe-fetch";
+import { searchWhiteboxTools } from "../whitebox-tool-search";
 import { webSearch } from "./web-search";
 
 /** Dependencies the assistant tools need beyond the global store. */
@@ -103,6 +114,46 @@ const MAX_MODEL_ALGORITHM_MATCHES = 25;
 
 /** Full detail for at most this many `list_whitebox_tools` search hits. */
 const MAX_WHITEBOX_MATCHES = 25;
+
+/**
+ * Rank the catalog against a search, semantically first and literally after.
+ *
+ * The two searches answer different questions. The substring filter is exact
+ * and free and is the whole answer when the model already knows the catalog's
+ * word for something; the Jev lookup understands a description of the operation
+ * and is the only thing that answers at all when it does not. Merging them —
+ * ranked semantic hits, then everything the filter found — is strictly better
+ * than either: over 20 raster requests phrased in the user's own words the
+ * filter alone found the right tool 0 times and the merge found it 19 times,
+ * 19 of them first, while for single-keyword searches the merge lifted the
+ * right tool into first place 15 times out of 20 against the filter's 8.
+ *
+ * The lookup needs a credential the deployment may not have, so its absence is
+ * the ordinary case: `selectCatalogTools` returns null and this degrades to
+ * exactly the filter that shipped before it.
+ */
+async function rankWhiteboxSearch(
+  query: string,
+  tools: readonly CatalogTool[],
+  keywordMatches: readonly CatalogTool[],
+): Promise<CatalogMatch[] | null> {
+  const endpoint = resolveSystemOneEndpoint(readRuntimeEnv());
+  if (!endpoint) return null;
+  try {
+    return await selectCatalogTools({
+      query,
+      tools,
+      keywordMatches: keywordMatches.slice(0, CATALOG_MAX_KEYWORD_CANDIDATES),
+      endpoint,
+      fetchImpl: await typesafeFetch(),
+    });
+  } catch (error) {
+    // `selectCatalogTools` resolves rather than throws for every failure it
+    // knows about; this covers the transport import, which does not.
+    console.warn("[GeoLibre] Assistant catalog selection was unavailable:", error);
+    return null;
+  }
+}
 
 /** Statement keywords that write data or have side effects. */
 const SQL_WRITE_KEYWORDS =
@@ -268,12 +319,8 @@ export function createAssistantTools(deps: AssistantToolDeps): Tool[] {
       : Promise.resolve(true);
 
   /** The current map viewport as [west, south, east, north], or null. */
-  const viewBbox = (): [number, number, number, number] | null => {
-    const map = deps.getMapController()?.getMap();
-    if (!map) return null;
-    const b = map.getBounds();
-    return [b.getWest(), b.getSouth(), b.getEast(), b.getNorth()];
-  };
+  const viewBbox = (): [number, number, number, number] | null =>
+    deps.getMapController()?.getViewBounds() ?? null;
 
   /** Reduce a STAC bbox (2D or 3D) to a 2D [w, s, e, n]. */
   const bbox2d = (bbox: number[]): [number, number, number, number] | null =>
@@ -453,13 +500,19 @@ export function createAssistantTools(deps: AssistantToolDeps): Tool[] {
 
   const addTileLayer = tool({
     name: "add_tile_layer",
-    description: `Add an XYZ raster tile basemap/layer to the map. Use a known name (${NAMED_TILE_BASEMAPS.map((basemap) => basemap.id).join(", ")}) or a custom XYZ url template containing {z}/{x}/{y}. The layer is placed underneath existing layers so it acts as a basemap.`,
+    description: `Add an XYZ raster tile basemap/layer to the map. Use a known name (${NAMED_TILE_BASEMAPS.map(
+      (basemap) => basemap.id,
+    ).join(
+      ", ",
+    )}) or a custom XYZ url template containing {z}/{x}/{y}. The layer is placed underneath existing layers so it acts as a basemap.`,
     inputSchema: z.object({
       basemap: z
         .string()
         .optional()
         .describe(
-          `Known basemap name, one of: ${NAMED_TILE_BASEMAPS.map((basemap) => basemap.id).join(", ")}.`,
+          `Known basemap name, one of: ${NAMED_TILE_BASEMAPS.map((basemap) => basemap.id).join(
+            ", ",
+          )}.`,
         ),
       url: z
         .string()
@@ -480,7 +533,9 @@ export function createAssistantTools(deps: AssistantToolDeps): Tool[] {
           attribution = attribution || found.attribution;
         } else if (!url) {
           throw new Error(
-            `Unknown basemap "${input.basemap}". Known: ${NAMED_TILE_BASEMAPS.map((basemap) => basemap.id).join(", ")} — or pass a url.`,
+            `Unknown basemap "${input.basemap}". Known: ${NAMED_TILE_BASEMAPS.map(
+              (basemap) => basemap.id,
+            ).join(", ")} — or pass a url.`,
           );
         }
       }
@@ -545,7 +600,9 @@ export function createAssistantTools(deps: AssistantToolDeps): Tool[] {
 
   const setBasemap = tool({
     name: "set_basemap",
-    description: `Switch the basemap. Accepts a known name (${OPENFREEMAP_BASEMAPS.map((basemap) => basemap.id).join(", ")}) or a full style URL.`,
+    description: `Switch the basemap. Accepts a known name (${OPENFREEMAP_BASEMAPS.map(
+      (basemap) => basemap.id,
+    ).join(", ")}) or a full style URL.`,
     inputSchema: z.object({
       basemap: z.string().describe("A basemap name/id or a style URL."),
     }),
@@ -625,7 +682,10 @@ export function createAssistantTools(deps: AssistantToolDeps): Tool[] {
     }),
     callback: async (input) => {
       if (!(await approveCodeExecution("run_maplibre_js", input.code))) {
-        return json({ ok: false, error: "The user declined to run this code." });
+        return json({
+          ok: false,
+          error: "The user declined to run this code.",
+        });
       }
       const map = deps.getMapController()?.getMap();
       if (!map) throw new Error("The map is not ready yet.");
@@ -728,26 +788,29 @@ export function createAssistantTools(deps: AssistantToolDeps): Tool[] {
   const listWhiteboxTools = tool({
     name: "list_whitebox_tools",
     description:
-      "List Whitebox raster/terrain tools that can run in the browser (hydrology such as fill_depressions, d8_pointer, flow accumulation and extract_streams; terrain such as slope, aspect, hillshade; LiDAR; image processing; raster↔vector conversion) with their exact parameter names, kinds and defaults. The catalog runs to ~1000 tools, so pass `search` to filter by name, id or category ('slope', 'stream', 'hydro'); without it you get the category names to search within. Call this before run_whitebox_tool.",
+      "List Whitebox raster/terrain tools that can run in the browser (hydrology such as fill_depressions, d8_pointer, flow accumulation and extract_streams; terrain such as slope, aspect, hillshade; LiDAR; image processing; raster↔vector conversion) with their exact parameter names, kinds and defaults. The catalog runs to ~1000 tools, so always pass `search`; without it you get the category names to search within. `search` is matched both literally and by meaning, so describe the operation in a phrase ('remove sinks from a DEM so water drains off the edge') rather than guessing one keyword — a description finds tools whose names share no words with it. Results are ranked best-first and each carries a `match` of 'semantic' or 'keyword'. Call this before run_whitebox_tool.",
     inputSchema: z.object({
       search: z
         .string()
         .optional()
-        .describe("Filter by tool name, id or category, e.g. 'slope' or 'hydrology'."),
+        .describe(
+          "What you are looking for: a description of the operation ('separate bare earth returns from vegetation in a point cloud') or a keyword ('slope').",
+        ),
     }),
     callback: async (input) => {
       const tools = await (await getScripting()).listWhiteboxTools();
-      const query = input.search?.trim().toLowerCase();
+      const query = input.search?.trim();
       if (query) {
-        const matches = tools.filter((item) =>
-          `${item.name} ${item.id} ${item.category}`.toLowerCase().includes(query),
-        );
-        return json({
-          search: input.search,
-          matched: matches.length,
-          truncated: matches.length > MAX_WHITEBOX_MATCHES,
-          tools: matches.slice(0, MAX_WHITEBOX_MATCHES),
-        });
+        // Shared with the Whitebox toolbox dialog's filter box: a name match
+        // always outranks a tool that merely mentions the query in its summary.
+        const keywordMatches = searchWhiteboxTools(tools, query, (item) => ({
+          name: `${item.name} ${item.id} ${item.category}`,
+          identifiers: [item.id, item.name],
+          summary: item.description,
+        }));
+        const selected = await rankWhiteboxSearch(query, tools, keywordMatches);
+        const merged = mergeCatalogMatches(selected, keywordMatches, tools, MAX_WHITEBOX_MATCHES);
+        return json({ search: query, selected: selected !== null, ...merged });
       }
       // ~1000 tools with full parameter lists is far too much to serialize, so
       // an unfiltered call returns the categories to search within instead.
@@ -760,7 +823,7 @@ export function createAssistantTools(deps: AssistantToolDeps): Tool[] {
         categories: [...categories]
           .sort((a, b) => a[0].localeCompare(b[0]))
           .map(([category, count]) => ({ category, tools: count })),
-        hint: "Call again with `search` (a category, a tool name, or a keyword like 'stream') to get exact ids and parameters.",
+        hint: "Call again with `search` to get exact ids and parameters. A phrase describing the operation ('extract the stream network from a DEM') searches the catalog by meaning; a category or tool name still matches literally.",
       });
     },
   });

@@ -451,7 +451,6 @@ def create_app(
                 "http://127.0.0.1:5173",
             ):
                 oauth_origins.add(origin)
-
     # Registered last so it is the outermost layer: Starlette wraps in reverse
     # order of registration, and with limit_body outermost its 413 returned
     # without CORS headers, leaving a browser unable to read the documented

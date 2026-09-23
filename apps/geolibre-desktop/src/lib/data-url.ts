@@ -1,15 +1,25 @@
 import type { FeatureCollection } from "geojson";
 import { AsyncUnzipInflate, strFromU8, Unzip, UnzipPassThrough, type UnzipFile } from "fflate";
 
+/**
+ * A `dataType` hint naming the format of a `data` URL that its path cannot
+ * reveal, such as an extensionless API endpoint.
+ */
+export type DataTypeHint = "lidar";
+
+const DATA_TYPE_HINTS = new Set<string>(["lidar"]);
+
 export interface DataUrlParameter {
   dataUrl: string;
   styleUrl: string | null;
+  dataType: DataTypeHint | null;
 }
 const SERVICE_KINDS = new Set([
   "xyz",
   "wms",
   "wmts",
   "wfs",
+  "wcs",
   "ogc-features",
   "ogc-vector-tiles",
   "arcgis",
@@ -62,6 +72,7 @@ export type RemoteData =
   | { kind: "cog"; name: string; url: string }
   | { kind: "pmtiles"; name: string; url: string }
   | { kind: "vector"; name: string; url: string; format: "geoparquet" }
+  | { kind: "lidar"; name: string; url: string }
   | { kind: "geojson"; layers: RemoteGeoJsonLayer[] };
 
 const MAX_ZIP_GEOJSON_BYTES = 250 * 1024 * 1024;
@@ -95,18 +106,30 @@ function httpUrl(value: string | null): string | null {
 export function dataUrlParameters(search: string): DataUrlParameter[] | null {
   const params = new URLSearchParams(search);
   const styles = params.getAll("style");
+  // Paired with `data` by position, like `style`; an empty or unknown value
+  // leaves that entry to be classified from its URL.
+  const dataTypes = params.getAll("dataType");
   const entries = params
     .getAll("data")
     .map((value, index) => {
       const dataUrl = httpUrl(value);
-      return dataUrl ? { dataUrl, styleUrl: httpUrl(styles[index] ?? null) } : null;
+      if (!dataUrl) return null;
+      const hint = dataTypes[index]?.trim().toLowerCase() ?? "";
+      return {
+        dataUrl,
+        styleUrl: httpUrl(styles[index] ?? null),
+        dataType: DATA_TYPE_HINTS.has(hint) ? (hint as DataTypeHint) : null,
+      };
     })
     .filter((entry): entry is DataUrlParameter => entry !== null);
   return entries.length ? entries : null;
 }
 
 export function remoteName(url: string): string {
-  const basename = new URL(url).pathname.split("/").pop() || "data";
+  const segments = new URL(url).pathname.split("/");
+  // An EPT dataset's entry file is always `ept.json`; its folder names it.
+  const basename =
+    (segments.at(-1)?.toLowerCase() === "ept.json" ? segments.at(-2) : segments.at(-1)) || "data";
   // A literal `%` in the path (`.../100%.tif`) makes decoding throw, which would
   // surface as a raw "URI malformed" instead of this file's own errors.
   let name: string;
@@ -116,7 +139,10 @@ export function remoteName(url: string): string {
     name = basename;
   }
   return (
-    name.replace(/\.(?:geojson|json|tiff?|cog|zip|pmtiles|geoparquet|parquet)$/i, "") || "data"
+    name
+      .replace(/\.copc\.laz$/i, "")
+      .replace(/\.(?:geojson|json|tiff?|cog|zip|pmtiles|geoparquet|parquet|las|laz)$/i, "") ||
+    "data"
   );
 }
 
@@ -284,11 +310,79 @@ function unzipGeoJsonEntries(bytes: Uint8Array): Promise<Record<string, Uint8Arr
   });
 }
 
-/** Classify or fetch a supported data URL into startup-loadable layers. */
+/**
+ * Whether a URL names a point cloud the LiDAR control streams itself: a LAS/LAZ
+ * (including COPC) file, or an Entwine Point Tile dataset's `ept.json`.
+ */
+function isLidarUrl(url: string): boolean {
+  const pathname = new URL(url).pathname.toLowerCase();
+  return /\.(?:las|laz)$/.test(pathname) || pathname.endsWith("/ept.json");
+}
+
+/**
+ * Whether maplibre-gl-lidar streams this URL by viewport rather than
+ * downloading it whole. Mirrors the routing at the top of its (unexported)
+ * `loadPointCloud`, string tests included; see docs/maintenance.md.
+ */
+export function isStreamedLidarUrl(url: string): boolean {
+  return url.endsWith("/ept.json") || url.includes("/ept.json?") || /\.copc\./i.test(url);
+}
+
+/**
+ * A point cloud the LiDAR control downloads whole bypasses `readCappedBytes`,
+ * so ask for its size with a one-byte range request first and refuse one past
+ * the same ceiling as any other `?data=` download. The probe only ever refuses
+ * a load it knows would fail or is too large: `Range` forces a CORS preflight
+ * that a plain download endpoint may reject, and maplibre-gl-lidar falls back
+ * to a plain GET in that case, so a probe that cannot get through (or a server
+ * that reports no size) lets the load go ahead, as the Add LiDAR Layer panel
+ * would.
+ */
+async function checkLidarDownloadSize(
+  url: string,
+  signal: AbortSignal | undefined,
+  fetchImpl: typeof fetch,
+): Promise<void> {
+  let response: Response;
+  try {
+    response = await fetchImpl(url, { signal, headers: { Range: "bytes=0-0" } });
+  } catch (error) {
+    if (error instanceof DOMException && error.name === "AbortError") throw error;
+    return;
+  }
+  // A server that ignores the range answers with the whole file; stop it here.
+  await response.body?.cancel().catch(() => {});
+  // 416: the server rejects the range itself, which says nothing of the file.
+  if (response.status === 416) return;
+  if (!response.ok) throw new Error(`Could not fetch ${url}: HTTP ${response.status}.`);
+  const total = response.headers.get("content-range")?.match(/\/(\d+)\s*$/)?.[1];
+  const size = total
+    ? Number(total)
+    : response.status === 200
+      ? Number(response.headers.get("content-length"))
+      : NaN;
+  if (Number.isFinite(size) && size > MAX_DOWNLOAD_BYTES) {
+    throw new Error(
+      `${url} is too large to open from a URL (${Math.round(size / (1024 * 1024))} MB). ` +
+        "Convert it to COPC so it can be streamed instead.",
+    );
+  }
+}
+
+/**
+ * Classify or fetch a supported data URL into startup-loadable layers. A
+ * `dataType` hint overrides classification by the URL's path.
+ */
 export async function fetchRemoteData(
   url: string,
-  options: { signal?: AbortSignal; fetchImpl?: typeof fetch } = {},
+  options: { signal?: AbortSignal; fetchImpl?: typeof fetch; dataType?: DataTypeHint | null } = {},
 ): Promise<RemoteData> {
+  if (options.dataType === "lidar" || isLidarUrl(url)) {
+    if (!isStreamedLidarUrl(url)) {
+      await checkLidarDownloadSize(url, options.signal, options.fetchImpl ?? fetch);
+    }
+    return { kind: "lidar", name: remoteName(url), url };
+  }
   const ext = extension(url);
   if (["tif", "tiff", "cog"].includes(ext)) return { kind: "cog", name: remoteName(url), url };
   if (ext === "pmtiles") return { kind: "pmtiles", name: remoteName(url), url };

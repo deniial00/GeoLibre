@@ -233,6 +233,71 @@ def test_wms_layer_version_defaults_to_1_1_1():
     )
 
 
+def test_wms_layer_crs_for_a_server_without_web_mercator():
+    # The Agenzia delle Entrate cadastral WMS lists only EPSG:6706, EPSG:4258
+    # and UTM zones. The template names the geographic CRS and keeps the Web
+    # Mercator placeholder, which the desktop tile protocol converts per tile.
+    layer = project.wms_layer("x", "https://e/wms", "a", crs="epsg:6706")
+    tile = layer["source"]["tiles"][0]
+    assert "SRS=EPSG%3A6706" in tile
+    assert "EPSG%3A3857" not in tile
+    assert "BBOX={bbox-epsg-3857}" in tile
+    tile = project.wms_layer("x", "https://e/wms", "a", version="1.3.0", crs="CRS:84")["source"][
+        "tiles"
+    ][0]
+    assert "CRS=CRS%3A84" in tile
+    # None keeps Web Mercator.
+    assert (
+        "SRS=EPSG%3A3857"
+        in project.wms_layer("x", "https://e/wms", "a", crs=None)["source"]["tiles"][0]
+    )
+
+
+def test_wms_layer_replaces_getmap_keys_already_in_the_endpoint():
+    # A capabilities OnlineResource often carries the whole GetMap query.
+    tile = project.wms_layer(
+        "x",
+        "https://e/wms?map=/srv/a.map&service=WMS&version=1.1.1&request=GetMap&bbox=1,2,3,4",
+        "a",
+        version="1.3.0",
+        crs="EPSG:4326",
+    )["source"]["tiles"][0]
+    lowered = tile.lower()
+    for key in ("service=", "request=", "version=", "bbox="):
+        assert lowered.count(key) == 1, key
+    assert "VERSION=1.3.0" in tile and "CRS=EPSG%3A4326" in tile
+    assert tile.startswith("https://e/wms?map=/srv/a.map&SERVICE=WMS")
+
+
+def test_wms_layer_replaces_a_percent_encoded_getmap_key():
+    tile = project.wms_layer("x", "https://e/wms?%73RS=EPSG:3857&map=a", "a", crs="EPSG:6706")[
+        "source"
+    ]["tiles"][0]
+    assert "%73RS" not in tile and tile.count("SRS=") == 1
+
+
+def test_wms_layer_replaces_a_crs_already_in_the_endpoint():
+    for key in ("SRS", "crs"):
+        tile = project.wms_layer(
+            "x", f"https://e/wms?map=/srv/a.map&{key}=EPSG:3857", "a", crs="EPSG:6706"
+        )["source"]["tiles"][0]
+        assert tile.startswith("https://e/wms?map=/srv/a.map&SERVICE=WMS")
+        assert tile.count("SRS=") == 1 and "SRS=EPSG%3A6706" in tile
+        assert "EPSG:3857" not in tile and "crs=" not in tile
+
+
+def test_wms_layer_rejects_crs84_outside_wms_1_3_0():
+    with pytest.raises(ValueError, match="needs version='1.3.0'"):
+        project.wms_layer("x", "https://e/wms", "a", crs="CRS:84")
+    assert project.wms_layer("x", "https://e/wms", "a", version="1.3.0", crs="crs:84")
+
+
+def test_wms_layer_rejects_a_crs_the_desktop_cannot_redraw():
+    # A projected CRS would need a real reprojection, not a strip redraw.
+    with pytest.raises(ValueError, match="crs must be one of"):
+        project.wms_layer("x", "https://e/wms", "a", crs="EPSG:25833")
+
+
 def test_wms_layer_transparent_false():
     layer = project.wms_layer("x", "https://e/wms", "a", transparent=False, tile_size=512)
     tile = layer["source"]["tiles"][0]
@@ -499,6 +564,67 @@ def test_normalize_popup_accepts_camel_and_snake_config_keys():
     snake = project.normalize_popup({"title_field": "name", "show_feature_id": False})
     camel = project.normalize_popup({"titleField": "name", "showFeatureId": False})
     assert snake == camel == {"titleField": "name", "showFeatureId": False}
+
+
+def test_popup_config_records_the_size_settings():
+    config = project.popup_config("name", max_width=480, image_height=320)
+    assert config["maxWidth"] == 480
+    assert config["imageHeight"] == 320
+
+
+def test_normalize_popup_accepts_the_sizes_inside_a_mapping():
+    snake = project.normalize_popup({"max_width": 480, "image_height": 320})
+    camel = project.normalize_popup({"maxWidth": 480, "imageHeight": 320})
+    assert snake == camel == {"maxWidth": 480, "imageHeight": 320}
+
+
+def test_normalize_popup_size_shorthands_configure_a_popup_on_their_own():
+    # `popup_max_width=480` with no `popup=` still has to widen the default
+    # popup -- that is the whole point of the shorthand.
+    assert project.normalize_popup(max_width=480) == {"maxWidth": 480}
+    assert project.normalize_popup(image_height=320) == {"imageHeight": 320}
+
+
+def test_normalize_popup_size_shorthand_wins_over_the_mapping_key():
+    config = project.normalize_popup({"max_width": 300}, max_width=480)
+    assert config["maxWidth"] == 480
+
+
+def test_normalize_popup_size_shorthand_skips_the_mapping_value_entirely():
+    # The mapping value is never validated when the shorthand overrides it, the
+    # way an inline `tooltip` key is dropped when `tooltip=` was passed -- an
+    # out-of-range value about to be overwritten must not raise.
+    config = project.normalize_popup(
+        {"max_width": 5000, "image_height": 1}, max_width=480, image_height=320
+    )
+    assert config == {"maxWidth": 480, "imageHeight": 320}
+
+
+@pytest.mark.parametrize(
+    ("kwargs", "message"),
+    [
+        ({"max_width": 100}, "max_width must be between 288 and 1200 pixels"),
+        ({"max_width": 5000}, "max_width must be between 288 and 1200 pixels"),
+        ({"image_height": 10}, "image_height must be between 40 and 1200 pixels"),
+        ({"max_width": 480.5}, "max_width must be a whole number of pixels"),
+        ({"image_height": "big"}, "image_height must be a whole number of pixels"),
+        # int(float("inf")) raises OverflowError, which must still surface as
+        # the ValueError this API documents.
+        ({"max_width": float("inf")}, "max_width must be a whole number of pixels"),
+        ({"image_height": float("-inf")}, "image_height must be a whole number of pixels"),
+        ({"image_height": float("nan")}, "image_height must be a whole number of pixels"),
+    ],
+)
+def test_popup_config_rejects_a_size_the_app_would_not_render(kwargs, message):
+    # The app clamps instead of failing, so an accepted out-of-range size would
+    # read one way in the notebook and draw another on the map.
+    with pytest.raises(ValueError, match=message):
+        project.popup_config(**kwargs)
+
+
+def test_popup_field_rejects_an_infinite_decimals():
+    with pytest.raises(ValueError, match="decimals must be a whole number"):
+        project.popup_field("pop", kind="number", decimals=float("inf"))
 
 
 def test_normalize_popup_rejects_an_unknown_config_key():

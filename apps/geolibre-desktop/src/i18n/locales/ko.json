@@ -22,6 +22,7 @@
     "noMatches": "일치하는 항목이 없습니다.",
     "addFailed": "이 데이터 소스를 추가할 수 없습니다.",
     "builtinBadge": "내장",
+    "configBadge": "설정",
     "newConnection": "새 {{kind}} 연결",
     "loadingTables": "테이블을 불러오는 중…",
     "files": "파일",
@@ -357,6 +358,10 @@
       "kml": {
         "label": "KML / KMZ",
         "description": "원본 스타일, 오버레이 및 네트워크 링크를 유지하여 KML 또는 KMZ를 지구본에 불러옵니다."
+      },
+      "wcs": {
+        "description": "WCS 1.0.0 서비스에서 수치 GeoTIFF 부분 영역을 불러옵니다.",
+        "label": "WCS 레이어"
       }
     },
     "shared": {
@@ -396,6 +401,7 @@
       "loadAria": "저장된 서비스 불러오기",
       "loadPlaceholder": "저장된 서비스 불러오기…",
       "builtin": "{{name}}(내장)",
+      "config": "{{name}} (설정)",
       "deleteAria": "저장된 서비스 삭제",
       "empty": "저장된 서비스가 아직 없습니다 — 양식을 작성한 후 \"현재 항목 저장\"을 선택하세요.",
       "name": "이름",
@@ -419,7 +425,11 @@
       "kindImagery": "영상",
       "altitudeOffset": "고도 오프셋 (m)",
       "quickPicks": "빠른 선택",
+      "quickPicksPlaceholder": "에셋 선택…",
+      "quickPicksGlobal": "모든 ion 계정에 포함",
+      "quickPicksDepot": "Asset Depot 샘플",
       "hint": "에셋 ID는 ion.cesium.com의 My Assets에서 확인할 수 있습니다. 에셋은 설정에 구성된 토큰과 공유되어 있어야 합니다.",
+      "depotHint": "Asset Depot 샘플은 ion.cesium.com → Asset Depot에서 계정에 추가한 후에만 스트리밍됩니다.",
       "errorAssetId": "Cesium Ion 에셋 ID(양의 정수)를 입력하세요.",
       "errorAltitude": "고도 오프셋을 미터 단위 숫자로 입력하세요.",
       "tokenMissing": "Cesium Ion 토큰이 구성되어 있지 않습니다. 설정 → 환경 변수 (VITE_CESIUM_TOKEN)에서 추가하지 않으면 에셋을 불러올 수 없습니다."
@@ -502,6 +512,7 @@
       "retrievedTypes": "조회된 피처 유형",
       "selectType_other": "{{count}}개 피처 유형 중에서 선택",
       "noTypesFound": "이 서비스에서 피처 유형을 찾을 수 없습니다.",
+      "errorNoFeatures": "이 피처 유형은 피처를 반환하지 않았습니다.",
       "retrieveError": "이 서비스에서 피처 유형을 조회할 수 없습니다."
     },
     "wmts": {
@@ -945,7 +956,42 @@
       "modelTooLarge": "이 모델은 프로젝트에 포함할 수 있는 {{limit}} MB 제한을 초과합니다. 서버에 호스팅한 후 URL로 추가하세요.",
       "modelFileError": "이 모델을 읽을 수 없습니다. 유효한 glTF 2.0 또는 GLB 파일을 선택하세요."
     },
-    "nonGeographicCoordinates": "{{names}}의 좌표가 경위도가 아니므로 지도에 아무것도 그려지지 않습니다. CRS가 잘못 지정되어 있습니다 — 데이터를 재투영하거나 .prj를 수정한 뒤 다시 불러오세요."
+    "nonGeographicCoordinates": "{{names}}의 좌표가 경위도가 아니므로 지도에 아무것도 그려지지 않습니다. CRS가 잘못 지정되어 있습니다 — 데이터를 재투영하거나 .prj를 수정한 뒤 다시 불러오세요.",
+    "pmtiles": {
+      "errorUrl": "유효한 HTTP 또는 HTTPS PMTiles URL을 입력하세요.",
+      "errorMlt": "ArcGIS에는 MLT가 아닌 MVT 벡터 타일이 필요합니다."
+    },
+    "lidar": {
+      "errorUrl": "유효한 HTTP 또는 HTTPS LiDAR URL을 입력하세요."
+    },
+    "zarr": {
+      "errorUrl": "유효한 HTTP 또는 HTTPS Zarr URL을 입력하세요.",
+      "errorColorLimits": "색상 최댓값은 최솟값보다 커야 합니다."
+    },
+    "raster": {
+      "errorSource": "GeoTIFF URL을 입력하거나 파일을 선택하세요."
+    },
+    "wcs": {
+      "coverage": "커버리지",
+      "retrieve": "커버리지 조회",
+      "select": "커버리지 선택",
+      "extent": "커버리지 범위 사용",
+      "width": "너비(픽셀)",
+      "height": "높이(픽셀)",
+      "hint": "선택한 픽셀 크기로 EPSG:4326 GeoTIFF를 다운로드합니다. 값이 재표본화될 수 있습니다. 다운로드한 데이터를 보관하려면 래스터를 저장하세요.",
+      "errors": {
+        "xml": "서비스가 잘못된 XML을 반환했습니다.",
+        "version": "이 데이터 소스에는 WCS 1.0.0이 필요합니다. 서비스가 지원하지 않는 응답을 반환했습니다.",
+        "empty": "일치하는 커버리지가 없습니다.",
+        "format": "커버리지가 GeoTIFF 출력을 제공하지 않습니다.",
+        "crs": "커버리지는 요청과 출력 모두 EPSG:4326을 지원해야 합니다.",
+        "size": "1~4096픽셀 크기를 선택하세요. 다운로드는 128 MB로 제한됩니다.",
+        "metadata": "서비스가 GeoLibre에서 불러올 수 있는 양보다 많은 메타데이터를 반환했습니다. 메타데이터 응답은 32 MB로 제한됩니다.",
+        "response": "서비스가 유효한 GeoTIFF를 반환하지 않았습니다.",
+        "bounds": "유효한 상자를 입력하세요: 서/동은 -180~180, 남/북은 -90~90 범위이며 서 < 동, 남 < 북이어야 합니다.",
+        "url": "WCS 서비스 URL을 입력하세요."
+      }
+    }
   },
   "offline": {
     "title": "오프라인 지역 다운로드",
@@ -1885,7 +1931,7 @@
     "only3d": "3D만",
     "noMapbox": "Mapbox 미지원",
     "noArcgis": "ArcGIS 미지원",
-    "cesiumTokenHint": "지형과 Ion 영상을 사용하려면 설정에서 Cesium Ion 토큰을 추가하세요"
+    "cesiumTokenHint": "지형과 Ion 영상을 사용하려면 <settingsLink>설정 → 환경 변수</settingsLink>에서 Cesium Ion 토큰을 추가하세요"
   },
   "renderer": {
     "basemap": "배경지도",
@@ -1895,6 +1941,7 @@
     "layerCesiumOnly": "3D 지구본에서만 렌더링됨",
     "layerMapboxUnsupported": "Mapbox 엔진에서는 렌더링되지 않음",
     "layerArcgisUnsupported": "ArcGIS 엔진에서는 렌더링되지 않음",
+    "layerArcgisViewUnsupported": "이 ArcGIS 뷰에서는 렌더링되지 않음",
     "resetView": "보기 재설정",
     "scene3D": "3D 지구본",
     "scene2D": "2D 지도",
@@ -2272,6 +2319,55 @@
       }
     }
   },
+  "panel": {
+    "godsEyeView": {
+      "description": "공개 데이터 피드에서 시간 정보가 포함된 실시간 지구 이벤트를 표시합니다.",
+      "globeOnly": "실시간 지구 피드는 Cesium 지구본에 렌더링됩니다. 보려면 3D 지구본으로 전환하세요.",
+      "groups": {
+        "movement": "이동",
+        "cameras": "카메라",
+        "infrastructure": "인프라",
+        "events": "이벤트",
+        "utilities": "유틸리티"
+      },
+      "earthquakes": "지진",
+      "spaceMissions": "우주 임무(30일)",
+      "satellites": "위성",
+      "flights": "실시간 항공편",
+      "militaryFlights": "군용기",
+      "bikeShare": "자전거 공유",
+      "transit": "실시간 대중교통",
+      "streetTraffic": "시뮬레이션 도로 교통",
+      "mappedAlpr": "지도화된 번호판 인식 카메라",
+      "cctv": "공공 CCTV 카메라",
+      "cctvPopup": {
+        "liveSnapshot": "실시간 이미지",
+        "provider": "제공자",
+        "attribution": "저작자 표시",
+        "privacy": "개인정보"
+      },
+      "radio": "라디오 방송국",
+      "datacenters": "데이터 센터",
+      "dams": "댐",
+      "cables": "해저 케이블",
+      "osmInfrastructure": "OSM 인프라",
+      "loading": "업데이트 중…",
+      "updateFailed": "업데이트 실패",
+      "noneInView": "이 레이어의 현재 화면에서 피처를 찾을 수 없습니다.",
+      "never": "없음",
+      "lastUpdated": "마지막 업데이트: {{time}}",
+      "speed": "속도",
+      "speedRealTime": "실시간 (1×)",
+      "speedMultiple": "{{factor}}×",
+      "denseSatellites": "고밀도 위성 카탈로그",
+      "denseLoading": "DENSE ···",
+      "denseFailed": "DENSE !",
+      "denseCount": "DENSE · {{count}}",
+      "dense": "DENSE",
+      "denseError": "Starlink 카탈로그를 불러올 수 없습니다: {{error}}. 다시 시도하려면 선택하세요.",
+      "denseDescription": "전체 Starlink 위성군을 가벼운 점으로 표시합니다(레이블 및 테이블 행 없음)."
+    }
+  },
   "toolbar": {
     "menu": {
       "project": "프로젝트",
@@ -2513,7 +2609,8 @@
       "czml": "CZML 동적 3D 장면",
       "gltfModel": "3D 모델 (glTF)",
       "postgres": "PostgreSQL 레이어",
-      "iceberg": "Apache Iceberg 레이어"
+      "iceberg": "Apache Iceberg 레이어",
+      "wcs": "WCS 레이어"
     },
     "conversion": {
       "vectorToVector": "벡터에서 벡터로",
@@ -2978,6 +3075,8 @@
       "maplibre-gl-esri-wayback": "과거 영상",
       "maplibre-gl-openaerialmap": "OpenAerialMap",
       "maplibre-gl-arcgis-hub": "ArcGIS Hub",
+      "geolibre-osm-downloader": "OSM 다운로더",
+      "geolibre-ign-lidar-hd": "IGN LiDAR HD Downloader",
       "geolibre-stac-catalogs": "STAC 카탈로그",
       "geolibre-planet-open-data": "Planet 오픈 데이터",
       "maplibre-gl-source-coop": "Source Cooperative",
@@ -2989,6 +3088,7 @@
       "maplibre-gl-huggingface": "Hugging Face",
       "carto-light": "Carto Light 베이스맵",
       "geolibre-flight-simulator": "비행 시뮬레이터",
+      "gods-eye-view": "전지적 시점",
       "geolibre-route-animation": "경로 애니메이션",
       "geolibre-sun": "태양 시뮬레이션",
       "maplibre-atmosphere-effects": "대기 효과",
@@ -4525,6 +4625,10 @@
       "errorStartSidecar": "GeoLibre 사이드카를 시작하지 못했습니다.",
       "errorStopSidecar": "GeoLibre 사이드카를 중지하지 못했습니다.",
       "noToolsFound": "도구를 찾을 수 없습니다.",
+      "searchToolsByMeaning": "도구 검색 또는 작업 설명",
+      "searchingByMeaning": "의미 기반으로 카탈로그 검색 중",
+      "bestMatches": "가장 적합한 결과",
+      "otherMatches": "기타 결과",
       "noParameters": "이 도구에는 매개변수가 없습니다.",
       "noOutput": "아직 출력이 없습니다.",
       "enabled": "사용",
@@ -6975,6 +7079,11 @@
       "invalidExpression": "잘못된 표현식",
       "openBuilder": "표현식 빌더 열기",
       "showFeatureId": "피처 ID 행 표시",
+      "maxWidth": "팝업 너비(px)",
+      "maxWidthPlaceholder": "기본값",
+      "imageHeight": "이미지 높이(px)",
+      "imageHeightPlaceholder": "기본값",
+      "sizeHint": "비워 두면 기본값이 적용됩니다. 이미지는 가로세로 비율을 유지하므로 사진이 늘어난 높이를 쓰려면 팝업을 넓혀야 합니다.",
       "fields": "필드",
       "allFields": "선택한 필드가 없으므로 표시 가능한 모든 필드를 데이터 자체의 순서대로 보여 줍니다.",
       "addField": "필드 추가…",
@@ -7342,6 +7451,7 @@
     "viewportStretchNoRange": "뷰포트 값으로 범위를 정할 수 없습니다.",
     "viewportStretchMoved": "읽기가 끝나기 전에 지도가 이동했습니다. 다시 적용하세요.",
     "index": "지수",
+    "opacityClasses": "불투명도 클래스",
     "classifyToggle": "이산 클래스로 분류",
     "method": "방법",
     "methodEqualInterval": "등간격",
@@ -7897,5 +8007,77 @@
     "catalogHuc12pp": "HUC12 유출점",
     "catalogNmwdiSt": "뉴멕시코 수문 관측지점",
     "catalogFlowlines": "NHDPlus 유로"
+  },
+  "plugin": {
+    "3d-tiles": {
+      "arcgisSourceUnsupported": "이 ArcGIS 뷰에서는 3D Tiles의 tileset.json URL을 사용하세요. Google Photorealistic 및 I3S 타일에는 다른 렌더링 엔진이 필요합니다.",
+      "globeGoogleKeyRequired": "지구본에서 Google Photorealistic 3D Tiles를 불러오려면 설정에 Google Maps API 키가 필요합니다."
+    },
+    "geolibre-osm-downloader": {
+      "title": "OSM 다운로더",
+      "hint": "공개된 Overpass API를 사용하여 현재 지도 영역의 OpenStreetMap 피처를 다운로드합니다.",
+      "attribution": "데이터 © OpenStreetMap 기여자, ODbL 라이선스 하에 제공.",
+      "featureType": "피처 유형",
+      "presetBuildings": "건물",
+      "presetRoads": "도로",
+      "presetAmenities": "편의 시설",
+      "presetWaterways": "수계",
+      "presetLanduse": "토지 이용",
+      "presetCustom": "사용자 지정 태그",
+      "presetAll": "모든 태그된 피처",
+      "tagKey": "태그 키",
+      "tagValue": "태그 값",
+      "tagKeyPlaceholder": "예: shop",
+      "tagValuePlaceholder": "선택 사항, 예: bakery",
+      "west": "서쪽",
+      "south": "남쪽",
+      "east": "동쪽",
+      "north": "북쪽",
+      "useMapExtent": "지도 범위 사용",
+      "download": "OSM 데이터 다운로드",
+      "ready": "영역과 피처 유형을 선택하세요.",
+      "exportGeoJson": "GeoJSON 저장",
+      "mapUnavailable": "아직 지도 범위를 사용할 수 없습니다.",
+      "extentApplied": "지도 범위가 적용되었습니다.",
+      "downloading": "OpenStreetMap에서 다운로드 중…",
+      "noFeatures": "이 영역에서 일치하는 피처를 찾을 수 없습니다.",
+      "error": "OSM 데이터를 다운로드할 수 없습니다: {{message}}",
+      "added": "{{count}}개 피처를 지도에 추가했습니다."
+    },
+    "geolibre-ign-lidar-hd": {
+      "title": "IGN LiDAR HD",
+      "hint": "현재 지도 영역에 대한 IGN LiDAR HD 타일 범위를 검색하고, 타일을 포인트 클라우드로 지도에 추가하거나, IGN 서버에서 COPC LAZ 파일을 다운로드하세요.",
+      "attribution": "데이터 © IGN — LiDAR HD, Licence Ouverte 2.0에 따라 게시됨.",
+      "west": "서쪽",
+      "south": "남쪽",
+      "east": "동쪽",
+      "north": "북쪽",
+      "useMapExtent": "지도 범위 사용",
+      "search": "타일 검색",
+      "addToMap": "지도에 추가",
+      "download": "다운로드",
+      "ready": "영역을 선택하고 LiDAR HD 타일을 검색하세요.",
+      "mapUnavailable": "아직 지도 범위를 사용할 수 없습니다.",
+      "extentApplied": "지도 범위가 적용되었습니다.",
+      "searching": "IGN LiDAR HD 타일을 검색하는 중…",
+      "noTiles": "이 영역에서 LiDAR HD 타일을 찾을 수 없습니다.",
+      "noDownload": "게시된 포인트 클라우드 없음",
+      "layerName": "IGN LiDAR HD 타일",
+      "found": "{{count}}개의 타일을 찾았습니다.",
+      "foundTruncated": "{{matched}}개 중 처음 {{count}}개의 타일을 표시하고 있습니다. 나머지를 보려면 검색 영역을 좁히세요.",
+      "addedToMap": "{{name}}을(를) 지도에 추가했습니다.",
+      "alreadyOnMap": "{{name}}은(는) 이미 지도에 있습니다.",
+      "unsupportedRenderer": "포인트 클라우드에는 MapLibre 또는 Mapbox 렌더러가 필요합니다.",
+      "addError": "{{name}}을(를) 지도에 추가할 수 없습니다: {{message}}",
+      "error": "IGN LiDAR HD 타일을 검색할 수 없습니다: {{message}}",
+      "selectAll": "모두 선택",
+      "selectTile": "{{name}} 선택",
+      "addSelectedToMap": "선택한 항목을 지도에 추가",
+      "addSelectedToMapCount": "선택한 {{count}}개를 지도에 추가",
+      "addingSelected": "{{count}}개의 타일을 지도에 추가하는 중…",
+      "addedSelectedCount": "{{count}}개의 타일을 지도에 추가했습니다.",
+      "alreadyOnMapCountPlural": "{{count}}개의 타일이 이미 지도에 있었습니다.",
+      "addSelectedFailedCount": "{{count}}개의 타일을 추가할 수 없습니다."
+    }
   }
 }

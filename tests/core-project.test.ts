@@ -21,6 +21,18 @@ import {
 import { geojsonLayer } from "./helpers/layer-fixtures";
 
 describe("project parsing", () => {
+  it("discards session raster URLs on save and on loading older projects", () => {
+    const layer = geojsonLayer({
+      type: "cog",
+      metadata: { localBytesUrl: "blob:expired", localFilePath: "/data/image.tif" },
+    });
+    const project = { ...createEmptyProject(), layers: [layer] };
+    assert.equal(JSON.parse(serializeProject(project)).layers[0].metadata.localBytesUrl, undefined);
+    const reopened = parseProject(JSON.stringify(project)).layers[0];
+    assert.equal(reopened.metadata.localBytesUrl, undefined);
+    assert.equal(reopened.metadata.localFilePath, "/data/image.tif");
+    assert.equal(layer.metadata.localBytesUrl, "blob:expired");
+  });
   it("restores portable WMS URLs when saving a desktop-routed layer", () => {
     const tile = "https://example.com/wms?BBOX={bbox-epsg-3857}";
     const routed = `geolibre-wms://tile?url=${encodeURIComponent(tile).replaceAll(
@@ -371,6 +383,38 @@ describe("project parsing", () => {
 
     const reparsed = parseProject(serializeProject(project)).layers[0] as Record<string, unknown>;
     assert.ok(!("embedFilter" in reparsed));
+  });
+
+  it("strips feed-rebuilt attribute rows marked as transient", () => {
+    const layer = {
+      ...geojsonLayer({ id: "moving-feed" }),
+      type: "czml" as const,
+      source: {
+        type: "czml" as const,
+        czmlData: [{ id: "document", version: "1.0" }, { id: "satellite-1" }],
+        attribution: "Example provider",
+      },
+      metadata: {
+        transientGeojson: true,
+        transientCzml: true,
+        feed: "satellites",
+      },
+    } as unknown as Parameters<typeof projectFromStore>[0]["layers"][number];
+    const project = projectFromStore({
+      projectName: "Moving feed",
+      mapView: { center: [0, 0], zoom: 2, bearing: 0, pitch: 0 },
+      basemapStyleUrl: DEFAULT_BASEMAP,
+      basemapVisible: true,
+      basemapOpacity: 1,
+      layers: [layer],
+      preferences: createEmptyProject().preferences,
+      metadata: {},
+    });
+
+    assert.equal(project.layers[0].geojson, undefined);
+    assert.equal(project.layers[0].source.czmlData, undefined);
+    assert.equal(project.layers[0].source.attribution, "Example provider");
+    assert.equal(project.layers[0].metadata.feed, "satellites");
   });
 
   it("keeps quick filters, which are project state rather than session state", () => {

@@ -10,11 +10,14 @@ import {
 } from "@geolibre/core";
 import type { CesiumWidget, ImageryLayer } from "@cesium/engine";
 import { memo, useEffect, useMemo, useRef, useState } from "react";
-import { applyBasemapAppearance, applyBasemapImagery, getStadiaApiKey } from "./cesium-basemap";
+import { applyBasemapAppearance, applyBasemapImagery } from "./cesium-basemap";
 import { isSameView } from "./cesium-camera";
 import { installCesiumInteractions } from "./cesium-interactions";
 import { CesiumEngine } from "./cesium-engine";
+import { consumePendingIdentifyRestore } from "./map-identify-lifecycle";
+import type { MapDiagnosticEvent } from "./map-diagnostic";
 import type { BuiltInMapControl, MapEngine } from "./map-engine";
+import { applySelectionHighlight, selectionFitKey } from "./map-selection";
 import { CesiumControlHost, setPrimaryCesiumControlHost } from "./cesium-control-host";
 import type {
   CesiumWidgetControlHandle,
@@ -112,6 +115,11 @@ export interface CesiumCanvasProps {
   controlLabels?: CesiumWidgetControlLabels;
   /** Translated accessible label for the Identify popup close button. */
   popupCloseLabel?: string;
+  /**
+   * Forwards a layer that failed to load to the app's Diagnostics panel, the
+   * way `MapCanvas` and `MapboxCanvas` forward their renderer failures.
+   */
+  onMapDiagnosticEvent?: (event: MapDiagnosticEvent) => void;
 }
 
 /**
@@ -158,11 +166,13 @@ export const CesiumCanvas = memo(function CesiumCanvas({
   onEngineReady,
   controlLabels,
   popupCloseLabel,
+  onMapDiagnosticEvent,
 }: CesiumCanvasProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const viewerRef = useRef<CesiumWidget | null>(null);
   const cesiumRef = useRef<typeof import("@cesium/engine") | null>(null);
   const engineInstanceRef = useRef<CesiumEngine | null>(null);
+  const previousSelectedFeatureKey = useRef<string | null>(null);
   const interactionCleanup = useRef<(() => void) | null>(null);
   const controlHostRef = useRef<CesiumControlHost | null>(null);
   // The Cesium toolbar widgets mounted on the primary globe, kept so the label
@@ -191,6 +201,8 @@ export const CesiumCanvas = memo(function CesiumCanvas({
   popupCloseLabelRef.current = popupCloseLabel;
   const controlLabelsRef = useRef(controlLabels);
   controlLabelsRef.current = controlLabels;
+  const onMapDiagnosticEventRef = useRef(onMapDiagnosticEvent);
+  onMapDiagnosticEventRef.current = onMapDiagnosticEvent;
 
   // No pane id means this globe *is* the primary map area, not a pane beside it.
   const isPrimary = viewId === undefined;
@@ -211,6 +223,10 @@ export const CesiumCanvas = memo(function CesiumCanvas({
   // Layer sync inputs, mirrored from SecondaryMapCanvas: the shared layers with
   // this pane's per-layer visibility overrides, then group effects folded in.
   const layers = useAppStore((s) => s.layers);
+  const selectedLayerId = useAppStore((s) => s.selectedLayerId);
+  const selectedFeatureId = useAppStore((s) => s.selectedFeatureId);
+  const selectedFeatureIds = useAppStore((s) => s.selectedFeatureIds);
+  const zoomToSelectedFeature = useAppStore((s) => s.ui.zoomToSelectedFeature);
   const layerGroups = useAppStore((s) => s.layerGroups);
   const layerVisibility = useAppStore((s) =>
     viewId === undefined
@@ -239,6 +255,11 @@ export const CesiumCanvas = memo(function CesiumCanvas({
   const basemapStyleUrl = useAppStore((s) => s.basemapStyleUrl);
   const cesiumBasemap = useAppStore((s) => s.preferences.map.cesiumBasemap);
   const terrainEnabled = useAppStore((s) => s.preferences.map.terrainEnabled);
+  // Select only the fields the globe applies: setPreferences replaces the whole
+  // preferences tree, so the `map` object changes on unrelated saves too.
+  const mapProjection = useAppStore((s) => s.preferences.map.projection);
+  const mapMinZoom = useAppStore((s) => s.preferences.map.minZoom);
+  const mapMaxZoom = useAppStore((s) => s.preferences.map.maxZoom);
   const basemapImagery = useMemo(
     () =>
       basemapToCesiumImagery(
@@ -354,6 +375,13 @@ export const CesiumCanvas = memo(function CesiumCanvas({
           // choice and fail without an Ion token (Ion's default imagery needs
           // one), which is what used to keep the globe off the keyless path.
           baseLayer: false,
+          // Draw at the display's real pixels, as MapLibre's canvas does.
+          // Cesium defaults this to `true`, which pins the drawing buffer to
+          // CSS pixels and lets the browser upscale it — on a HiDPI screen the
+          // whole globe softens, and glyph-atlas text (satellite names, the
+          // scale bar) is where it shows first. The cost is fragment work
+          // proportional to the square of the device pixel ratio.
+          useBrowserRecommendedResolution: false,
           contextOptions: { webgl: { preserveDrawingBuffer: true } },
           // Match the project map in flat modes, including its vertical extent.
           mapProjection: new Cesium.WebMercatorProjection(),
@@ -386,6 +414,7 @@ export const CesiumCanvas = memo(function CesiumCanvas({
         const engine = new CesiumEngine(Cesium, viewer, {
           viewId: viewIdRef.current,
           worldTerrainAvailable: Boolean(token),
+          onDiagnostic: (event) => onMapDiagnosticEventRef.current?.(event),
         });
         engineInstanceRef.current = engine;
 
@@ -468,6 +497,7 @@ export const CesiumCanvas = memo(function CesiumCanvas({
         // first frame. Basemap first so it lands at the bottom of an empty
         // imagery stack rather than having to be lowered past the data layers.
         applyBasemap();
+        engine.applyMapPreferences(state.preferences.map);
         engine.syncLayers(paneLayersRef.current);
         if (isPrimaryRef.current)
           interactionCleanup.current = installCesiumInteractions(
@@ -500,8 +530,11 @@ export const CesiumCanvas = memo(function CesiumCanvas({
       // Clear the published ref before the engine is torn down, so nothing can
       // reach a destroyed engine through it. Only ours is cleared: a pane never
       // published one.
-      if (isPrimaryRef.current && engineRefProp.current?.current === engineInstanceRef.current) {
-        engineRefProp.current.current = null;
+      if (isPrimaryRef.current) {
+        useAppStore.getState().setCameraAltitude(null);
+        if (engineRefProp.current?.current === engineInstanceRef.current) {
+          engineRefProp.current.current = null;
+        }
       }
       engineInstanceRef.current = null;
       // The viewer's destroy() below tears the imagery down with it; just drop
@@ -536,25 +569,6 @@ export const CesiumCanvas = memo(function CesiumCanvas({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ready, basemapImagery]);
 
-  // Stadia can authenticate through a registered domain or a runtime API key.
-  // Rebuild only its active provider when that key changes in Settings.
-  useEffect(() => {
-    if (!ready) return;
-    let key = getStadiaApiKey();
-    const refresh = () => {
-      const next = getStadiaApiKey();
-      if (next === key) return;
-      key = next;
-      const imagery = basemapImageryRef.current;
-      if (imagery.kind !== "xyz" || imagery.apiKeyProvider !== "stadia") return;
-      appliedImageryRef.current = null;
-      applyBasemap();
-    };
-    window.addEventListener("geolibre:runtime-env-change", refresh);
-    return () => window.removeEventListener("geolibre:runtime-env-change", refresh);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [ready]);
-
   // Terrain selection uses the same saved preference as Controls → Terrain,
   // including globe panes that do not host a toolbar.
   useEffect(() => {
@@ -563,6 +577,12 @@ export const CesiumCanvas = memo(function CesiumCanvas({
     const enabled = terrainEnabled;
     if (engine.isTerrainEnabled() !== enabled) engine.setTerrainEnabled(enabled);
   }, [ready, terrainEnabled, ionToken]);
+
+  // Push project map preferences (min/max zoom, projection) onto the engine.
+  useEffect(() => {
+    if (!ready) return;
+    engineInstanceRef.current?.applyMapPreferences(useAppStore.getState().preferences.map);
+  }, [ready, mapProjection, mapMinZoom, mapMaxZoom]);
 
   // Hiding or fading the background is a live appearance change, so it re-styles
   // the existing layers rather than rebuilding them.
@@ -587,6 +607,33 @@ export const CesiumCanvas = memo(function CesiumCanvas({
     if (!ready) return;
     engineInstanceRef.current?.syncLayers(paneLayers);
   }, [ready, paneLayers]);
+
+  // The primary globe shares the same selection lifecycle as MapLibre. A
+  // secondary pane is display-only and must not compete with the primary
+  // engine for fitting or highlights.
+  useEffect(() => {
+    if (!ready || !isPrimary) return;
+    const key = selectionFitKey({ selectedLayerId, selectedFeatureIds, selectedFeatureId });
+    const restoring = consumePendingIdentifyRestore(key);
+    previousSelectedFeatureKey.current = applySelectionHighlight(
+      engineInstanceRef.current,
+      layers,
+      selectedLayerId,
+      selectedFeatureId,
+      selectedFeatureIds,
+      zoomToSelectedFeature,
+      previousSelectedFeatureKey.current,
+      restoring,
+    );
+  }, [
+    ready,
+    isPrimary,
+    layers,
+    selectedLayerId,
+    selectedFeatureId,
+    selectedFeatureIds,
+    zoomToSelectedFeature,
+  ]);
 
   // Synced: follow the shared global camera. Depend on primitives so an
   // equal-valued mapView object does not re-apply. `ready` re-runs this once the

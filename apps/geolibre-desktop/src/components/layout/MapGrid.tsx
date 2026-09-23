@@ -22,6 +22,7 @@ import { type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { PrimaryMapboxCanvas } from "./PrimaryMapboxCanvas";
 import { PrimaryArcgisCanvas } from "./PrimaryArcgisCanvas";
+import { CesiumTokenHint } from "./PrimaryCesiumCanvas";
 import { useCesiumIonToken } from "../../hooks/useCesiumIonToken";
 
 /**
@@ -147,15 +148,7 @@ function SecondaryMapPane({ viewId, index, cesiumToken }: SecondaryMapPaneProps)
       ) : (
         <SecondaryMapCanvas viewId={viewId} />
       )}
-      {/* The globe works without an Ion token — it draws the project basemap —
-          so say what a token would add rather than hiding the view. Bottom-end
-          keeps it clear of Cesium's own credit display (bottom-left) and of the
-          pane's controls and label along the top. */}
-      {is3d && !cesiumToken ? (
-        <div className="pointer-events-none absolute bottom-2 end-2 z-10 max-w-[70%] truncate rounded-md border border-input map-glass px-2 py-1 text-xs text-muted-foreground shadow-sm">
-          {t("mapGrid.cesiumTokenHint")}
-        </div>
-      ) : null}
+      {is3d && !cesiumToken ? <CesiumTokenHint /> : null}
       <PaneLabel
         value={label}
         onChange={(value) => setSecondaryMapLabel(viewId, value)}
@@ -270,7 +263,7 @@ function PaneLayerToggle({ viewId, index, renderer }: PaneLayerToggleProps) {
             const only2d = is3d && !isCesiumSupportedLayerType(layer);
             const only3d = !is3d && isCesiumOnlyLayer(layer);
             const noMapbox = renderer === "mapbox" && !isMapboxSupportedLayer(layer);
-            const noArcgis = renderer === "arcgis" && !isArcgisSupportedLayer(layer);
+            const noArcgis = renderer === "arcgis" && !isArcgisSupportedLayer(layer, false);
             return (
               <DropdownMenuCheckboxItem
                 key={layer.id}

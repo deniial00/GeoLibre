@@ -1,5 +1,5 @@
 import * as duckdb from "@duckdb/duckdb-wasm";
-import type { Feature, FeatureCollection, Geometry } from "geojson";
+import type { Feature, FeatureCollection, Geometry, Position } from "geojson";
 import { isGeographicCrs } from "./crs-utils";
 import {
   detectGeometryColumn,
@@ -1064,6 +1064,58 @@ export async function reprojectFeatureCollectionToWgs84(
     await connection.close();
     await dropFilesIfPresent(db, [sourceFile]);
   }
+}
+
+/**
+ * Reproject a bare coordinate list to WGS84 (EPSG:4326), preserving order,
+ * length, and any Z value.
+ *
+ * The positions travel as the parts of a single `MultiPoint` so the engine pays
+ * the per-row cost of its GeoJSON round-trip once instead of once per feature.
+ * Callers that hold geometry which reuses the same vertex many times (a TIN
+ * surface, where each point belongs to ~6 triangles) should deduplicate first
+ * and rebuild from the result, so the transform scales with the real vertex
+ * count rather than the coordinate count.
+ *
+ * Every position must have the same number of ordinates. GDAL's GeoJSON reader
+ * gives one `MultiPoint` a single dimension and pads the short parts, so mixing
+ * `[x, y]` with `[x, y, z]` would hand back a fabricated `z` of 0 for the 2D
+ * ones. Batch each dimension separately rather than relaxing this.
+ *
+ * @param positions Coordinates in `sourceCrs`, all `[x, y]` or all `[x, y, z]`.
+ * @param sourceCrs Source CRS as `AUTHORITY:CODE` or WKT, as ST_Transform accepts.
+ * @returns The same coordinates, in the same order, as WGS84 lon/lat.
+ * @throws If the positions do not all have the same dimension.
+ */
+export async function reprojectPositionsToWgs84(
+  positions: Position[],
+  sourceCrs: string,
+): Promise<Position[]> {
+  if (positions.length === 0) return [];
+  const dimension = positions[0].length;
+  if (positions.some((position) => position.length !== dimension)) {
+    throw new Error(
+      "reprojectPositionsToWgs84 requires every position to have the same dimension.",
+    );
+  }
+  const reprojected = await reprojectFeatureCollectionToWgs84(
+    {
+      type: "FeatureCollection",
+      features: [
+        {
+          type: "Feature",
+          properties: {},
+          geometry: { type: "MultiPoint", coordinates: positions },
+        },
+      ],
+    },
+    sourceCrs,
+  );
+  const geometry = reprojected.features[0]?.geometry;
+  if (!geometry || geometry.type !== "MultiPoint") {
+    throw new Error("Reprojection did not return the expected coordinate list.");
+  }
+  return geometry.coordinates;
 }
 
 async function dropFilesIfPresent(db: duckdb.AsyncDuckDB, fileNames: string[]): Promise<void> {
