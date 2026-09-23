@@ -85,6 +85,7 @@ function searchHaystack(project: SharedProject): string {
  * case, since that is the credential the web sign-in produced.
  */
 function galleryErrorMessage(error: unknown, t: TFunction, oauthSupported: boolean): string {
+  if (error instanceof ShareOAuthError) return t(shareOAuthErrorKey(error.code));
   if (error instanceof GalleryError) {
     switch (error.code) {
       case "timeout":
@@ -230,13 +231,23 @@ export function ProjectGalleryDialog({
       setErrorCode(null);
       try {
         if (effectiveScope === "mine") {
-          // "My projects" returns the full set (no pagination) and includes the
-          // owner's unlisted/private projects. Web builds resolve a fresh OAuth
-          // access token per load (null → empty token → the fetcher reports
-          // unauthorized, prompting re-sign-in); desktop uses the pasted token.
-          const token = oauthSupported
-            ? ((await getShareAccessToken()) ?? trimmedToken)
-            : trimmedToken;
+          // "My projects" returns the owner's full set, including unlisted and
+          // private projects. Prefer OAuth when available, with a personal-token
+          // fallback for desktop and transient OAuth refresh failures.
+          let token = trimmedToken;
+          if (oauthSupported) {
+            try {
+              token = (await getShareAccessToken()) ?? trimmedToken;
+            } catch (err) {
+              if (
+                !(err instanceof ShareOAuthError) ||
+                err.code !== "refresh-unavailable" ||
+                !trimmedToken
+              ) {
+                throw err;
+              }
+            }
+          }
           const mine = await fetchMyProjects({
             token,
             signal: controller.signal,
@@ -271,7 +282,7 @@ export function ProjectGalleryDialog({
         if (!controller.signal.aborted) setStatus("idle");
       }
     },
-    [t, effectiveScope, trimmedToken, oauthSupported, oauthSignedIn],
+    [t, effectiveScope, trimmedToken, oauthSupported],
   );
   // Web sign-in from the gallery. Keep the current error visible while the
   // popup is pending; a successful sign-in reloads the active scope explicitly
@@ -280,6 +291,7 @@ export function ProjectGalleryDialog({
     signInToShare()
       .then(() => {
         setErrorCode(null);
+        setProjects([]);
         void loadPage(0);
       })
       .catch((err: unknown) => {
@@ -315,13 +327,24 @@ export function ProjectGalleryDialog({
     setOpenError(null);
     try {
       // Only private projects in "My projects" need credentials; public and
-      // unlisted opens must stay anonymous to avoid a CORS preflight.
-      const token =
-        effectiveScope === "mine" && project.visibility === "private"
-          ? oauthSupported
-            ? ((await getShareAccessToken()) ?? trimmedToken)
-            : trimmedToken
-          : "";
+      // unlisted opens stay anonymous to avoid a CORS preflight.
+      let token = "";
+      if (effectiveScope === "mine" && project.visibility === "private") {
+        token = trimmedToken;
+        if (oauthSupported) {
+          try {
+            token = (await getShareAccessToken()) ?? trimmedToken;
+          } catch (err) {
+            if (
+              !(err instanceof ShareOAuthError) ||
+              err.code !== "refresh-unavailable" ||
+              !trimmedToken
+            ) {
+              throw err;
+            }
+          }
+        }
+      }
       await onOpenProject(
         project.rawJsonUrl,
         effectiveScope === "mine" ? projectOpenToken(project, token) : undefined,
@@ -330,8 +353,13 @@ export function ProjectGalleryDialog({
       onOpenChange(false);
     } catch (err) {
       if (err instanceof DOMException && err.name === "AbortError") return;
-      console.error("Failed to open gallery project", err);
-      setOpenError(err instanceof Error ? err.message : t("gallery.openError"));
+      setOpenError(
+        err instanceof ShareOAuthError
+          ? t(shareOAuthErrorKey(err.code))
+          : err instanceof Error
+            ? err.message
+            : t("gallery.openError"),
+      );
     } finally {
       setOpeningState(null);
     }

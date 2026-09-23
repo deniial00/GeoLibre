@@ -1479,6 +1479,7 @@
     "oauthTimeout": "Sign-in took too long. Please try again.",
     "oauthInProgress": "A sign-in window is already open.",
     "oauthFailed": "Sign-in failed. Please try again.",
+    "oauthRefreshFailed": "Could not refresh your session. Check your connection and try again.",
     "reauthBody": "Your {{shareHost}} session has expired. Sign in again to keep sharing.",
     "reauthSignIn": "Sign in again",
     "liveAt": "Your project is live at:",

@@ -1,19 +1,149 @@
-// Security-boundary tests for the share server's web OAuth client
-// (share-oauth.ts). Only the pure, security-critical pieces are unit-tested:
-// token material shape, the S256 challenge derivation, callback URL derivation
-// (root and subpath deployments), and the callback-message validator that
-// gates which authorization codes the app will accept. The popup/message/exchange
-// flow itself needs a browser and is covered by the live verification in the PR.
+// Security-boundary and refresh-failure tests for the share server's web OAuth
+// client. The popup/message/exchange flow itself needs a browser and is covered
+// by the live verification in the PR.
 
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
   deriveCallbackUrl,
+  getShareAccessToken,
   oauthEndpointUrl,
   randomUrlSafeToken,
   s256Challenge,
+  ShareOAuthError,
   validateCallbackPayload,
 } from "../apps/geolibre-desktop/src/lib/share-oauth";
+
+function installRefreshEnvironment(issuer: string, fetchImpl: typeof fetch) {
+  const originalWindow = Object.getOwnPropertyDescriptor(globalThis, "window");
+  const originalFetch = Object.getOwnPropertyDescriptor(globalThis, "fetch");
+  const storage = new Map<string, string>([
+    [`geolibre-share-oauth:${issuer}`, JSON.stringify({ refreshToken: "refresh-token" })],
+  ]);
+  Object.defineProperty(globalThis, "window", {
+    configurable: true,
+    value: {
+      location: { origin: "http://localhost" },
+      sessionStorage: {
+        getItem: (key: string) => storage.get(key) ?? null,
+        setItem: (key: string, value: string) => storage.set(key, value),
+        removeItem: (key: string) => storage.delete(key),
+      },
+      setTimeout,
+      clearTimeout,
+    },
+  });
+  Object.defineProperty(globalThis, "fetch", { configurable: true, writable: true, value: fetchImpl });
+  return {
+    storage,
+    restore() {
+      if (originalWindow) Object.defineProperty(globalThis, "window", originalWindow);
+      else Reflect.deleteProperty(globalThis, "window");
+      if (originalFetch) Object.defineProperty(globalThis, "fetch", originalFetch);
+      else Reflect.deleteProperty(globalThis, "fetch");
+    },
+  };
+}
+
+describe("refresh failure handling", () => {
+  it("keeps the session and reports a retryable error on network failure", async () => {
+    const issuer = "https://network-failure.example";
+    const env = installRefreshEnvironment(issuer, async () => {
+      throw new TypeError("offline");
+    });
+    try {
+      await assert.rejects(
+        getShareAccessToken(issuer),
+        (error: unknown) =>
+          error instanceof ShareOAuthError && error.code === "refresh-unavailable",
+      );
+      assert.equal(
+        env.storage.get(`geolibre-share-oauth:${issuer}`),
+        JSON.stringify({ refreshToken: "refresh-token" }),
+      );
+    } finally {
+      env.restore();
+    }
+  });
+
+  it("keeps the session on temporary server errors", async () => {
+    const issuer = "https://server-failure.example";
+    const env = installRefreshEnvironment(
+      issuer,
+      async () =>
+        new Response(JSON.stringify({ error: "temporarily_unavailable" }), {
+          status: 503,
+          headers: { "Content-Type": "application/json" },
+        }),
+    );
+    try {
+      await assert.rejects(
+        getShareAccessToken(issuer),
+        (error: unknown) =>
+          error instanceof ShareOAuthError && error.code === "refresh-unavailable",
+      );
+      assert.equal(
+        env.storage.get(`geolibre-share-oauth:${issuer}`),
+        JSON.stringify({ refreshToken: "refresh-token" }),
+      );
+    } finally {
+      env.restore();
+    }
+  });
+
+  it("clears a session only after the server confirms an invalid grant", async () => {
+    const issuer = "https://invalid-grant.example";
+    const env = installRefreshEnvironment(
+      issuer,
+      async () =>
+        new Response(JSON.stringify({ error: "invalid_grant" }), {
+          status: 400,
+          headers: { "Content-Type": "application/json" },
+        }),
+    );
+    try {
+      assert.equal(await getShareAccessToken(issuer), null);
+      assert.equal(env.storage.has(`geolibre-share-oauth:${issuer}`), false);
+    } finally {
+      env.restore();
+    }
+  });
+
+  it("cancels oversized token responses without dropping the session", async () => {
+    const issuer = "https://oversized-response.example";
+    let cancelled = false;
+    const env = installRefreshEnvironment(
+      issuer,
+      async () =>
+        new Response(
+          new ReadableStream<Uint8Array>({
+            start(controller) {
+              controller.enqueue(new Uint8Array(1024 * 1024));
+            },
+            cancel() {
+              cancelled = true;
+            },
+          }),
+          { status: 503 },
+        ),
+    );
+    try {
+      await assert.rejects(
+        getShareAccessToken(issuer),
+        (error: unknown) =>
+          error instanceof ShareOAuthError && error.code === "refresh-unavailable",
+      );
+      assert.equal(cancelled, true);
+      assert.equal(
+        env.storage.get(`geolibre-share-oauth:${issuer}`),
+        JSON.stringify({ refreshToken: "refresh-token" }),
+      );
+    } finally {
+      env.restore();
+    }
+  });
+});
+
 
 describe("randomUrlSafeToken", () => {
   // RFC 7636 requires a 43–128 character verifier. 32 bytes → 43 base64url

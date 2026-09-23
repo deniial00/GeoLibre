@@ -361,10 +361,22 @@ export function ShareProjectDialog({
     const controller = new AbortController();
     abortRef.current = controller;
     try {
-      // A fresh access token per upload (memory cache absorbs repeats); the
-      // pasted personal token is the fallback on desktop or when the web
-      // session is absent.
-      const oauthToken = oauthSupported ? await getShareAccessToken() : null;
+      // Prefer OAuth; a pasted personal token remains a fallback when OAuth is
+      // unavailable or its refresh endpoint is temporarily unreachable.
+      let oauthToken: string | null = null;
+      if (oauthSupported) {
+        try {
+          oauthToken = await getShareAccessToken();
+        } catch (err) {
+          if (
+            !(err instanceof ShareOAuthError) ||
+            err.code !== "refresh-unavailable" ||
+            !shareToken.trim()
+          ) {
+            throw err;
+          }
+        }
+      }
       if (oauthSupported && !oauthToken && !shareToken.trim()) {
         setErrorCode("unauthorized");
         setError(null);
@@ -391,8 +403,13 @@ export function ShareProjectDialog({
         setErrorCode(err.code);
         setError(null);
       } else {
-        setError(err instanceof Error ? err.message : t("share.errorFallback"));
-        setErrorCode(null);
+        setError(
+          err instanceof ShareOAuthError
+            ? t(shareOAuthErrorKey(err.code))
+            : err instanceof Error
+              ? err.message
+              : t("share.errorFallback"),
+        );
       }
     } finally {
       // Only the controller that is still current clears state, so an aborted

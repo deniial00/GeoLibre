@@ -43,6 +43,8 @@ const ACCESS_EXPIRY_BUFFER_MS = 30_000;
 
 /** Bound token endpoint requests so a stalled server cannot block sign-in. */
 const TOKEN_REQUEST_TIMEOUT_MS = 30_000;
+/** Reject unexpectedly large OAuth JSON responses before buffering them. */
+const MAX_TOKEN_RESPONSE_BYTES = 64 * 1024;
 
 /** sessionStorage key prefix; the issuer completes it. */
 const SESSION_PREFIX = "geolibre-share-oauth:";
@@ -62,7 +64,8 @@ export type ShareOAuthErrorCode =
   | "state-mismatch"
   | "issuer-mismatch"
   | "malformed"
-  | "exchange-failed";
+  | "exchange-failed"
+  | "refresh-unavailable";
 
 /** Typed failure so the UI renders guidance (t()) instead of a raw message. */
 export class ShareOAuthError extends Error {
@@ -79,6 +82,8 @@ export class ShareOAuthError extends Error {
 /** i18n catalog key for each failure, so the UI never renders the raw code. */
 export function shareOAuthErrorKey(code: ShareOAuthErrorCode): ParseKeys {
   switch (code) {
+    case "refresh-unavailable":
+      return "share.oauthRefreshFailed";
     case "popup-blocked":
       return "share.oauthPopupBlocked";
     case "cancelled":
@@ -400,6 +405,37 @@ function waitForCallbackCode(
     window.addEventListener("message", onMessage);
   });
 }
+
+async function readTokenResponseBody(response: Response): Promise<unknown> {
+  const reader = response.body?.getReader();
+  if (!reader) return null;
+  const chunks: Uint8Array[] = [];
+  let byteLength = 0;
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      if (value.byteLength > MAX_TOKEN_RESPONSE_BYTES - byteLength) {
+        void reader.cancel().catch(() => {});
+        return null;
+      }
+      chunks.push(value);
+      byteLength += value.byteLength;
+    }
+    const bytes = new Uint8Array(byteLength);
+    let offset = 0;
+    for (const chunk of chunks) {
+      bytes.set(chunk, offset);
+      offset += chunk.byteLength;
+    }
+    return JSON.parse(new TextDecoder().decode(bytes)) as unknown;
+  } catch {
+    return null;
+  } finally {
+    reader.releaseLock();
+  }
+}
+
 async function fetchTokenEndpoint(
   url: URL,
   init: RequestInit,
@@ -408,7 +444,7 @@ async function fetchTokenEndpoint(
   const timeout = window.setTimeout(() => controller.abort(), TOKEN_REQUEST_TIMEOUT_MS);
   try {
     const response = await fetch(url, { ...init, signal: controller.signal });
-    const body = await response.json().catch(() => null);
+    const body = await readTokenResponseBody(response);
     return { response, body };
   } finally {
     window.clearTimeout(timeout);
@@ -476,9 +512,8 @@ const refreshInFlight = new Map<string, Promise<string | null>>();
 
 /**
  * A fresh access token for the share issuer, or null when there is no web
- * session (the caller then falls back to the pasted personal token). Refresh
- * failure (revoked/expired family) clears the session so the UI offers sign-in
- * rather than retrying a dead grant forever.
+ * session or the refresh grant is confirmed dead. Transient refresh failures
+ * reject with a retryable ShareOAuthError and preserve the stored session.
  */
 export async function getShareAccessToken(baseUrl?: string): Promise<string | null> {
   if (!supportsShareOAuth()) return null;
@@ -525,8 +560,8 @@ async function refreshAccessToken(
       }),
     }));
   } catch {
-    // Network trouble is not an authorization failure: keep the session.
-    return null;
+    if (generation !== sessionGeneration) return null;
+    throw new ShareOAuthError("refresh-unavailable");
   }
   if (generation !== sessionGeneration) return null;
   if (!response.ok) {
@@ -540,8 +575,9 @@ async function refreshAccessToken(
       clearStoredSession(issuer);
       if (cachedAccess?.issuer === issuer) cachedAccess = null;
       if (loadSignedInIssuer() === null) setStoreIssuer(null);
+      return null;
     }
-    return null;
+    throw new ShareOAuthError("refresh-unavailable");
   }
   const payload = body as Partial<TokenResponse> | null;
   if (generation !== sessionGeneration) return null;
@@ -551,7 +587,7 @@ async function refreshAccessToken(
     typeof payload?.refresh_token !== "string" ||
     !payload.refresh_token
   ) {
-    return null;
+    throw new ShareOAuthError("refresh-unavailable");
   }
   // Rotation: the presented refresh token is consumed; store the successor.
   writeSession(issuer, payload.refresh_token);
