@@ -186,7 +186,10 @@ describe("resolveShareIssuer", () => {
   });
 
   it("preserves non-default ports and IPv6 authority", () => {
-    assert.equal(resolveShareIssuer("https://[2001:DB8::1]:8443/path"), "https://[2001:db8::1]:8443/path");
+    assert.equal(
+      resolveShareIssuer("https://[2001:DB8::1]:8443/path"),
+      "https://[2001:db8::1]:8443/path",
+    );
   });
 
   it("returns null for missing or invalid issuers", () => {
