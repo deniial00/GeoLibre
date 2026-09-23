@@ -11,7 +11,7 @@ implementation or storage engine. The reference implementation lives in
   (or `VITE_GEOLIBRE_SHARE_URL` at build time).
 - JSON request and response bodies use `application/json` and camel-case keys.
 - Dates are UTC ISO 8601 strings.
-- Authenticated endpoints accept a personal API token in
+- Authenticated endpoints accept a personal API token or OAuth access token in
   `Authorization: Bearer <token>`.
 - Error responses are JSON objects with an `error` string. `401` means a
   missing, invalid, or expired token; `403` means the authenticated principal
@@ -26,14 +26,17 @@ implementation or storage engine. The reference implementation lives in
 
 ## What the reference server leaves to the operator
 
-Two deployment protections remain the operator's responsibility:
+Deployment protections remain the operator's responsibility:
 
-- **Rate limiting.** `429` is in the error vocabulary, but no route returns it.
-  `POST /api/auth/token` and `POST /api/accounts` are unauthenticated and run
-  scrypt on every call, so without a limiter in front they allow password
-  brute-forcing, username enumeration through the `409`/`401` distinction, and
-  a cheap CPU-burn. Put a reverse proxy or WAF limit on both, keyed by client IP
-  and by username.
+- **Personal-token lifecycle.** Omitting `expiresInDays` preserves the v1
+  delete-only lifecycle and creates a non-expiring token. Require an explicit
+  1–365 day lifetime where bounded credentials are needed, and revoke or rotate
+  delete-only and legacy tokens operationally.
+- **Rate limiting.** The OAuth consent flow caps pending interactions per
+  browser binding, but the reference server has no general request limiter.
+  `POST /api/auth/token`, `POST /api/accounts`, and the consent login all run
+  scrypt. Put a reverse proxy or WAF limit on these routes, keyed by client IP
+  and username.
 - **A request-size limit.** The server rejects an oversized *declared*
   `Content-Length` before reading the body, but a chunked or HTTP/2 request
   declares no length and is parsed in full before the per-route limit applies.
@@ -116,11 +119,13 @@ Revokes the presented Bearer token. Response: `204`.
 
 ### `GET /api/users/me`
 
-Returns the account and effective project scopes associated with the token:
+Returns the account, effective project scopes, and OAuth session ID. `sessionId`
+is `null` for personal tokens.
 
 ```json
 {
   "user": {"id": "uuid", "username": "ada", "createdAt": "2026-08-03T12:00:00Z"},
+  "sessionId": "oauth-session-uuid",
   "scopes": ["read:projects", "write:projects", "share:public"]
 }
 ```
@@ -317,6 +322,91 @@ A valid credential missing a required scope receives `403` with
 `WWW-Authenticate: Bearer error="insufficient_scope"`. Missing credentials use
 the `Bearer` challenge; malformed, unknown, revoked, and expired credentials use
 `Bearer error="invalid_token"`.
+
+## OAuth 2.0 sign-in (Authorization Code + S256 PKCE)
+
+The reference server implements Authorization Code with PKCE (`S256` only) for
+public clients; no client secret is accepted. Registrations are exact and
+startup-validated through `GEOLIBRE_OAUTH_CLIENTS`. The only supported client
+IDs are `geolibre-web` and `geolibre-desktop`. Empty or unset configuration
+disables every OAuth route without changing personal-token startup behavior.
+
+The issuer is `GEOLIBRE_PUBLIC_URL`. When OAuth is enabled it must be an
+absolute HTTPS URL. Loopback HTTP is allowed only for `localhost` or
+`127.0.0.1` with an explicit port. The request `Host` header, including its
+port, must match the issuer authority.
+
+### Discovery
+
+`GET /.well-known/oauth-authorization-server` returns RFC 8414 metadata. For an
+issuer with path `/services/projects`, the route is
+`/.well-known/oauth-authorization-server/services/projects`. The document
+advertises the authorization, token, and revocation endpoints; authorization
+code and refresh grants; `S256`; and the three project scopes.
+
+### Authorization and consent
+
+`GET /oauth/authorize` accepts one value each for `response_type=code`,
+`client_id`, exact `redirect_uri`, nonempty `scope`, `state`, `code_challenge`,
+and `code_challenge_method=S256`; `device_label` is optional. State is 16–512
+URL-safe characters. The S256 challenge is the 43-character unpadded base64url
+SHA-256 value.
+
+Unknown clients and unregistered redirects return a local error page and never
+receive a `Location` header. Other authorization errors redirect to the already
+validated callback with `error`, `state`, and `iss`.
+
+`POST /oauth/authorize` submits the server-owned consent form. It requires the
+browser-binding cookie, CSRF value, same-origin `Origin` or `Referer`, and
+account credentials. Approval returns `303` to the exact callback with a
+single-use code, `state`, and `iss`; cancellation returns `access_denied`.
+Authorization codes expire after 60 seconds by default.
+
+Web redirects must be absolute HTTPS URLs ending in `/oauth-callback.html`.
+Explicit-port loopback HTTP is allowed for development. Desktop redirects must
+be exactly `org.geolibre.desktop:/oauth/callback`.
+
+### Token exchange and rotation
+
+`POST /oauth/token` accepts form-urlencoded bodies up to 16 KiB:
+
+- `grant_type=authorization_code` requires `client_id`, `code`,
+  `redirect_uri`, and a 43–128 character `code_verifier`.
+- `grant_type=refresh_token` requires `client_id` and `refresh_token`.
+  Optional `scope` must be the same scope set as the original grant; ordering
+  does not matter.
+
+Success returns:
+
+```json
+{
+  "access_token": "opaque",
+  "token_type": "Bearer",
+  "expires_in": 600,
+  "refresh_token": "opaque",
+  "scope": "read:projects write:projects"
+}
+```
+
+Access tokens expire after 600 seconds by default and never outlive their
+family. Refresh tokens are single-use and rotate on every use. Reusing a
+consumed refresh token revokes the entire family, including tokens minted by
+the successful rotation. A family expires at issuance plus the configured
+refresh TTL (30 days by default); rotation never extends it.
+
+`POST /oauth/revoke` accepts `client_id`, `token`, and optional advisory
+`token_type_hint`. A matching access or refresh token revokes its entire
+family. Unknown, already-revoked, and wrong-client tokens all return the same
+empty `200`.
+
+OAuth failures use `invalid_request`, `invalid_client`, `invalid_grant`,
+`invalid_scope`, `unsupported_grant_type`, or `unsupported_token_type`. Token
+and revocation responses are `no-store`. Raw codes and tokens are returned once;
+the database stores only SHA-256 digests.
+
+OAuth access tokens use the same project scope matrix as personal tokens.
+`admin:org` and `manage:sessions` are reserved for later stacks and are rejected
+by this server.
 
 ## Compatibility
 

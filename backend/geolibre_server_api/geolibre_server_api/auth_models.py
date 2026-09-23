@@ -47,6 +47,81 @@ class Token(Base):
     created_at: Mapped[str] = mapped_column(String(32))
 
 
+class OAuthAuthorizationCode(Base):
+    """A pending or issued authorization-code interaction."""
+
+    __tablename__ = "oauth_authorization_codes"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    account_id: Mapped[str | None] = mapped_column(
+        ForeignKey("accounts.id", ondelete="CASCADE"), nullable=True, index=True
+    )
+    client_id: Mapped[str] = mapped_column(String(64))
+    redirect_uri: Mapped[str] = mapped_column(Text)
+    scope: Mapped[str] = mapped_column(Text)
+    code_challenge: Mapped[str] = mapped_column(String(128))
+    state: Mapped[str] = mapped_column(String(512))
+    browser_cookie_digest: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    csrf_digest: Mapped[str] = mapped_column(String(64))
+    label: Mapped[str] = mapped_column(String(100))
+    interaction_expires_at: Mapped[int] = mapped_column(Integer)
+    code_digest: Mapped[str | None] = mapped_column(String(64), unique=True, nullable=True)
+    code_expires_at: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    approved_at: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    consumed_at: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    session_id: Mapped[str | None] = mapped_column(
+        ForeignKey("oauth_sessions.id", ondelete="SET NULL"), nullable=True
+    )
+
+
+class OAuthSession(Base):
+    """One OAuth grant family and its absolute lifetime."""
+
+    __tablename__ = "oauth_sessions"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    account_id: Mapped[str] = mapped_column(
+        ForeignKey("accounts.id", ondelete="CASCADE"), index=True
+    )
+    client_id: Mapped[str] = mapped_column(String(64))
+    kind: Mapped[str] = mapped_column(String(16))
+    scope: Mapped[str] = mapped_column(Text)
+    label: Mapped[str] = mapped_column(String(100))
+    created_at: Mapped[int] = mapped_column(Integer)
+    last_used_at: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    expires_at: Mapped[int] = mapped_column(Integer)
+    revoked_at: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    rotation_version: Mapped[int] = mapped_column(Integer, default=0)
+
+
+class OAuthAccessToken(Base):
+    """A short-lived access token belonging to an OAuth session family."""
+
+    __tablename__ = "oauth_access_tokens"
+
+    digest: Mapped[str] = mapped_column(String(64), primary_key=True)
+    session_id: Mapped[str] = mapped_column(
+        ForeignKey("oauth_sessions.id", ondelete="CASCADE"), index=True
+    )
+    created_at: Mapped[int] = mapped_column(Integer)
+    expires_at: Mapped[int] = mapped_column(Integer)
+
+
+class OAuthRefreshToken(Base):
+    """One refresh-token generation retained for replay detection."""
+
+    __tablename__ = "oauth_refresh_tokens"
+
+    digest: Mapped[str] = mapped_column(String(64), primary_key=True)
+    session_id: Mapped[str] = mapped_column(
+        ForeignKey("oauth_sessions.id", ondelete="CASCADE"), index=True
+    )
+    created_at: Mapped[int] = mapped_column(Integer)
+    expires_at: Mapped[int] = mapped_column(Integer)
+    consumed_at: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    successor_digest: Mapped[str | None] = mapped_column(String(64), nullable=True)
+
+
 class PersonalTokenPolicy(Base):
     """Policy metadata for one personal API token.
 
@@ -64,8 +139,8 @@ class PersonalTokenPolicy(Base):
     scope: Mapped[str] = mapped_column(Text)
     expires_at: Mapped[int | None] = mapped_column(Integer, nullable=True)
     last_used_at: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    # Checked on every request but not yet written: revocation currently deletes
-    # the Token row (cascading the policy). TODO(#1666): revoke by token id
-    # without deleting history once the OAuth follow-up lands.
+    # Checked on every PAT request but not yet written: PAT revocation deletes
+    # the Token row and cascades this policy. OAuth revocation uses its separate
+    # session family.
     revoked_at: Mapped[int | None] = mapped_column(Integer, nullable=True)
     legacy: Mapped[bool] = mapped_column(Boolean, default=False)

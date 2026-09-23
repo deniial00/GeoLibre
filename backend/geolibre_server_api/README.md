@@ -17,9 +17,22 @@ Configuration:
 - `GEOLIBRE_STORAGE=s3`, `GEOLIBRE_S3_BUCKET`, and optional
   `GEOLIBRE_S3_ENDPOINT` / `GEOLIBRE_S3_REGION`: S3-compatible storage (install
   the `s3` extra; standard AWS credential environment variables apply).
-- `GEOLIBRE_PUBLIC_URL`: externally reachable API origin.
+- `GEOLIBRE_PUBLIC_URL`: externally reachable API URL and, when OAuth is
+  enabled, its canonical issuer. Production OAuth requires HTTPS. Loopback HTTP
+  requires `localhost` or `127.0.0.1` plus an explicit port.
 - `GEOLIBRE_VIEWER_URL`: GeoLibre viewer origin.
-- `GEOLIBRE_CORS_ORIGINS`: comma-separated web origins, default `*`.
+- `GEOLIBRE_CORS_ORIGINS`: comma-separated web origins, default `*`. OAuth CORS
+  remains restricted to registered web callback origins and recognized
+  Tauri/development origins even when ordinary API CORS is `*`.
+- `GEOLIBRE_OAUTH_CLIENTS`: JSON array of exact public-client registrations:
+  `[{"client_id":"geolibre-web","name":"GeoLibre Web","redirect_uris":["https://app.example/oauth-callback.html"],"scopes":["read:projects","write:projects","share:public"]}]`.
+  Empty or unset disables OAuth without validating OAuth-only settings. The
+  supported IDs are `geolibre-web` and `geolibre-desktop`; the desktop redirect
+  must be exactly `org.geolibre.desktop:/oauth/callback`.
+- `GEOLIBRE_OAUTH_CODE_TTL_SECONDS` (default `60`),
+  `GEOLIBRE_OAUTH_ACCESS_TTL_SECONDS` (`600`), and
+  `GEOLIBRE_OAUTH_REFRESH_TTL_SECONDS` (`2592000`): positive integer grant
+  lifetimes. Refresh rotation never extends the family's absolute expiry.
 - `GEOLIBRE_MAX_PROJECT_BYTES`, `GEOLIBRE_MAX_THUMBNAIL_BYTES`: upload limits.
 - `GEOLIBRE_HOST`, `GEOLIBRE_PORT`: bind address and port for the
   `geolibre-server-api` entry point, default `0.0.0.0` and `8000`. Bind to
@@ -40,6 +53,6 @@ docker run --rm -v geolibre_geolibre-projects:/data/objects busybox \
 
 ## Hardening
 
-Rate limiting and a complete request-size limit are not implemented here; see
-the "What the reference server leaves to the operator" section of
-`docs/server-api.md` before exposing this publicly.
+The OAuth consent flow caps pending interactions, but general rate limiting and
+a complete request-size limit are not implemented here. See "What the reference
+server leaves to the operator" in `docs/server-api.md` before public exposure.

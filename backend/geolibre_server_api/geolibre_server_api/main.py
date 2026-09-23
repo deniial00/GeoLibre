@@ -9,7 +9,7 @@ import uuid
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Annotated, Callable, Literal
-from urllib.parse import quote
+from urllib.parse import quote, urlparse
 
 from fastapi import Depends, FastAPI, HTTPException, Query, Request, Response
 from fastapi.exceptions import RequestValidationError
@@ -38,8 +38,11 @@ from geolibre_server_api.auth import (
     InsufficientScopeError,
     bearer_challenge,
     build_identity_router,
+    build_oauth_router,
+    cleanup_expired_security_rows,
     ensure_scope,
     get_session,
+    make_oauth_config,
     now,
     optional_principal,
     require_scope,
@@ -317,6 +320,48 @@ def title_from(document: dict, filename: str) -> str:
     return candidate or "Untitled"
 
 
+class PathCORSMiddleware:
+    """Route CORS by request path.
+
+    API routes keep the deployment's configured CORS (including its wildcard
+    default). OAuth endpoints use only explicitly registered browser origins:
+    registered web callbacks plus, from ``GEOLIBRE_CORS_ORIGINS``, the packaged
+    Tauri origins and desktop development origins. CORS is never authorization:
+    it only decides which origins may *read* cross-origin responses, and a
+    wildcard API policy must not overwrite the narrow OAuth choice.
+
+    The two CORSMiddleware instances are built from the incoming ``app`` (the
+    chain this middleware wraps) rather than captured around an outer object:
+    wrapping the FastAPI app itself would regenerate the full middleware stack
+    -- including this dispatcher -- on every request, recursing forever.
+    """
+
+    def __init__(self, app, api_origins, api_credentials, oauth_origins):
+        self.api = CORSMiddleware(
+            app,
+            allow_origins=api_origins,
+            allow_credentials=api_credentials,
+            allow_methods=["*"],
+            allow_headers=["Authorization", "Content-Type"],
+            expose_headers=["WWW-Authenticate"],
+        )
+        self.oauth = CORSMiddleware(
+            app,
+            allow_origins=oauth_origins,
+            allow_credentials=False,
+            allow_methods=["*"],
+            allow_headers=["Authorization", "Content-Type"],
+            expose_headers=["WWW-Authenticate"],
+        )
+
+    async def __call__(self, scope, receive, send):
+        path = scope.get("path", "")
+        if path.startswith("/oauth/") or path.startswith("/.well-known/oauth-authorization-server"):
+            await self.oauth(scope, receive, send)
+        else:
+            await self.api(scope, receive, send)
+
+
 def create_app(
     database_url: str | None = None,
     storage=None,
@@ -340,7 +385,13 @@ def create_app(
 
     Base.metadata.create_all(engine)
     sessions = sessionmaker(engine, expire_on_commit=False)
+    oauth_config = make_oauth_config(public_url)
     clock_fn = clock or (lambda: int(datetime.now(UTC).timestamp()))
+    if oauth_config is not None:
+        # Bound startup cleanup so an upgraded long-running deployment cannot
+        # spend unbounded time deleting accumulated OAuth state before serving.
+        with sessions() as cleanup_session:
+            cleanup_expired_security_rows(cleanup_session, clock_fn())
     object_storage = storage or make_storage()
     base_url = (public_url or os.getenv("GEOLIBRE_PUBLIC_URL", "http://localhost:8000")).rstrip("/")
     viewer_url = os.getenv("GEOLIBRE_VIEWER_URL", "https://app.geolibre.org/").rstrip("/") + "/"
@@ -352,6 +403,7 @@ def create_app(
     app.state.storage = object_storage
     app.state.session_factory = sessions
     app.state.clock = clock_fn
+    app.state.oauth_config = oauth_config
     # A declared Content-Length past the largest thing any route accepts is
     # rejected before the body is read at all. Without this, the JSON `content`
     # routes let Pydantic materialize the whole payload in memory *before*
@@ -384,17 +436,42 @@ def create_app(
     # with it.
     wildcard = "*" in origins
 
+    oauth_origins: set[str] = set()
+    if oauth_config is not None:
+        for client in oauth_config.clients.values():
+            for uri in client.redirect_uris:
+                if uri.startswith(("http://", "https://")):
+                    parsed = urlparse(uri)
+                    oauth_origins.add(f"{parsed.scheme}://{parsed.netloc}")
+        for origin in origins:
+            if origin in (
+                "tauri://localhost",
+                "http://tauri.localhost",
+                "http://localhost:5173",
+                "http://127.0.0.1:5173",
+            ):
+                oauth_origins.add(origin)
+
     # Registered last so it is the outermost layer: Starlette wraps in reverse
     # order of registration, and with limit_body outermost its 413 returned
     # without CORS headers, leaving a browser unable to read the documented
     # error body.
-    app.add_middleware(
-        CORSMiddleware,
-        allow_origins=["*"] if wildcard else origins,
-        allow_credentials=not wildcard,
-        allow_methods=["*"],
-        allow_headers=["Authorization", "Content-Type"],
-    )
+    if oauth_config is not None:
+        app.add_middleware(
+            PathCORSMiddleware,
+            api_origins=["*"] if wildcard else origins,
+            api_credentials=not wildcard,
+            oauth_origins=sorted(oauth_origins),
+        )
+    else:
+        app.add_middleware(
+            CORSMiddleware,
+            allow_origins=["*"] if wildcard else origins,
+            allow_credentials=not wildcard,
+            allow_methods=["*"],
+            allow_headers=["Authorization", "Content-Type"],
+            expose_headers=["WWW-Authenticate"],
+        )
 
     @app.get("/health")
     def health():
@@ -427,8 +504,10 @@ def create_app(
         logger.exception("unhandled error", exc_info=exc)
         return JSONResponse({"error": "internal server error"}, status_code=500)
 
-    # Register identity routes before the username/slug catch-alls below.
+    # Identity routes must precede the username/slug catch-alls below.
     app.include_router(build_identity_router())
+    if oauth_config is not None:
+        app.include_router(build_oauth_router(oauth_config))
 
     def unique_slug(session: Session, owner_id: str, desired: str) -> str:
         base = slugify(desired)

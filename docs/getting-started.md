@@ -534,6 +534,21 @@ URLs. For a real deployment, set `GEOLIBRE_SHARE_URL`,
 `GEOLIBRE_COLLAB_URL`, `GEOLIBRE_VIEWER_URL`, and
 `GEOLIBRE_CORS_ORIGINS` to the public TLS origins before starting Compose.
 
+OAuth sign-in is disabled until `GEOLIBRE_OAUTH_CLIENTS` contains exact public
+client registrations. For the local web deployment:
+
+```bash
+export GEOLIBRE_OAUTH_CLIENTS='[{"client_id":"geolibre-web","name":"GeoLibre Web","redirect_uris":["http://localhost:8080/oauth-callback.html"],"scopes":["read:projects","write:projects","share:public"]}]'
+POSTGRES_PASSWORD=choose-a-password docker compose up --build
+```
+
+Production web callbacks require HTTPS and must end in
+`/oauth-callback.html`. The desktop client uses the exact callback
+`org.geolibre.desktop:/oauth/callback`. Add its separate
+`geolibre-desktop` registration to the same JSON array when desktop sign-in is
+required. See the [server API OAuth contract](server-api.md#oauth-20-sign-in-authorization-code--s256-pkce)
+for the flow and lifetime settings.
+
 Behind a reverse proxy, only the web container should be reachable from outside
 the host. The Compose file publishes the projects server on `8000` and the relay
 on `8787` for local use, and pointing the browser URLs at your proxy does not

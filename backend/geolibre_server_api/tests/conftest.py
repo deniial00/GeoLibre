@@ -2,15 +2,34 @@
 
 from __future__ import annotations
 
+import json
+
 import pytest
 from fastapi.testclient import TestClient
 from geolibre_server_api.main import FileStorage, create_app
 
 PUBLIC_URL = "https://share.example"
+WEB_REDIRECT = f"{PUBLIC_URL}/oauth-callback.html"
+DESKTOP_REDIRECT = "org.geolibre.desktop:/oauth/callback"
+
+OAUTH_CLIENTS = [
+    {
+        "client_id": "geolibre-web",
+        "name": "GeoLibre Web",
+        "redirect_uris": [WEB_REDIRECT],
+        "scopes": ["read:projects", "write:projects", "share:public"],
+    },
+    {
+        "client_id": "geolibre-desktop",
+        "name": "GeoLibre Desktop",
+        "redirect_uris": [DESKTOP_REDIRECT],
+        "scopes": ["read:projects", "write:projects", "share:public"],
+    },
+]
 
 
 class TestClock:
-    """Mutable clock for deterministic personal-token expiry tests."""
+    """Mutable wall clock for deterministic credential expiry tests."""
 
     def __init__(self, start: int = 1_700_000_000):
         self.now_ts = start
@@ -27,15 +46,39 @@ def clock() -> TestClock:
     return TestClock()
 
 
-@pytest.fixture
-def client(tmp_path, clock):
-    app = create_app(
+def _make_app(tmp_path, public_url: str, clock=None):
+    return create_app(
         f"sqlite:///{tmp_path / 'test.db'}",
-        public_url=PUBLIC_URL,
+        public_url=public_url,
         storage=FileStorage(str(tmp_path / "objects")),
-        clock=clock.now,
+        clock=clock,
     )
+
+
+@pytest.fixture
+def client(tmp_path, monkeypatch, clock):
+    """Legacy environment: OAuth disabled and PAT behavior unchanged."""
+    monkeypatch.delenv("GEOLIBRE_OAUTH_CLIENTS", raising=False)
+    app = _make_app(tmp_path, PUBLIC_URL, clock=clock.now)
     with TestClient(app) as test_client:
+        yield test_client
+
+
+@pytest.fixture
+def oauth_client(tmp_path, monkeypatch, clock):
+    """OAuth-enabled client speaking the canonical issuer origin."""
+    monkeypatch.setenv("GEOLIBRE_OAUTH_CLIENTS", json.dumps(OAUTH_CLIENTS))
+    app = _make_app(tmp_path, PUBLIC_URL, clock=clock.now)
+    with TestClient(app, base_url=PUBLIC_URL) as test_client:
+        yield test_client
+
+
+@pytest.fixture
+def pathed_client(tmp_path, monkeypatch, clock):
+    """OAuth enabled under a multi-segment issuer path."""
+    monkeypatch.setenv("GEOLIBRE_OAUTH_CLIENTS", json.dumps(OAUTH_CLIENTS))
+    app = _make_app(tmp_path, f"{PUBLIC_URL}/services/projects", clock=clock.now)
+    with TestClient(app, base_url=PUBLIC_URL) as test_client:
         yield test_client
 
 
@@ -54,12 +97,13 @@ def postgres_url():
 
 
 @pytest.fixture
-def postgres_app(tmp_path, postgres_url):
-    """Create the API in a unique disposable PostgreSQL schema."""
+def postgres_app(tmp_path, postgres_url, monkeypatch):
+    """Create the OAuth-enabled API in a unique disposable PostgreSQL schema."""
     import uuid
 
     from sqlalchemy import create_engine, text
 
+    monkeypatch.setenv("GEOLIBRE_OAUTH_CLIENTS", json.dumps(OAUTH_CLIENTS))
     schema = f"geolibre_test_{uuid.uuid4().hex[:12]}"
     admin = create_engine(postgres_url, isolation_level="AUTOCOMMIT")
     with admin.connect() as connection:
