@@ -400,11 +400,16 @@ function waitForCallbackCode(
     window.addEventListener("message", onMessage);
   });
 }
-async function fetchTokenEndpoint(url: URL, init: RequestInit): Promise<Response> {
+async function fetchTokenEndpoint(
+  url: URL,
+  init: RequestInit,
+): Promise<{ response: Response; body: unknown }> {
   const controller = new AbortController();
   const timeout = window.setTimeout(() => controller.abort(), TOKEN_REQUEST_TIMEOUT_MS);
   try {
-    return await fetch(url, { ...init, signal: controller.signal });
+    const response = await fetch(url, { ...init, signal: controller.signal });
+    const body = await response.json().catch(() => null);
+    return { response, body };
   } finally {
     window.clearTimeout(timeout);
   }
@@ -424,8 +429,9 @@ async function exchangeCode(
   redirectUri: string,
 ): Promise<TokenResponse> {
   let response: Response;
+  let body: unknown;
   try {
-    response = await fetchTokenEndpoint(oauthEndpointUrl(issuer, "token"), {
+    ({ response, body } = await fetchTokenEndpoint(oauthEndpointUrl(issuer, "token"), {
       method: "POST",
       headers: { "Content-Type": "application/x-www-form-urlencoded" },
       body: new URLSearchParams({
@@ -435,11 +441,11 @@ async function exchangeCode(
         redirect_uri: redirectUri,
         code_verifier: verifier,
       }),
-    });
+    }));
   } catch {
     throw new ShareOAuthError("exchange-failed", "Could not reach the share server.");
   }
-  const payload = (await response.json().catch(() => null)) as Partial<TokenResponse> | null;
+  const payload = body as Partial<TokenResponse> | null;
   if (
     !response.ok ||
     typeof payload?.access_token !== "string" ||
@@ -507,8 +513,9 @@ async function refreshAccessToken(
   generation: number,
 ): Promise<string | null> {
   let response: Response;
+  let body: unknown;
   try {
-    response = await fetchTokenEndpoint(oauthEndpointUrl(issuer, "token"), {
+    ({ response, body } = await fetchTokenEndpoint(oauthEndpointUrl(issuer, "token"), {
       method: "POST",
       headers: { "Content-Type": "application/x-www-form-urlencoded" },
       body: new URLSearchParams({
@@ -516,18 +523,18 @@ async function refreshAccessToken(
         client_id: CLIENT_ID,
         refresh_token: refreshToken,
       }),
-    });
+    }));
   } catch {
     // Network trouble is not an authorization failure: keep the session.
     return null;
   }
   if (generation !== sessionGeneration) return null;
   if (!response.ok) {
-    const body = (await response.json().catch(() => null)) as { error?: unknown } | null;
+    const parsedBody = body as { error?: unknown } | null;
     if (generation !== sessionGeneration) return null;
     const grantDead =
       (response.status === 400 || response.status === 401) &&
-      (body?.error === "invalid_grant" || body?.error === "invalid_client");
+      (parsedBody?.error === "invalid_grant" || parsedBody?.error === "invalid_client");
     if (grantDead) {
       // Dead family (reused/rotated elsewhere, revoked, expired): drop it.
       clearStoredSession(issuer);
@@ -536,7 +543,7 @@ async function refreshAccessToken(
     }
     return null;
   }
-  const payload = (await response.json().catch(() => null)) as Partial<TokenResponse> | null;
+  const payload = body as Partial<TokenResponse> | null;
   if (generation !== sessionGeneration) return null;
   if (
     typeof payload?.access_token !== "string" ||
