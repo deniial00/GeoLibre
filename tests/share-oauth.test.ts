@@ -94,10 +94,7 @@ describe("validateCallbackPayload", () => {
   });
 
   it("rejects a mismatched issuer (mix-up defense)", () => {
-    const verdict = validateCallbackPayload(
-      message({ iss: "https://evil.example" }),
-      expected,
-    );
+    const verdict = validateCallbackPayload(message({ iss: "https://evil.example" }), expected);
     assert.equal(verdict.ok, false);
     if (!verdict.ok) assert.equal(verdict.code, "issuer-mismatch");
   });

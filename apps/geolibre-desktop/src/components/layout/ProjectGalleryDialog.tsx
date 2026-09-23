@@ -441,7 +441,9 @@ export function ProjectGalleryDialog({
                 ) : (
                   <LogIn className="me-2 h-3.5 w-3.5" />
                 )}
-                {oauthPending ? t("share.oauthSigningIn") : t("share.oauthSignIn", { shareHost: shareHostLabel() })}
+                {oauthPending
+                  ? t("share.oauthSigningIn")
+                  : t("share.oauthSignIn", { shareHost: shareHostLabel() })}
               </Button>
             </div>
           ) : (

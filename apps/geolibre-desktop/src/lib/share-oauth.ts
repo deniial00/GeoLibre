@@ -282,9 +282,7 @@ interface CachedAccessToken {
 let cachedAccess: CachedAccessToken | null = null;
 
 function setStoreIssuer(issuer: string | null): void {
-  useShareOAuthStore.setState((state) =>
-    state.issuer === issuer ? state : { ...state, issuer },
-  );
+  useShareOAuthStore.setState((state) => (state.issuer === issuer ? state : { ...state, issuer }));
 }
 
 // ---------------------------------------------------------------------------
@@ -340,7 +338,9 @@ export async function signInToShare(baseUrl?: string): Promise<void> {
   } finally {
     if (pendingFlow === flow) {
       pendingFlow = null;
-      useShareOAuthStore.setState((state) => (state.pending ? { ...state, pending: false } : state));
+      useShareOAuthStore.setState((state) =>
+        state.pending ? { ...state, pending: false } : state,
+      );
     }
     popup.close();
   }
@@ -430,10 +430,16 @@ async function exchangeCode(
     throw new ShareOAuthError("exchange-failed", "The share server rejected the sign-in.");
   }
   const expiresIn =
-    typeof payload.expires_in === "number" && Number.isFinite(payload.expires_in) && payload.expires_in > 0
+    typeof payload.expires_in === "number" &&
+    Number.isFinite(payload.expires_in) &&
+    payload.expires_in > 0
       ? payload.expires_in
       : 600;
-  return { access_token: payload.access_token, refresh_token: payload.refresh_token, expires_in: expiresIn };
+  return {
+    access_token: payload.access_token,
+    refresh_token: payload.refresh_token,
+    expires_in: expiresIn,
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -453,7 +459,11 @@ export async function getShareAccessToken(baseUrl?: string): Promise<string | nu
   const issuer = resolveShareIssuer(baseUrl);
   if (!issuer) return null;
 
-  if (cachedAccess && cachedAccess.issuer === issuer && cachedAccess.expiresAt - ACCESS_EXPIRY_BUFFER_MS > Date.now()) {
+  if (
+    cachedAccess &&
+    cachedAccess.issuer === issuer &&
+    cachedAccess.expiresAt - ACCESS_EXPIRY_BUFFER_MS > Date.now()
+  ) {
     return cachedAccess.token;
   }
   const session = readSession(issuer);
@@ -506,7 +516,9 @@ async function refreshAccessToken(issuer: string, refreshToken: string): Promise
   // Rotation: the presented refresh token is consumed; store the successor.
   writeSession(issuer, payload.refresh_token);
   const expiresIn =
-    typeof payload.expires_in === "number" && Number.isFinite(payload.expires_in) && payload.expires_in > 0
+    typeof payload.expires_in === "number" &&
+    Number.isFinite(payload.expires_in) &&
+    payload.expires_in > 0
       ? payload.expires_in
       : 600;
   cachedAccess = { issuer, token: payload.access_token, expiresAt: Date.now() + expiresIn * 1000 };

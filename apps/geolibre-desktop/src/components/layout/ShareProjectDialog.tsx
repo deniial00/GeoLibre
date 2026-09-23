@@ -480,9 +480,7 @@ export function ShareProjectDialog({
                   ) : (
                     <LogIn className="me-2 h-3.5 w-3.5" />
                   )}
-                  {oauthPending
-                    ? t("share.oauthSigningIn")
-                    : t("share.oauthSignIn", { shareHost })}
+                  {oauthPending ? t("share.oauthSigningIn") : t("share.oauthSignIn", { shareHost })}
                 </Button>
                 {oauthError ? (
                   <p role="alert" className="text-xs text-destructive">
