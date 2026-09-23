@@ -124,6 +124,56 @@ def test_exactly_one_code_exchange_wins(postgres_app):
         client_b.close()
 
 
+def test_cancel_losing_approval_race_cannot_claim_denial(postgres_app):
+    app = postgres_app
+    initiator = TestClient(app, base_url="https://share.example")
+    approver, canceller = _two_clients(app)
+    approved = threading.Event()
+    paused_cancel = threading.Event()
+
+    def pause_cancel_update(_conn, _cursor, statement, _params, _context, _many):
+        if statement.lower().startswith("update oauth_authorization_codes set consumed_at"):
+            paused_cancel.set()
+            assert approved.wait(timeout=10)
+
+    event.listen(app.state.engine, "before_cursor_execute", pause_cancel_update)
+    try:
+        from helpers import ensure_account
+
+        ensure_account(initiator)
+        page, verifier, interaction, csrf = start_authorize(initiator)
+        assert page.status_code == 200
+        approver.cookies.update(initiator.cookies)
+        canceller.cookies.update(initiator.cookies)
+
+        def allow():
+            try:
+                return approve(approver, interaction, csrf)
+            finally:
+                approved.set()
+
+        results, errors = _run_concurrently(
+            [allow, lambda: approve(canceller, interaction, csrf, decision="cancel")]
+        )
+        assert not errors, errors
+        assert paused_cancel.is_set()
+        allowed, cancelled = results
+        assert allowed.status_code == 303
+        assert cancelled.status_code == 400
+        assert "location" not in cancelled.headers
+        assert (
+            exchange_code(
+                initiator, redirect_params(allowed)["code"], verifier=verifier
+            ).status_code
+            == 200
+        )
+    finally:
+        event.remove(app.state.engine, "before_cursor_execute", pause_cancel_update)
+        initiator.close()
+        approver.close()
+        canceller.close()
+
+
 def test_concurrent_refresh_reuse_revokes_the_family(postgres_app):
     app = postgres_app
     client = TestClient(app, base_url="https://share.example")

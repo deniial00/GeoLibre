@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import os
 import re
 import shutil
 import uuid
+from contextlib import asynccontextmanager, suppress
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Annotated, Callable, Literal
@@ -53,6 +55,7 @@ Visibility = Literal["public", "unlisted", "private"]
 SLUG_RE = re.compile(r"[^a-z0-9]+")
 IMAGE_TYPES = {"image/png", "image/jpeg", "image/webp"}
 
+OAUTH_CLEANUP_INTERVAL_SECONDS = 300
 logger = logging.getLogger(__name__)
 
 
@@ -387,18 +390,44 @@ def create_app(
     sessions = sessionmaker(engine, expire_on_commit=False)
     oauth_config = make_oauth_config(public_url)
     clock_fn = clock or (lambda: int(datetime.now(UTC).timestamp()))
-    if oauth_config is not None:
-        # Bound startup cleanup so an upgraded long-running deployment cannot
-        # spend unbounded time deleting accumulated OAuth state before serving.
+
+    def cleanup_oauth_state() -> None:
         with sessions() as cleanup_session:
             cleanup_expired_security_rows(cleanup_session, clock_fn())
+
+    if oauth_config is not None:
+        # Bound each sweep so accumulated state cannot stall startup or serving.
+        cleanup_oauth_state()
+
+    @asynccontextmanager
+    async def oauth_lifespan(_app: FastAPI):
+        async def sweep() -> None:
+            while True:
+                await asyncio.sleep(OAUTH_CLEANUP_INTERVAL_SECONDS)
+                try:
+                    await asyncio.to_thread(cleanup_oauth_state)
+                except Exception:
+                    logger.exception("periodic OAuth security-state cleanup failed")
+
+        task = asyncio.create_task(sweep())
+        try:
+            yield
+        finally:
+            task.cancel()
+            with suppress(asyncio.CancelledError):
+                await task
+
     object_storage = storage or make_storage()
     base_url = (public_url or os.getenv("GEOLIBRE_PUBLIC_URL", "http://localhost:8000")).rstrip("/")
     viewer_url = os.getenv("GEOLIBRE_VIEWER_URL", "https://app.geolibre.org/").rstrip("/") + "/"
     max_project_bytes = int(os.getenv("GEOLIBRE_MAX_PROJECT_BYTES", str(50 * 1024 * 1024)))
     max_thumbnail_bytes = int(os.getenv("GEOLIBRE_MAX_THUMBNAIL_BYTES", str(5 * 1024 * 1024)))
 
-    app = FastAPI(title="GeoLibre projects and identity API", version="1.0")
+    app = FastAPI(
+        title="GeoLibre projects and identity API",
+        version="1.0",
+        lifespan=oauth_lifespan if oauth_config is not None else None,
+    )
     app.state.engine = engine
     app.state.storage = object_storage
     app.state.session_factory = sessions

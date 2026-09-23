@@ -9,8 +9,13 @@ discovery. The clock fixture replaces sleeping: time advances only through
 from __future__ import annotations
 
 import hashlib
+import json
+import threading
 
 import pytest
+from fastapi.testclient import TestClient
+from geolibre_server_api import main as server_main
+from geolibre_server_api.main import FileStorage, create_app
 from helpers import (
     ORIGIN,
     approve,
@@ -85,7 +90,7 @@ def test_authorization_html_has_security_headers(oauth_client):
     expected = {
         "cache-control": "no-store",
         "pragma": "no-cache",
-        "referrer-policy": "same-origin",
+        "referrer-policy": "origin",
         "x-frame-options": "DENY",
     }
     for header, value in expected.items():
@@ -231,6 +236,37 @@ def test_pending_authorizations_are_capped(oauth_client):
         assert response.status_code == 200
     response, _, _, _ = start_authorize(oauth_client)
     assert response.status_code == 429
+
+
+def test_browser_cookie_survives_parallel_web_and_desktop_flows(oauth_client):
+    web, web_verifier, web_interaction, web_csrf = start_authorize(oauth_client)
+    assert web.status_code == 200
+    original_cookie = oauth_client.cookies.get("__Host-geolibre_oauth_browser")
+
+    desktop, desktop_verifier, desktop_interaction, desktop_csrf = start_authorize(
+        oauth_client, client_id="geolibre-desktop"
+    )
+    assert desktop.status_code == 200
+    assert oauth_client.cookies.get("__Host-geolibre_oauth_browser") == original_cookie
+
+    web_approval = approve(oauth_client, web_interaction, web_csrf)
+    desktop_approval = approve(oauth_client, desktop_interaction, desktop_csrf)
+    assert web_approval.status_code == desktop_approval.status_code == 303
+    assert (
+        exchange_code(
+            oauth_client, redirect_params(web_approval)["code"], verifier=web_verifier
+        ).status_code
+        == 200
+    )
+    assert (
+        exchange_code(
+            oauth_client,
+            redirect_params(desktop_approval)["code"],
+            client_id="geolibre-desktop",
+            verifier=desktop_verifier,
+        ).status_code
+        == 200
+    )
 
 
 def test_bad_host_is_rejected(oauth_client):
@@ -475,6 +511,25 @@ def test_refresh_rotation_consumes_and_mints(oauth_client, clock):
     assert refresh(oauth_client, rotated_json["refresh_token"]).status_code == 400
 
 
+def test_consumed_refresh_with_changed_scope_still_revokes_family(oauth_client):
+    tokens = sign_in(oauth_client)
+    rotated = refresh(oauth_client, tokens["refresh_token"])
+    assert rotated.status_code == 200
+    successor = rotated.json()
+
+    replay = refresh(oauth_client, tokens["refresh_token"], extra_form={"scope": "write:projects"})
+    assert replay.status_code == 400
+    assert replay.json()["error"] == "invalid_grant"
+    assert (
+        oauth_client.get(
+            "/api/users/me",
+            headers={"Authorization": f"Bearer {successor['access_token']}"},
+        ).status_code
+        == 401
+    )
+    assert refresh(oauth_client, successor["refresh_token"]).status_code == 400
+
+
 def test_refresh_scope_compares_canonical_sets(oauth_client):
     tokens = sign_in(oauth_client, scope="read:projects write:projects")
     mismatched = refresh(
@@ -570,6 +625,52 @@ def test_oauth_operations_cleanup_expired_state_and_keep_active_reuse_history(oa
             "oauth_authorization_codes",
         ):
             assert connection.exec_driver_sql(f"select count(*) from {table}").scalar() == 0
+
+
+def test_idle_server_periodically_cleans_expired_rows(tmp_path, monkeypatch, clock):
+    from conftest import OAUTH_CLIENTS, PUBLIC_URL
+
+    monkeypatch.setenv("GEOLIBRE_OAUTH_CLIENTS", json.dumps(OAUTH_CLIENTS))
+    monkeypatch.setattr(server_main, "OAUTH_CLEANUP_INTERVAL_SECONDS", 0.01)
+    expired_at = clock.now() + 601
+    swept = threading.Event()
+    original_cleanup = server_main.cleanup_expired_security_rows
+
+    def observe_cleanup(session, now_ts):
+        original_cleanup(session, now_ts)
+        if now_ts >= expired_at:
+            swept.set()
+
+    monkeypatch.setattr(server_main, "cleanup_expired_security_rows", observe_cleanup)
+    app = create_app(
+        f"sqlite:///{tmp_path / 'idle.db'}",
+        storage=FileStorage(str(tmp_path / "objects")),
+        public_url=PUBLIC_URL,
+        clock=clock.now,
+    )
+    with TestClient(app, base_url=PUBLIC_URL) as test_client:
+        tokens = sign_in(test_client)
+        assert refresh(test_client, tokens["refresh_token"]).status_code == 200
+        page, _, _, _ = start_authorize(test_client)
+        assert page.status_code == 200
+        clock.advance(601)
+        # No more HTTP requests: only the lifespan task can trigger cleanup.
+        assert swept.wait(2), "idle OAuth cleanup did not run"
+        with app.state.engine.connect() as connection:
+            assert (
+                connection.exec_driver_sql("select count(*) from oauth_access_tokens").scalar() == 0
+            )
+            assert (
+                connection.exec_driver_sql(
+                    "select count(*) from oauth_authorization_codes where approved_at is null"
+                ).scalar()
+                == 0
+            )
+            assert (
+                connection.exec_driver_sql("select count(*) from oauth_refresh_tokens").scalar()
+                == 2
+            )
+    app.state.engine.dispose()
 
 
 def test_wrong_client_cannot_revoke_or_use_a_family(oauth_client):

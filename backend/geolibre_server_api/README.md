@@ -54,5 +54,9 @@ docker run --rm -v geolibre_geolibre-projects:/data/objects busybox \
 ## Hardening
 
 The OAuth consent flow caps pending interactions, but general rate limiting and
-a complete request-size limit are not implemented here. See "What the reference
-server leaves to the operator" in `docs/server-api.md` before public exposure.
+a complete request-size limit are not implemented here. Keep the API behind a
+rate-limiting proxy for **GET and POST** `/oauth/authorize`, `POST /oauth/token`,
+`POST /api/auth/token`, and `POST /api/accounts`; the Compose API port binds to
+loopback so that proxy cannot be bypassed from outside the host. See "What the
+reference server leaves to the operator" in `docs/server-api.md` before public
+exposure.

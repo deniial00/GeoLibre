@@ -112,6 +112,7 @@ def iso_ts(epoch_seconds: int) -> str:
 # Password and token primitives
 # ---------------------------------------------------------------------------
 
+
 def password_hash(password: str, salt: bytes | None = None) -> str:
     """Hash a password with scrypt, optionally reusing a caller-provided salt."""
     if not password:
@@ -140,6 +141,7 @@ def token_digest(token: str) -> str:
 def base64url_sha256(value: str) -> str:
     digest = hashlib.sha256(value.encode("ascii")).digest()
     return base64.urlsafe_b64encode(digest).rstrip(b"=").decode("ascii")
+
 
 def account_json(account: Account) -> dict:
     """Serialize an account with the API's camelCase field names."""
@@ -566,6 +568,7 @@ def cleanup_expired_security_rows(session: Session, now_ts: int, *, batch_size: 
     if changed:
         session.commit()
 
+
 def required_principal(
     principal: AuthPrincipal | None = Depends(optional_principal),
 ) -> AuthPrincipal:
@@ -729,9 +732,9 @@ def authorization_html_response(
     response = HTMLResponse(body, status_code=status)
     response.headers["Cache-Control"] = "no-store"
     response.headers["Pragma"] = "no-cache"
-    # Keep the issuer origin available to the same-origin consent POST while
-    # withholding the authorization URL from the cross-origin callback.
-    response.headers["Referrer-Policy"] = "same-origin"
+    # Send only the issuer origin to the consent POST (needed for browser
+    # validation), never the authorization URL's state/challenge query.
+    response.headers["Referrer-Policy"] = "origin"
     form_action = "'self'"
     if form_redirect_uri is not None:
         redirect = urlparse(form_redirect_uri)
@@ -904,6 +907,7 @@ class TokenIssueRequest(BaseModel):
     values is enforced in the routes, not by Pydantic, so the error
     vocabulary matches the contract.
     """
+
     username: str = Field(max_length=39)
     password: str = Field(max_length=1024)
     name: str | None = Field(default=None, max_length=100)
@@ -1100,12 +1104,11 @@ def build_oauth_router(config: OAuthConfig) -> APIRouter:
         existing = request.cookies.get(BROWSER_COOKIE)
         if existing:
             existing_digest = token_digest(existing)
-            # Reuse a valid, unexpired binding for this client across
-            # simultaneous forms.
+            # One browser cookie binds simultaneous consent forms for every
+            # registered client; only the pending cap is per client.
             reusable = session.scalar(
                 select(OAuthAuthorizationCode.id).where(
                     OAuthAuthorizationCode.browser_cookie_digest == existing_digest,
-                    OAuthAuthorizationCode.client_id == client_id,
                     OAuthAuthorizationCode.interaction_expires_at > now_ts,
                 )
             )
@@ -1227,11 +1230,23 @@ def build_oauth_router(config: OAuthConfig) -> APIRouter:
             return oauth_error_page(400, "invalid_request", "unknown client")
 
         if decision == "cancel":
-            session.execute(
+            # A simultaneous approval may have committed since the pending row
+            # was read. Only the winner may claim to have denied consent.
+            cancelled = session.execute(
                 update(OAuthAuthorizationCode)
-                .where(OAuthAuthorizationCode.id == interaction.id)
+                .where(
+                    OAuthAuthorizationCode.id == interaction.id,
+                    OAuthAuthorizationCode.approved_at.is_(None),
+                    OAuthAuthorizationCode.consumed_at.is_(None),
+                    OAuthAuthorizationCode.interaction_expires_at > now_ts,
+                )
                 .values(consumed_at=now_ts)
-            )
+            ).rowcount
+            if not cancelled:
+                session.rollback()
+                return oauth_error_page(
+                    400, "invalid_request", "authorization request already processed"
+                )
             session.commit()
             return oauth_error_redirect(
                 config.issuer, interaction.redirect_uri, "access_denied", interaction.state
@@ -1279,6 +1294,7 @@ def build_oauth_router(config: OAuthConfig) -> APIRouter:
                 OAuthAuthorizationCode.id == interaction.id,
                 OAuthAuthorizationCode.approved_at.is_(None),
                 OAuthAuthorizationCode.consumed_at.is_(None),
+                OAuthAuthorizationCode.interaction_expires_at > now_ts,
             )
             .values(
                 account_id=account.id,
@@ -1440,12 +1456,6 @@ def build_oauth_router(config: OAuthConfig) -> APIRouter:
             or refresh.expires_at <= now_ts
         ):
             return oauth_token_error(400, "invalid_grant")
-        if requested_scope is not None:
-            requested_scope_set = parse_scope_set(requested_scope)
-            if requested_scope_set is None or requested_scope_set != frozenset(
-                oauth_session.scope.split()
-            ):
-                return oauth_token_error(400, "invalid_scope")
         if refresh.consumed_at is not None:
             # Reuse: a consumed generation presented with its correct binding
             # revokes the whole family (including any tokens minted by the
@@ -1457,6 +1467,12 @@ def build_oauth_router(config: OAuthConfig) -> APIRouter:
             )
             session.commit()
             return oauth_token_error(400, "invalid_grant")
+        if requested_scope is not None:
+            requested_scope_set = parse_scope_set(requested_scope)
+            if requested_scope_set is None or requested_scope_set != frozenset(
+                oauth_session.scope.split()
+            ):
+                return oauth_token_error(400, "invalid_scope")
 
         # Serialization point shared with revocation: a conditional UPDATE on
         # the family row. If a concurrent revoke wins, this matches 0 rows and

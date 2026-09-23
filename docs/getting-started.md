@@ -554,18 +554,16 @@ Production web callbacks require HTTPS and must end in
 required. See the [server API OAuth contract](server-api.md#oauth-20-sign-in-authorization-code--s256-pkce)
 for the flow and lifetime settings.
 
-Behind a reverse proxy, only the web container should be reachable from outside
-the host. The Compose file publishes the projects server on `8000` and the relay
-on `8787` for local use, and pointing the browser URLs at your proxy does not
-stop anyone connecting to those listeners directly. Bind them to loopback (or
-drop the mappings entirely and let the proxy reach them over the Compose
-network) with an override file:
+Behind a reverse proxy, keep the projects API behind the rate-limit boundary:
+Compose binds its host port to `127.0.0.1` by default. Do not override that
+binding to `0.0.0.0` or publish the container port directly; either have a
+same-host proxy connect to loopback or let a proxy container reach the API over
+the Compose network. The relay still publishes `8787` for local use; bind it to
+loopback when only the web container should be reachable from outside the host:
 
 ```yaml
 # docker-compose.override.yml
 services:
-  geolibre-server:
-    ports: ["127.0.0.1:8000:8000"]
   geolibre-collab:
     ports: ["127.0.0.1:8787:8787"]
 ```

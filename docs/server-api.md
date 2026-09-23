@@ -33,10 +33,39 @@ Deployment protections remain the operator's responsibility:
   1–365 day lifetime where bounded credentials are needed, and revoke or rotate
   delete-only and legacy tokens operationally.
 - **Rate limiting.** The OAuth consent flow caps pending interactions per
-  browser binding, but the reference server has no general request limiter.
-  `POST /api/auth/token`, `POST /api/accounts`, and the consent login all run
-  scrypt. Put a reverse proxy or WAF limit on these routes, keyed by client IP
-  and username.
+  browser binding, but a fresh cookie bypasses that cap; the reference server
+  has no general request limiter. Before enabling OAuth publicly, enforce
+  per-client-IP limits at the ingress on **GET and POST** `/oauth/authorize`,
+  `POST /oauth/token`, `POST /api/auth/token`, and `POST /api/accounts`.
+  The last three POSTs include password or token operations; consent login
+  and the PAT/account routes run scrypt. Add per-username limits where the
+  ingress can safely parse credentials. Every public path to the API must go
+  through this limiter: Compose binds the API host port to loopback by default.
+  A root-issuer nginx deployment can put this zone in its `http` context and
+  the location in its TLS issuer `server` context:
+
+  ```nginx
+  # http context
+  limit_req_zone $binary_remote_addr zone=geolibre_auth:10m rate=12r/m;
+
+  # TLS issuer server context; proxy other API routes separately.
+  location ~ ^/(oauth/(authorize|token)|api/(auth/token|accounts))$ {
+      limit_req zone=geolibre_auth burst=6 nodelay;
+      limit_req_status 429;
+      client_max_body_size 16k;
+      access_log off;
+      proxy_pass http://127.0.0.1:8000;
+      proxy_set_header Host $http_host;
+  }
+  ```
+
+  Preserve the original Host authority, including any port, or OAuth host
+  binding rejects the request. Route the issuer's exact discovery URL and
+  other API paths to the same backend; for a path-prefixed issuer, apply the
+  limit to its externally visible prefix and strip that prefix when proxying.
+  Suppress authorization request query strings, callback `Location` headers,
+  and callback request query strings at the web ingress in proxy, WAF, and
+  load-balancer logs.
 - **A request-size limit.** The server rejects an oversized *declared*
   `Content-Length` before reading the body, but a chunked or HTTP/2 request
   declares no length and is parsed in full before the per-route limit applies.
@@ -393,6 +422,11 @@ family. Refresh tokens are single-use and rotate on every use. Reusing a
 consumed refresh token revokes the entire family, including tokens minted by
 the successful rotation. A family expires at issuance plus the configured
 refresh TTL (30 days by default); rotation never extends it.
+
+An enabled server deletes bounded batches of expired interactions, access
+tokens, and families at startup, during OAuth requests, and every five minutes
+while running. Consumed refresh generations stay until the family expires so
+replay detection remains effective.
 
 `POST /oauth/revoke` accepts `client_id`, `token`, and optional advisory
 `token_type_hint`. A matching access or refresh token revokes its entire
