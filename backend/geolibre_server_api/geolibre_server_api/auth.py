@@ -90,8 +90,6 @@ PKCE_VERIFIER_RE = re.compile(r"^[A-Za-z0-9._~-]{43,128}$")
 # URL-safe state used for CSRF binding between the app and the server.
 STATE_RE = re.compile(r"^[A-Za-z0-9._~-]{16,512}$")
 
-logger = __import__("logging").getLogger(__name__)
-
 
 # ---------------------------------------------------------------------------
 # Time helpers
@@ -735,6 +733,8 @@ def authorization_html_response(
     # Send only the issuer origin to the consent POST (needed for browser
     # validation), never the authorization URL's state/challenge query.
     response.headers["Referrer-Policy"] = "origin"
+    # Some browsers apply form-action to the 303 after the consent POST, so the
+    # registered callback origin must be allowed even though the form posts here.
     form_action = "'self'"
     if form_redirect_uri is not None:
         redirect = urlparse(form_redirect_uri)
@@ -824,9 +824,16 @@ def is_sqlite_lock_error(session: Session, exc: OperationalError) -> bool:
 # ---------------------------------------------------------------------------
 
 
+def _is_form_content_type(request: Request) -> bool:
+    return (
+        request.headers.get("content-type", "").split(";", 1)[0].strip().lower()
+        == "application/x-www-form-urlencoded"
+    )
+
+
 async def read_form_body(request: Request) -> bytes | None:
     """Read a bounded URL-encoded body asynchronously, if the content type matches."""
-    if request.headers.get("content-type", "").split(";")[0] != "application/x-www-form-urlencoded":
+    if not _is_form_content_type(request):
         return None
     chunks: list[bytes] = []
     total = 0
@@ -1079,6 +1086,10 @@ def build_oauth_router(config: OAuthConfig) -> APIRouter:
         if client is None or redirect_uri not in client.redirect_uris:
             return oauth_error_page(400, "invalid_request", "unknown client or redirect URI")
         state = params.get("state", "")
+        # Never reflect an unbounded value into a redirect, including the
+        # unsupported-response-type branch that precedes state validation.
+        if len(state) > 512:
+            return oauth_error_page(400, "invalid_request", "state too long")
         if params.get("response_type") != "code":
             return oauth_error_redirect(
                 config.issuer, redirect_uri, "unsupported_response_type", state
@@ -1197,8 +1208,7 @@ def build_oauth_router(config: OAuthConfig) -> APIRouter:
         referer = request.headers.get("referer")
         if not same_origin_allowed(config, origin, referer):
             return oauth_error_page(400, "invalid_request", "cross-origin request rejected")
-        content_type = request.headers.get("content-type", "").split(";")[0]
-        if content_type != "application/x-www-form-urlencoded":
+        if not _is_form_content_type(request):
             return oauth_error_page(400, "invalid_request", "invalid content type")
         if body is None:
             return oauth_error_page(400, "invalid_request", "request body too large")
@@ -1580,8 +1590,7 @@ def build_oauth_router(config: OAuthConfig) -> APIRouter:
         body: bytes | None = Depends(read_form_body),
         session: Session = Depends(get_session),
     ):
-        content_type = request.headers.get("content-type", "").split(";")[0]
-        if content_type != "application/x-www-form-urlencoded":
+        if not _is_form_content_type(request):
             return oauth_token_error(400, "invalid_request")
         if body is None:
             return oauth_token_error(400, "invalid_request")
@@ -1614,8 +1623,7 @@ def build_oauth_router(config: OAuthConfig) -> APIRouter:
         body: bytes | None = Depends(read_form_body),
         session: Session = Depends(get_session),
     ):
-        content_type = request.headers.get("content-type", "").split(";")[0]
-        if content_type != "application/x-www-form-urlencoded":
+        if not _is_form_content_type(request):
             return oauth_token_error(400, "invalid_request")
         if body is None:
             return oauth_token_error(400, "invalid_request")

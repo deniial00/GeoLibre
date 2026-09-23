@@ -381,9 +381,10 @@ and `code_challenge_method=S256`; `device_label` is optional. State is 16–512
 URL-safe characters. The S256 challenge is the 43-character unpadded base64url
 SHA-256 value.
 
-Unknown clients and unregistered redirects return a local error page and never
-receive a `Location` header. Other authorization errors redirect to the already
-validated callback with `error`, `state`, and `iss`.
+Unknown clients, unregistered redirects, and state values longer than 512
+characters return a local error page without a `Location` header. Other
+authorization errors redirect to the already validated callback with `error`,
+`iss`, and the exact `state` value when supplied.
 
 `POST /oauth/authorize` submits the server-owned consent form. It requires the
 browser-binding cookie, CSRF value, same-origin `Origin` or `Referer`, and

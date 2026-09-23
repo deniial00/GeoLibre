@@ -205,6 +205,15 @@ def test_authorize_rejects_bad_requests_with_redirect_error(oauth_client, mutato
     assert response.headers["location"].startswith("https://share.example/oauth-callback.html")
 
 
+def test_oversized_state_never_enters_an_error_redirect(oauth_client):
+    response, _, _, _ = start_authorize(
+        oauth_client, state="s" * 8192, params_extra={"response_type": "token"}
+    )
+    assert response.status_code == 400
+    assert "location" not in response.headers
+    assert "s" * 8192 not in response.text
+
+
 def test_authorize_rejects_duplicate_security_parameters(oauth_client):
     verifier, challenge = make_verifier_and_challenge()
     base = {
@@ -463,6 +472,52 @@ def test_token_endpoint_requires_form_urlencoded(oauth_client):
     )
     assert response.status_code == 400
     assert response.json()["error"] == "invalid_request"
+
+
+def test_oauth_post_endpoints_accept_case_insensitive_form_media_type(oauth_client):
+    page, verifier, interaction, csrf = start_authorize(oauth_client)
+    assert page.status_code == 200 and interaction and csrf
+    headers = {"Content-Type": "Application/X-WWW-Form-Urlencoded ; charset=UTF-8"}
+    approved = oauth_client.post(
+        "/oauth/authorize",
+        data={
+            "interaction": interaction,
+            "csrf": csrf,
+            "label": "Test device",
+            "username": "ada",
+            "password": "correct horse",
+            "decision": "allow",
+        },
+        headers=headers | {"Origin": ORIGIN},
+        follow_redirects=False,
+    )
+    assert approved.status_code == 303
+
+    exchanged = oauth_client.post(
+        "/oauth/token",
+        data={
+            "grant_type": "authorization_code",
+            "client_id": "geolibre-web",
+            "redirect_uri": "https://share.example/oauth-callback.html",
+            "code": redirect_params(approved)["code"],
+            "code_verifier": verifier,
+        },
+        headers=headers,
+    )
+    assert exchanged.status_code == 200
+    access_token = exchanged.json()["access_token"]
+    revoked = oauth_client.post(
+        "/oauth/revoke",
+        data={"client_id": "geolibre-web", "token": access_token},
+        headers=headers,
+    )
+    assert revoked.status_code == 200
+    assert (
+        oauth_client.get(
+            "/api/users/me", headers={"Authorization": f"Bearer {access_token}"}
+        ).status_code
+        == 401
+    )
 
 
 def test_unknown_client_gets_invalid_client(oauth_client):
