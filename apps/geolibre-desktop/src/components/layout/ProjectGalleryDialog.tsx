@@ -150,17 +150,6 @@ export function ProjectGalleryDialog({
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const loadMoreSentinelRef = useRef<HTMLDivElement>(null);
 
-  // Web sign-in from the gallery. Failures land in the same error strip the
-  // fetch errors use, translated from the ShareOAuthError code.
-  const handleSignIn = () => {
-    setError(null);
-    setErrorCode(null);
-    signInToShare().catch((err: unknown) => {
-      setError(
-        t(err instanceof ShareOAuthError ? shareOAuthErrorKey(err.code) : "share.oauthFailed"),
-      );
-    });
-  };
 
   // Without a token, the "My projects" scope isn't available; fall back to the
   // featured tab.
@@ -285,6 +274,22 @@ export function ProjectGalleryDialog({
     },
     [t, effectiveScope, trimmedToken, oauthSupported, oauthSignedIn],
   );
+  // Web sign-in from the gallery. Keep the current error visible while the
+  // popup is pending; a successful sign-in reloads the active scope explicitly
+  // because the issuer may remain unchanged.
+  const handleSignIn = () => {
+    signInToShare()
+      .then(() => {
+        setErrorCode(null);
+        void loadPage(0);
+      })
+      .catch((err: unknown) => {
+        setError(
+          t(err instanceof ShareOAuthError ? shareOAuthErrorKey(err.code) : "share.oauthFailed"),
+        );
+      });
+  };
+
 
   // Reload from the first page when the dialog opens or the scope changes (the
   // `loadPage` identity changes with scope); reset transient state and abort any

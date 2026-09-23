@@ -340,11 +340,15 @@ export function ShareProjectDialog({
   // success, which re-runs the readiness probe effect below (hasToken flips).
   const handleSignIn = () => {
     setOauthError(null);
-    signInToShare().catch((err: unknown) => {
-      setOauthError(
-        t(err instanceof ShareOAuthError ? shareOAuthErrorKey(err.code) : "share.oauthFailed"),
-      );
-    });
+    signInToShare()
+      .then(() => {
+        setErrorCode((code) => (code === "unauthorized" ? null : code));
+      })
+      .catch((err: unknown) => {
+        setOauthError(
+          t(err instanceof ShareOAuthError ? shareOAuthErrorKey(err.code) : "share.oauthFailed"),
+        );
+      });
   };
 
   const handleShare = async () => {
