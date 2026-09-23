@@ -1142,7 +1142,7 @@ def build_oauth_router(config: OAuthConfig) -> APIRouter:
             )
         )
         if (pending or 0) >= MAX_PENDING_PER_BINDING:
-            return oauth_error_page(429, "too many requests", "too many pending authorizations")
+            return oauth_error_page(429, "too_many_requests", "too many pending authorizations")
 
         csrf_value = secrets.token_urlsafe(32)
         interaction = OAuthAuthorizationCode(
