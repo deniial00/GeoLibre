@@ -639,20 +639,27 @@ export function ShareProjectDialog({
               >
                 <p>{t("share.reauthBody", { shareHost })}</p>
                 {oauthSupported ? (
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    onClick={handleSignIn}
-                    disabled={oauthPending}
-                  >
-                    {oauthPending ? (
-                      <Loader2 className="me-2 h-3.5 w-3.5 animate-spin" />
-                    ) : (
-                      <LogIn className="me-2 h-3.5 w-3.5" />
-                    )}
-                    {t("share.reauthSignIn")}
-                  </Button>
+                  <>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={handleSignIn}
+                      disabled={oauthPending}
+                    >
+                      {oauthPending ? (
+                        <Loader2 className="me-2 h-3.5 w-3.5 animate-spin" />
+                      ) : (
+                        <LogIn className="me-2 h-3.5 w-3.5" />
+                      )}
+                      {t("share.reauthSignIn")}
+                    </Button>
+                    {oauthError ? (
+                      <p role="alert" className="text-xs text-destructive">
+                        {oauthError}
+                      </p>
+                    ) : null}
+                  </>
                 ) : (
                   <Button type="button" variant="outline" size="sm" onClick={handleConfigureToken}>
                     <KeyRound className="me-2 h-3.5 w-3.5" />

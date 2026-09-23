@@ -41,6 +41,9 @@ const POPUP_POLL_MS = 500;
 /** Refresh an access token this long before its stated expiry. */
 const ACCESS_EXPIRY_BUFFER_MS = 30_000;
 
+/** Bound token endpoint requests so a stalled server cannot block sign-in. */
+const TOKEN_REQUEST_TIMEOUT_MS = 30_000;
+
 /** sessionStorage key prefix; the issuer completes it. */
 const SESSION_PREFIX = "geolibre-share-oauth:";
 
@@ -318,8 +321,10 @@ export async function signInToShare(baseUrl?: string): Promise<void> {
 
   pendingFlow = flow;
   useShareOAuthStore.setState((state) => (state.pending ? state : { ...state, pending: true }));
+  const flowGeneration = sessionGeneration;
   try {
     const challenge = await s256Challenge(verifier);
+    if (flowGeneration !== sessionGeneration) return;
     const redirectUri = deriveCallbackUrl(window.location.origin);
     const authorizeUrl = oauthEndpointUrl(issuer, "authorize");
     authorizeUrl.search = new URLSearchParams({
@@ -334,7 +339,9 @@ export async function signInToShare(baseUrl?: string): Promise<void> {
     popup.location.href = authorizeUrl.toString();
 
     const code = await waitForCallbackCode(popup, { state, issuer, flow });
+    if (flowGeneration !== sessionGeneration) return;
     const tokens = await exchangeCode(issuer, code, verifier, redirectUri);
+    if (flowGeneration !== sessionGeneration) return;
     sessionGeneration += 1;
     writeSession(issuer, tokens.refresh_token);
     cachedAccess = {
@@ -397,6 +404,15 @@ function waitForCallbackCode(
     window.addEventListener("message", onMessage);
   });
 }
+async function fetchTokenEndpoint(url: URL, init: RequestInit): Promise<Response> {
+  const controller = new AbortController();
+  const timeout = window.setTimeout(() => controller.abort(), TOKEN_REQUEST_TIMEOUT_MS);
+  try {
+    return await fetch(url, { ...init, signal: controller.signal });
+  } finally {
+    window.clearTimeout(timeout);
+  }
+}
 
 interface TokenResponse {
   access_token: string;
@@ -413,7 +429,7 @@ async function exchangeCode(
 ): Promise<TokenResponse> {
   let response: Response;
   try {
-    response = await fetch(oauthEndpointUrl(issuer, "token"), {
+    response = await fetchTokenEndpoint(oauthEndpointUrl(issuer, "token"), {
       method: "POST",
       headers: { "Content-Type": "application/x-www-form-urlencoded" },
       body: new URLSearchParams({
@@ -496,7 +512,7 @@ async function refreshAccessToken(
 ): Promise<string | null> {
   let response: Response;
   try {
-    response = await fetch(oauthEndpointUrl(issuer, "token"), {
+    response = await fetchTokenEndpoint(oauthEndpointUrl(issuer, "token"), {
       method: "POST",
       headers: { "Content-Type": "application/x-www-form-urlencoded" },
       body: new URLSearchParams({

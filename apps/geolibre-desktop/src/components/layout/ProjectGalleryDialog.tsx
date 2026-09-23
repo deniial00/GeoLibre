@@ -309,10 +309,14 @@ export function ProjectGalleryDialog({
     setOpeningState({ id: project.id, action });
     setOpenError(null);
     try {
-      // Same credential resolution as loadPage: a fresh OAuth token on web,
-      // the pasted personal token on desktop. Public/unlisted opens still send
-      // no Authorization header at all (see projectOpenToken).
-      const token = oauthSupported ? ((await getShareAccessToken()) ?? trimmedToken) : trimmedToken;
+      // Only private projects in "My projects" need credentials; public and
+      // unlisted opens must stay anonymous to avoid a CORS preflight.
+      const token =
+        effectiveScope === "mine" && project.visibility === "private"
+          ? oauthSupported
+            ? ((await getShareAccessToken()) ?? trimmedToken)
+            : trimmedToken
+          : "";
       await onOpenProject(
         project.rawJsonUrl,
         effectiveScope === "mine" ? projectOpenToken(project, token) : undefined,
