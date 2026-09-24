@@ -658,7 +658,11 @@ export function ShareProjectDialog({
                 role="alert"
                 className="space-y-2 rounded-md bg-destructive/10 p-3 text-sm text-destructive"
               >
-                <p>{t("share.reauthBody", { shareHost })}</p>
+                <p>
+                  {t(oauthSupported ? "share.reauthBody" : "share.errorUnauthorized", {
+                    shareHost,
+                  })}
+                </p>
                 {oauthSupported ? (
                   <>
                     <Button

@@ -1481,6 +1481,7 @@
     "oauthFailed": "Sign-in failed. Please try again.",
     "oauthRefreshFailed": "Could not refresh your session. Check your connection and try again.",
     "reauthBody": "Your {{shareHost}} session has expired. Sign in again to keep sharing.",
+    "errorUnauthorized": "Your {{shareHost}} API token is invalid or expired. Update it in Settings.",
     "reauthSignIn": "Sign in again",
     "liveAt": "Your project is live at:",
     "credentialsRemoved": "{{count}} credential field(s) were not included. Recipients must provide their own credentials or use a brokered reference.",
