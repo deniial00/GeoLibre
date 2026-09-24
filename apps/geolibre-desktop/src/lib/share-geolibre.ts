@@ -130,20 +130,16 @@ export interface ShareHost {
 
 /**
  * Whether a URL is safe to send a Bearer token to: HTTPS anywhere, or HTTP on
- * loopback for local development, and never with credentials in the URL.
+ * loopback for local development. Share base URLs cannot include credentials,
+ * query strings, or fragments.
  *
  * The hostname is matched exactly rather than by prefix — `startsWith(
  * "http://localhost")` would also accept `http://localhost.evil.com`. A
  * self-hosted server on a private network therefore needs TLS; see
  * `docs/getting-started.md`.
- *
- * Embedded credentials are rejected regardless of scheme, mirroring the
- * `service_url()` validator in `docker/entrypoint.sh`: a `https://user:pass@host`
- * base would send Basic Auth alongside the Bearer token on every request, and
- * the value reaches log output and error messages.
  */
 function isSafeShareUrl(url: URL): boolean {
-  if (url.username || url.password) return false;
+  if (url.username || url.password || url.href.includes("?") || url.href.includes("#")) return false;
   if (url.protocol === "https:") return true;
   return url.protocol === "http:" && (url.hostname === "localhost" || url.hostname === "127.0.0.1");
 }

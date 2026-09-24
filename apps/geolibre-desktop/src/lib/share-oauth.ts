@@ -136,7 +136,12 @@ export function supportsShareOAuth(): boolean {
  * unavailable or the configured base URL is invalid.
  */
 export function resolveShareIssuer(baseUrl?: string): string | null {
-  const base = baseUrl ?? resolveShareBaseUrl();
+  const base =
+    baseUrl === undefined
+      ? resolveShareBaseUrl()
+      : baseUrl.trim()
+        ? resolveShareBaseUrl(baseUrl)
+        : null;
   if (!base) return null;
   try {
     return new URL(base).toString().replace(/\/+$/, "");

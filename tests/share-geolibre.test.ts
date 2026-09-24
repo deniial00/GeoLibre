@@ -107,6 +107,13 @@ describe("resolveShareBaseUrl", () => {
     assert.equal(resolveShareBaseUrl("http://user:pass@localhost:8000"), null);
   });
 
+  it("refuses query strings and fragments in share base URLs", () => {
+    assert.equal(resolveShareBaseUrl("https://maps.example.org/?tenant=private"), null);
+    assert.equal(resolveShareBaseUrl("https://maps.example.org/#section"), null);
+    assert.equal(resolveShareBaseUrl("https://maps.example.org?"), null);
+    assert.equal(resolveShareBaseUrl("https://maps.example.org#"), null);
+  });
+
   it('treats "off" as sharing disabled', () => {
     assert.equal(resolveShareBaseUrl("off"), null);
     assert.equal(resolveShareBaseUrl("OFF"), null);

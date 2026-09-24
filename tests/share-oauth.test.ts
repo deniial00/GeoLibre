@@ -196,6 +196,13 @@ describe("resolveShareIssuer", () => {
     assert.equal(resolveShareIssuer(""), null);
     assert.equal(resolveShareIssuer("not a URL"), null);
   });
+
+  it("validates explicit base URLs before resolving the issuer", () => {
+    assert.equal(resolveShareIssuer("http://share.example"), null);
+    assert.equal(resolveShareIssuer("https://user:pass@share.example"), null);
+    assert.equal(resolveShareIssuer("https://share.example/?tenant=private"), null);
+    assert.equal(resolveShareIssuer("https://share.example/#section"), null);
+  });
 });
 
 describe("deriveCallbackUrl", () => {
