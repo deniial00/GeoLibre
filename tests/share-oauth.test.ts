@@ -234,6 +234,7 @@ describe("sign-in stale result handling", () => {
       await signIn;
 
       assert.equal(storage.has(`geolibre-share-oauth:${issuer}`), false);
+      assert.equal(await getShareAccessToken(issuer), null);
       assert.equal(useShareOAuthStore.getState().issuer, null);
       assert.equal(useShareOAuthStore.getState().pending, false);
       assert.equal(popup.closed, true);
