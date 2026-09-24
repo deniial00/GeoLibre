@@ -1076,6 +1076,9 @@ def _voronoi(
             points.extend(list(geom.geoms))
     if len(points) < 3:
         raise ValueError("Voronoi / Delaunay needs at least 3 points")
+    # NaN slips past every bounds comparison below, so reject it explicitly.
+    if any(not (math.isfinite(point.x) and math.isfinite(point.y)) for point in points):
+        raise ValueError("Input points must have finite coordinates")
     multipoint = MultiPoint(points)
     # Both diagrams are undefined for collinear/coincident points (a zero-area
     # bounding box); bail with a clear message rather than a degenerate result.
@@ -1098,10 +1101,29 @@ def _voronoi(
         message = f"Delaunay: produced {len(triangles)} triangle(s) from {len(points)} point(s)"
         return _to_feature_collection(result), [message]
     # Clip the (otherwise unbounded outer) cells to the points' bbox expanded by a
-    # 10% margin, matching the client, so they get a finite extent.
+    # 10% margin, matching the client, clamped to WGS84 bounds so coordinates
+    # stay within valid geographic domain. Guard against antimeridian crossings.
+    # Out-of-range points would clamp the envelope to a sliver that no longer
+    # contains them, so reject those up front.
+    if minx < -180.0 or maxx > 180.0 or miny < -90.0 or maxy > 90.0:
+        raise ValueError(
+            "Input points must use valid WGS84 coordinates "
+            "(longitude in [-180, 180], latitude in [-90, 90])"
+        )
     dx = maxx - minx
+    if dx > 180.0:
+        raise ValueError(
+            f"Input points cross the antimeridian (longitude span > 180°, "
+            f"got {dx:.1f}°). Split the layer at the dateline into "
+            "per-hemisphere layers, or reproject to a local projected CRS, "
+            "before running Voronoi."
+        )
     dy = maxy - miny
-    envelope = box(minx - dx * 0.1, miny - dy * 0.1, maxx + dx * 0.1, maxy + dy * 0.1)
+    env_minx = max(-180.0, minx - dx * 0.1)
+    env_maxx = min(180.0, maxx + dx * 0.1)
+    env_miny = max(-90.0, miny - dy * 0.1)
+    env_maxy = min(90.0, maxy + dy * 0.1)
+    envelope = box(env_minx, env_miny, env_maxx, env_maxy)
     diagram = voronoi_diagram(multipoint, envelope=envelope)
     cells = [cell.intersection(envelope) for cell in diagram.geoms]
     # Clipping a cell whose edge coincides with the envelope can yield a

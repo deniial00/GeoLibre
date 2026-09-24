@@ -1,5 +1,12 @@
-import { ArcgisCanvas, type MapEngine } from "@geolibre/map";
-import type { ComponentType, ReactElement, RefObject } from "react";
+import {
+  ArcgisCanvas,
+  type ArcgisEngineMessages,
+  type MapCanvasIdentifyAllLabels,
+  type MapCanvasRasterIdentify,
+  type MapDiagnosticEvent,
+  type MapEngine,
+} from "@geolibre/map";
+import { useMemo, type ComponentType, type ReactElement, type RefObject } from "react";
 import { Trans, useTranslation } from "react-i18next";
 import { useArcgisApiKey } from "../../hooks/useArcgisApiKey";
 import { openSettingsSection } from "./SettingsDialog";
@@ -24,14 +31,30 @@ const HintTrans = Trans as ComponentType<{
 export function PrimaryArcgisCanvas({
   engineRef,
   onEngineReady,
+  onMapDiagnosticEvent,
+  canUseRemoteElevation,
+  identifyAllLabels,
+  identifyRasterLayerAt,
   viewId,
 }: {
   engineRef?: RefObject<MapEngine | null>;
   onEngineReady?: () => void;
+  onMapDiagnosticEvent?: (event: MapDiagnosticEvent) => void;
+  canUseRemoteElevation?: () => boolean;
+  identifyAllLabels?: MapCanvasIdentifyAllLabels;
+  identifyRasterLayerAt?: MapCanvasRasterIdentify;
   viewId?: string;
 }) {
   const { t } = useTranslation();
   const apiKey = useArcgisApiKey();
+  const messages = useMemo<Partial<ArcgisEngineMessages>>(
+    () => ({
+      filterNoSql: (layer) => t("renderer.arcgisFilterNoSql", { layer }),
+      imageFailed: (layer) => t("renderer.arcgisImageFailed", { layer }),
+      pluginLayer: (layer) => t("renderer.arcgisPluginLayer", { layer }),
+    }),
+    [t],
+  );
   return (
     <div className="absolute inset-0" data-testid="primary-arcgis">
       <ArcgisCanvas
@@ -43,6 +66,12 @@ export function PrimaryArcgisCanvas({
         onEngineReady={onEngineReady}
         viewId={viewId}
         closeLabel={t("common.close")}
+        retryLabel={t("common.retry")}
+        onMapDiagnosticEvent={onMapDiagnosticEvent}
+        messages={messages}
+        canUseRemoteElevation={canUseRemoteElevation}
+        identifyAllLabels={identifyAllLabels}
+        identifyRasterLayerAt={identifyRasterLayerAt}
       />
       {apiKey ? null : (
         <div className="pointer-events-none absolute bottom-10 start-2 z-10 max-w-[70%] rounded-md border border-input map-glass px-2 py-1 text-xs text-muted-foreground shadow-sm">

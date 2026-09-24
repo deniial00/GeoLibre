@@ -2,6 +2,7 @@ import type { ArcgisLayerPlan } from "./arcgis-layers";
 import type { ArcgisLayer, ArcgisRasterLayer, ArcgisSdk } from "./arcgis-sdk";
 import { getPMTilesArchive } from "./layer-sync";
 import { requestProtocolTile } from "./cesium-protocol-imagery";
+import { attachArcgisSprite } from "./arcgis-sprite";
 
 type ArchivePlan = Extract<ArcgisLayerPlan, { kind: "archive" }>;
 export type ArchiveTileReader = (
@@ -82,18 +83,22 @@ export function createArcgisArchiveLayer(
         return bytes instanceof ArrayBuffer ? bytes : bytes.slice().buffer;
       },
     };
+    const source = { type: "vector", url: prefix + "source.json" };
+    const sprite = attachArcgisSprite(sdk, {
+      version: 8,
+      sources: { [plan.sourceId]: source },
+      layers: plan.styleLayers,
+    });
+    // Registered once the sprite is, so a throw above leaves no interceptor.
     sdk.config.request.interceptors.push(interceptor);
     const dispose = () => {
       lifetime.abort();
+      sprite.dispose();
       const index = sdk.config.request.interceptors.indexOf(interceptor);
       if (index >= 0) sdk.config.request.interceptors.splice(index, 1);
     };
     try {
-      const source = { type: "vector", url: prefix + "source.json" };
-      const layer = new sdk.layers.VectorTileLayer({
-        ...properties,
-        style: { version: 8, sources: { [plan.sourceId]: source }, layers: plan.styleLayers },
-      });
+      const layer = new sdk.layers.VectorTileLayer({ ...properties, style: sprite.style });
       return { layer, dispose };
     } catch (error) {
       dispose();
