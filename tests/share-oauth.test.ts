@@ -12,6 +12,9 @@ import {
   resolveShareIssuer,
   s256Challenge,
   ShareOAuthError,
+  signInToShare,
+  signOutOfShare,
+  useShareOAuthStore,
   validateCallbackPayload,
 } from "../apps/geolibre-desktop/src/lib/share-oauth";
 
@@ -145,6 +148,100 @@ describe("refresh failure handling", () => {
       );
     } finally {
       env.restore();
+    }
+  });
+});
+
+describe("sign-in stale result handling", () => {
+  it("does not restore the session when sign-out races with token exchange", async () => {
+    const issuer = "https://share.example";
+    const originalWindow = Object.getOwnPropertyDescriptor(globalThis, "window");
+    const originalFetch = Object.getOwnPropertyDescriptor(globalThis, "fetch");
+    const storage = new Map<string, string>();
+    const popup = {
+      closed: false,
+      location: { href: "about:blank" },
+      close() {
+        this.closed = true;
+      },
+    };
+    const messageListenerReady = Promise.withResolvers<void>();
+    const exchangeStarted = Promise.withResolvers<void>();
+    const exchange = Promise.withResolvers<Response>();
+    let messageHandler: ((event: MessageEvent) => void) | null = null;
+
+    Object.defineProperty(globalThis, "window", {
+      configurable: true,
+      value: {
+        location: { origin: "https://app.example" },
+        crypto,
+        open: () => popup,
+        sessionStorage: {
+          getItem: (key: string) => storage.get(key) ?? null,
+          setItem: (key: string, value: string) => storage.set(key, value),
+          removeItem: (key: string) => storage.delete(key),
+        },
+        addEventListener: (_type: string, listener: (event: MessageEvent) => void) => {
+          messageHandler = listener;
+          messageListenerReady.resolve();
+        },
+        removeEventListener: () => {},
+        setTimeout: () => 1,
+        clearTimeout: () => {},
+        setInterval: () => 1,
+        clearInterval: () => {},
+      },
+    });
+    Object.defineProperty(globalThis, "fetch", {
+      configurable: true,
+      writable: true,
+      value: () => {
+        exchangeStarted.resolve();
+        return exchange.promise;
+      },
+    });
+
+    try {
+      const signIn = signInToShare(issuer);
+      await messageListenerReady.promise;
+
+      const handler = messageHandler;
+      assert.ok(handler, "consent callback listener was not installed");
+      const authorizeUrl = new URL(popup.location.href);
+      handler({
+        origin: "https://app.example",
+        source: popup,
+        data: {
+          type: "geolibre-share-oauth",
+          code: "authorization-code",
+          state: authorizeUrl.searchParams.get("state"),
+          iss: issuer,
+        },
+      } as unknown as MessageEvent);
+      await exchangeStarted.promise;
+
+      await signOutOfShare(issuer);
+      exchange.resolve(
+        new Response(
+          JSON.stringify({
+            access_token: "access-token",
+            refresh_token: "refresh-token",
+            expires_in: 3600,
+          }),
+          { headers: { "Content-Type": "application/json" } },
+        ),
+      );
+      await signIn;
+
+      assert.equal(storage.has(`geolibre-share-oauth:${issuer}`), false);
+      assert.equal(useShareOAuthStore.getState().issuer, null);
+      assert.equal(useShareOAuthStore.getState().pending, false);
+      assert.equal(popup.closed, true);
+    } finally {
+      if (originalWindow) Object.defineProperty(globalThis, "window", originalWindow);
+      else Reflect.deleteProperty(globalThis, "window");
+      if (originalFetch) Object.defineProperty(globalThis, "fetch", originalFetch);
+      else Reflect.deleteProperty(globalThis, "fetch");
     }
   });
 });
