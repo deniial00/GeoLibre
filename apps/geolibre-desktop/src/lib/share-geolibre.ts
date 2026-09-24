@@ -139,7 +139,8 @@ export interface ShareHost {
  * `docs/getting-started.md`.
  */
 function isSafeShareUrl(url: URL): boolean {
-  if (url.username || url.password || url.href.includes("?") || url.href.includes("#")) return false;
+  if (url.username || url.password || url.href.includes("?") || url.href.includes("#"))
+    return false;
   if (url.protocol === "https:") return true;
   return url.protocol === "http:" && (url.hostname === "localhost" || url.hostname === "127.0.0.1");
 }
