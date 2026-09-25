@@ -26,6 +26,24 @@ describe("desktop OAuth callback", () => {
     assert.deepEqual(parseNativeShareCallback(callback), { code: "one-time-code", state, issuer });
   });
 
+  it("ignores an abandoned callback during the next sign-in", async () => {
+    let cold = 0;
+    const receiver = new NativeShareAuthReceiver(() => {
+      cold += 1;
+    });
+    const abandoned = receiver.waitForCode(state, issuer, 300_000);
+    abandoned.cancel();
+    await assert.rejects(abandoned.code, NativeShareCallbackError);
+    assert.equal(receiver.accept(callback), true);
+    assert.equal(cold, 0);
+
+    const nextState = "next-random-state";
+    const retry = receiver.waitForCode(nextState, issuer, 300_000);
+    assert.equal(receiver.accept(callback), true);
+    assert.equal(receiver.accept(callback.replace(`state=${state}`, `state=${nextState}`)), true);
+    assert.equal(await retry.code, "one-time-code");
+  });
+
   it("rejects ambiguous, authority-bearing, unknown, or fragment-bearing callbacks", () => {
     const invalid = [
       callback.replace(":/oauth/", "://host/oauth/"),

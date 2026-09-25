@@ -271,11 +271,8 @@ export async function revokeShareSession(id: string): Promise<{ current: boolean
   const active = management;
   if (!active) throw new SessionManagementError("reauthorize");
   const current = id === active.project.sessionId;
-  try {
-    await managerRequest(`api/auth/sessions/${encodeURIComponent(id)}`, { method: "DELETE" });
-  } finally {
-    if (current) await signOutOfShare(active.project.issuer);
-  }
+  await managerRequest(`api/auth/sessions/${encodeURIComponent(id)}`, { method: "DELETE" });
+  if (current) await signOutOfShare(active.project.issuer);
   return { current };
 }
 

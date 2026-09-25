@@ -343,6 +343,12 @@ function setStoreIssuer(issuer: string | null, newGrant = false): void {
 
 /** A single in-flight consent flow. A second sign-in request is rejected. */
 let pendingFlow: symbol | null = null;
+let cancelActiveDesktopFlow: (() => void) | null = null;
+
+/** Cancel this process's pending desktop consent without affecting web popups. */
+export function cancelShareSignIn(): void {
+  cancelActiveDesktopFlow?.();
+}
 
 type RequestedGrant = "project" | "management";
 
@@ -373,9 +379,18 @@ async function authorizeShareGrant(
   pendingFlow = flow;
   useShareOAuthStore.setState({ pending: true, startupError: null });
   const flowGeneration = sessionGeneration;
+  let cancelled = false;
+  let nativeWaiter: ReturnType<typeof waitForNativeShareCode> | null = null;
+  const cancelFlow = () => {
+    cancelled = true;
+    nativeWaiter?.cancel();
+  };
+  if (desktop) cancelActiveDesktopFlow = cancelFlow;
   try {
     if (desktop) await waitForDesktopOAuthReady();
+    if (cancelled) throw new ShareOAuthError("cancelled");
     const challenge = await s256Challenge(verifier);
+    if (cancelled) throw new ShareOAuthError("cancelled");
     if (flowGeneration !== sessionGeneration) return null;
     const redirectUri = desktop
       ? DESKTOP_SHARE_CALLBACK
@@ -395,30 +410,40 @@ async function authorizeShareGrant(
     let code: string;
     if (desktop) {
       const waiter = waitForNativeShareCode(state, issuer, POPUP_TIMEOUT_MS);
+      nativeWaiter = waiter;
+      // Cancellation can precede openUrl's completion; observe that rejection
+      // even before the code wait below starts awaiting it.
+      void waiter.code.catch(() => {});
       try {
         // Platform-only API: the web and embed bundles do not use the opener.
         const { openUrl } = await import("@tauri-apps/plugin-opener");
         await openUrl(authorizeUrl.toString());
       } catch {
-        void waiter.code.catch(() => {});
+        if (cancelled) throw new ShareOAuthError("cancelled");
         waiter.cancel();
         throw new ShareOAuthError("exchange-failed");
       }
       try {
         code = await waiter.code;
+        if (cancelled) throw new ShareOAuthError("cancelled");
       } catch (error) {
+        if (cancelled) throw new ShareOAuthError("cancelled");
         if (error instanceof NativeShareCallbackError) throw new ShareOAuthError(error.code);
         throw error;
       }
+      if (cancelled) throw new ShareOAuthError("cancelled");
     } else {
       popup!.location.href = authorizeUrl.toString();
       code = await waitForCallbackCode(popup!, { state, issuer, flow });
     }
     if (flowGeneration !== sessionGeneration) return null;
+    if (cancelled) throw new ShareOAuthError("cancelled");
     const tokens = await exchangeCode(issuer, code, verifier, redirectUri, grant);
+    if (cancelled) throw new ShareOAuthError("cancelled");
     if (flowGeneration !== sessionGeneration) return null;
     return { issuer, tokens, generation: flowGeneration };
   } finally {
+    if (cancelActiveDesktopFlow === cancelFlow) cancelActiveDesktopFlow = null;
     if (pendingFlow === flow) {
       pendingFlow = null;
       useShareOAuthStore.setState({ pending: false });

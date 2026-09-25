@@ -226,9 +226,11 @@ Personal tokens use `kind: "personal-token"`, `clientId: null`,
 are backfilled on listing, marked `legacy: true`, and remain valid until
 revoked. Management responses use `Cache-Control: private, no-store`.
 
-`DELETE /api/auth/sessions/{id}` returns `204` for an owned OAuth family or
-personal token, including one already revoked; unknown and foreign IDs return
-the same `404`. Revocation invalidates the family, not just one access token.
+`DELETE /api/auth/sessions/{id}` returns `204` for an owned project OAuth
+family or personal token, including one already revoked. Management grants are
+not addressable through this endpoint; unknown, foreign, and management-only IDs
+return the same `404`. Revocation invalidates the family, not just one access
+token.
 If the ID is the current project session, the client must immediately clear
 its local project credential and protected Gallery/remote-edit state; it must
 not keep a stale session UI. A pasted personal token remains a separate

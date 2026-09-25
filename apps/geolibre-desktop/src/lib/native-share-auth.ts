@@ -99,6 +99,7 @@ export class NativeShareAuthReceiver {
       cancel = () => {
         if (this.pending?.state !== state) return;
         clearTimeout(timer);
+        this.lastState = state;
         this.pending = null;
         reject(new NativeShareCallbackError("malformed"));
       };
@@ -111,6 +112,7 @@ export class NativeShareAuthReceiver {
     // OAuth URL through those queues and never log its raw value.
     if (!raw.toLowerCase().startsWith("org.geolibre.desktop:")) return false;
     const callback = parseNativeShareCallback(raw);
+    if (callback?.state === this.lastState) return true;
     const pending = this.pending;
     if (!pending) {
       if (callback?.state !== this.lastState) this.coldCallback();

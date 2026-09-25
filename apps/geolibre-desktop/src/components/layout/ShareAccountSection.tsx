@@ -5,6 +5,7 @@ import { CircleCheck, LoaderCircle, LogIn, LogOut } from "lucide-react";
 import { isDesktopRuntime } from "../../lib/is-mobile";
 import {
   ShareOAuthError,
+  cancelShareSignIn,
   shareOAuthErrorKey,
   signInToShare,
   signOutOfShare,
@@ -26,10 +27,17 @@ import {
 
 const PAGE_SIZE = 10;
 
-type AccountError = "reauthorize" | "account-mismatch" | "no-project-session" | "request-failed";
+type AccountError =
+  | "reauthorize"
+  | "account-mismatch"
+  | "no-project-session"
+  | "request-failed"
+  | { oauth: ShareOAuthError["code"] };
 
 function managementError(error: unknown): AccountError {
-  return error instanceof SessionManagementError ? error.code : "request-failed";
+  if (error instanceof SessionManagementError) return error.code;
+  if (error instanceof ShareOAuthError) return { oauth: error.code };
+  return "request-failed";
 }
 
 function formatDate(value: string | null, fallback: string): string {
@@ -65,11 +73,15 @@ export function ShareAccountSection({
   const [busy, setBusy] = useState(false);
   const [managementFailure, setManagementFailure] = useState<AccountError | null>(null);
   const [confirmOthers, setConfirmOthers] = useState(false);
+  const [confirmRevokeId, setConfirmRevokeId] = useState<string | null>(null);
   const [revokeId, setRevokeId] = useState<string | null>(null);
   const request = useRef(0);
+  const startedNativeConsent = useRef(false);
 
   useEffect(
     () => () => {
+      if (startedNativeConsent.current) cancelShareSignIn();
+      startedNativeConsent.current = false;
       request.current += 1;
       void closeShareSessionManagement();
     },
@@ -85,6 +97,7 @@ export function ShareAccountSection({
     setOffset(0);
     setManagementFailure(null);
     setConfirmOthers(false);
+    setConfirmRevokeId(null);
     setBusy(false);
     setRevokeId(null);
     if (!issuer) {
@@ -107,7 +120,10 @@ export function ShareAccountSection({
     );
   }, [issuer, sessionRevision]);
 
-  const errorText = (error: AccountError) => t(`settings.env.accountError.${error}`);
+  const errorText = (error: AccountError) =>
+    typeof error === "string"
+      ? t(`settings.env.accountError.${error}`)
+      : t(shareOAuthErrorKey(error.oauth));
 
   const refreshIdentity = async () => {
     const current = ++request.current;
@@ -127,6 +143,7 @@ export function ShareAccountSection({
     const current = ++request.current;
     setBusy(true);
     setManagementFailure(null);
+    setConfirmRevokeId(null);
     try {
       const result = await listShareSessions(PAGE_SIZE, nextOffset);
       if (request.current !== current) return;
@@ -153,6 +170,7 @@ export function ShareAccountSection({
     setBusy(true);
     setManagementFailure(null);
     setPage(null);
+    if (desktop) startedNativeConsent.current = true;
     try {
       const account = await authorizeShareSessionManagement();
       if (request.current !== current) return;
@@ -162,6 +180,7 @@ export function ShareAccountSection({
     } catch (error) {
       if (request.current === current) setManagementFailure(managementError(error));
     } finally {
+      startedNativeConsent.current = false;
       if (request.current === current) setBusy(false);
     }
   };
@@ -189,6 +208,7 @@ export function ShareAccountSection({
   const revokeOthers = async () => {
     const current = request.current;
     setConfirmOthers(false);
+    setConfirmRevokeId(null);
     setBusy(true);
     setManagementFailure(null);
     try {
@@ -206,14 +226,33 @@ export function ShareAccountSection({
   };
 
   const closeManager = () => {
+    if (startedNativeConsent.current) cancelShareSignIn();
+    startedNativeConsent.current = false;
     request.current += 1;
     setManaging(false);
     setPage(null);
     setManagementFailure(null);
     setConfirmOthers(false);
+    setConfirmRevokeId(null);
     setBusy(false);
     setRevokeId(null);
     void closeShareSessionManagement();
+  };
+
+  const signIn = () => {
+    setOauthError(null);
+    if (desktop) startedNativeConsent.current = true;
+    void signInToShare()
+      .catch((error: unknown) =>
+        setOauthError(
+          t(
+            error instanceof ShareOAuthError ? shareOAuthErrorKey(error.code) : "share.oauthFailed",
+          ),
+        ),
+      )
+      .finally(() => {
+        startedNativeConsent.current = false;
+      });
   };
 
   const signOut = () => {
@@ -293,16 +332,23 @@ export function ShareAccountSection({
             </div>
           ) : null}
           {identity && !managing ? (
-            <Button
-              type="button"
-              size="sm"
-              variant="outline"
-              disabled={busy || !supported}
-              onClick={() => void authorize()}
-            >
-              {busy ? <LoaderCircle className="me-2 h-3.5 w-3.5 animate-spin" /> : null}
-              {t("settings.env.accountManage")}
-            </Button>
+            <div className="flex flex-wrap gap-2">
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                disabled={busy || !supported}
+                onClick={() => void authorize()}
+              >
+                {busy ? <LoaderCircle className="me-2 h-3.5 w-3.5 animate-spin" /> : null}
+                {t("settings.env.accountManage")}
+              </Button>
+              {desktop && pending && startedNativeConsent.current ? (
+                <Button type="button" size="sm" variant="outline" onClick={cancelShareSignIn}>
+                  {t("common.cancel")}
+                </Button>
+              ) : null}
+            </div>
           ) : null}
           {managing ? (
             <div className="space-y-3 rounded-md border p-3">
@@ -380,7 +426,10 @@ export function ShareAccountSection({
                             variant="outline"
                             className="ms-auto"
                             disabled={busy || revokeId !== null}
-                            onClick={() => void revoke(session)}
+                            onClick={() => {
+                              setConfirmOthers(false);
+                              setConfirmRevokeId(session.id);
+                            }}
                           >
                             {revokeId === session.id
                               ? t("settings.env.sessionRevoking")
@@ -405,6 +454,42 @@ export function ShareAccountSection({
                             date: formatDate(session.expiresAt, t("settings.env.sessionNever")),
                           })}
                         </p>
+                        {confirmRevokeId === session.id ? (
+                          <div className="space-y-2 rounded-md border border-destructive p-2">
+                            <p>
+                              {t(
+                                session.kind === "personal-token"
+                                  ? "settings.env.revokeTokenConfirm"
+                                  : session.current
+                                    ? "settings.env.revokeCurrentConfirm"
+                                    : "settings.env.revokeSessionConfirm",
+                                { label: session.label },
+                              )}
+                            </p>
+                            <div className="flex flex-wrap gap-2">
+                              <Button
+                                type="button"
+                                size="sm"
+                                variant="destructive"
+                                disabled={busy || revokeId !== null}
+                                onClick={() => {
+                                  setConfirmRevokeId(null);
+                                  void revoke(session);
+                                }}
+                              >
+                                {t("settings.env.revokeSessionConfirmButton")}
+                              </Button>
+                              <Button
+                                type="button"
+                                size="sm"
+                                variant="outline"
+                                onClick={() => setConfirmRevokeId(null)}
+                              >
+                                {t("common.cancel")}
+                              </Button>
+                            </div>
+                          </div>
+                        ) : null}
                       </li>
                     ))}
                   </ul>
@@ -445,7 +530,10 @@ export function ShareAccountSection({
                   size="sm"
                   variant="destructive"
                   disabled={busy || revokeId !== null}
-                  onClick={() => setConfirmOthers(true)}
+                  onClick={() => {
+                    setConfirmRevokeId(null);
+                    setConfirmOthers(true);
+                  }}
                 >
                   {t("settings.env.revokeOthers")}
                 </Button>
@@ -487,22 +575,7 @@ export function ShareAccountSection({
           {hasPersonalToken ? (
             <p className="text-xs text-muted-foreground">{t("settings.env.accountPatOnly")}</p>
           ) : null}
-          <Button
-            type="button"
-            disabled={pending}
-            onClick={() => {
-              setOauthError(null);
-              void signInToShare().catch((error: unknown) =>
-                setOauthError(
-                  t(
-                    error instanceof ShareOAuthError
-                      ? shareOAuthErrorKey(error.code)
-                      : "share.oauthFailed",
-                  ),
-                ),
-              );
-            }}
-          >
+          <Button type="button" disabled={pending} onClick={signIn}>
             {pending ? (
               <LoaderCircle className="me-2 h-3.5 w-3.5 animate-spin" />
             ) : (
@@ -510,6 +583,11 @@ export function ShareAccountSection({
             )}
             {t(pending ? "settings.env.oauthSigningIn" : "settings.env.oauthSignIn")}
           </Button>
+          {desktop && pending && startedNativeConsent.current ? (
+            <Button type="button" variant="outline" onClick={cancelShareSignIn}>
+              {t("common.cancel")}
+            </Button>
+          ) : null}
           {oauthError ? (
             <p role="alert" className="text-xs text-destructive">
               {oauthError}

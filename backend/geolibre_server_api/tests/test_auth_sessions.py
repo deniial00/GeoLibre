@@ -191,6 +191,12 @@ def test_ownership_single_revocation_and_bulk_preserves_current_and_manager(oaut
         )
     manager = sign_in(oauth_client, scope="manage:sessions")
     headers = auth(manager["access_token"])
+    for manager_token in (manager["access_token"], second_manager["access_token"]):
+        manager_id = _session_id(oauth_client, manager_token)
+        hidden = oauth_client.delete(f"/api/auth/sessions/{manager_id}", headers=headers)
+        assert hidden.status_code == 404
+        assert hidden.json() == {"error": "not found"}
+        assert _me(oauth_client, manager_token).status_code == 200
     for id_ in ("unknown", foreign_id, foreign_pat_id):
         get = oauth_client.get(
             "/api/auth/sessions", params={"currentSessionId": id_}, headers=headers

@@ -1274,7 +1274,9 @@ def build_identity_router() -> APIRouter:
         account_id = principal.account.id
         grant = session.scalar(
             select(OAuthSession.id).where(
-                OAuthSession.id == session_id, OAuthSession.account_id == account_id
+                OAuthSession.id == session_id,
+                OAuthSession.account_id == account_id,
+                OAuthSession.kind == "project",
             )
         )
         if grant is not None:
