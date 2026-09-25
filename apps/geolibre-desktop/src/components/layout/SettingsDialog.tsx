@@ -704,7 +704,6 @@ export function SettingsDialog({
     return draftDesktopSettings.aiProfiles.find((p) => p.id === editingProfileId) ?? null;
   }, [editingProfileId, isCreatingProfile, draftDesktopSettings.aiProfiles]);
 
-
   /**
    * Flat env map from saved profile fieldValues. Its names prevent matching OS
    * credentials from shadowing the values shown in the profile editor.

@@ -80,7 +80,8 @@ export function OpenRouterModelPicker({
     if (!normalized) return catalogModels;
     return catalogModels.filter(
       (model) =>
-        model.id.toLowerCase().includes(normalized) || model.name.toLowerCase().includes(normalized),
+        model.id.toLowerCase().includes(normalized) ||
+        model.name.toLowerCase().includes(normalized),
     );
   }, [catalogModels, query]);
   const selectedName = catalogModels.find((model) => model.id === value)?.name ?? value;
@@ -116,7 +117,9 @@ export function OpenRouterModelPicker({
 
   useEffect(() => {
     if (!open || matchingModels.length === 0) return;
-    document.getElementById(`${listId}-option-${activeIndex}`)?.scrollIntoView?.({ block: "nearest" });
+    document
+      .getElementById(`${listId}-option-${activeIndex}`)
+      ?.scrollIntoView?.({ block: "nearest" });
   }, [activeIndex, listId, matchingModels.length, open]);
 
   const choose = (model: OpenRouterModel) => {
@@ -159,10 +162,7 @@ export function OpenRouterModelPicker({
         aria-label={t("assistant.model")}
         aria-haspopup="listbox"
         aria-expanded={open}
-        className={cn(
-          "w-full justify-between gap-2",
-          compact && "h-8 max-w-[180px] text-xs",
-        )}
+        className={cn("w-full justify-between gap-2", compact && "h-8 max-w-[180px] text-xs")}
         onClick={showPicker}
       >
         <span className="truncate">{selectedName || t("assistant.model")}</span>
@@ -206,7 +206,9 @@ export function OpenRouterModelPicker({
                 onKeyDown={(event) => {
                   if (event.key === "ArrowDown") {
                     event.preventDefault();
-                    setActiveIndex((index) => Math.min(index + 1, Math.max(matchingModels.length - 1, 0)));
+                    setActiveIndex((index) =>
+                      Math.min(index + 1, Math.max(matchingModels.length - 1, 0)),
+                    );
                   } else if (event.key === "ArrowUp") {
                     event.preventDefault();
                     setActiveIndex((index) => Math.max(index - 1, 0));
@@ -246,11 +248,14 @@ export function OpenRouterModelPicker({
             </p>
           ) : null}
           {matchingModels.length === 0 ? (
-            <p className="px-2 py-2 text-xs text-muted-foreground">
-              {t("settings.ai.noModels")}
-            </p>
+            <p className="px-2 py-2 text-xs text-muted-foreground">{t("settings.ai.noModels")}</p>
           ) : (
-            <div id={listId} role="listbox" aria-busy={loading} className="max-h-64 overflow-y-auto py-1">
+            <div
+              id={listId}
+              role="listbox"
+              aria-busy={loading}
+              className="max-h-64 overflow-y-auto py-1"
+            >
               {matchingModels.map((model, index) => (
                 <button
                   key={model.id}

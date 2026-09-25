@@ -45,12 +45,15 @@ describe("discoverOpenRouterModels", () => {
     const url = new URL(requestUrl);
     assert.equal(url.origin, "https://openrouter.ai");
     assert.equal(url.pathname, "/api/v1/models");
-    assert.deepEqual([...url.searchParams.entries()], [
-      ["input_modalities", "text"],
-      ["output_modalities", "text"],
-      ["supported_parameters", "tools"],
-      ["sort", "most-popular"],
-    ]);
+    assert.deepEqual(
+      [...url.searchParams.entries()],
+      [
+        ["input_modalities", "text"],
+        ["output_modalities", "text"],
+        ["supported_parameters", "tools"],
+        ["sort", "most-popular"],
+      ],
+    );
     assert.equal(hasAuthorization, false);
   });
 

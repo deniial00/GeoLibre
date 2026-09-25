@@ -382,10 +382,10 @@ describe("availableProviders", () => {
       "openai",
     ]);
     assert.deepEqual(availableProviders({ ANTHROPIC_API_KEY: "a" }), ["anthropic"]);
-    assert.deepEqual(
-      availableProviders({ OPENROUTER_API_KEY: "r", OPENAI_API_KEY: "o" }),
-      ["openai", "openrouter"],
-    );
+    assert.deepEqual(availableProviders({ OPENROUTER_API_KEY: "r", OPENAI_API_KEY: "o" }), [
+      "openai",
+      "openrouter",
+    ]);
   });
 });
 
@@ -419,15 +419,12 @@ describe("configForProvider", () => {
     );
   });
   it("resolves OpenRouter from a nonblank API key with its synchronous default model", () => {
-    assert.deepEqual(
-      configForProvider("openrouter", undefined, { OPENROUTER_API_KEY: "key" }),
-      {
-        provider: "openrouter",
-        apiKey: "key",
-        baseURL: "https://openrouter.ai/api/v1",
-        modelId: "openai/gpt-5.6-luna",
-      },
-    );
+    assert.deepEqual(configForProvider("openrouter", undefined, { OPENROUTER_API_KEY: "key" }), {
+      provider: "openrouter",
+      apiKey: "key",
+      baseURL: "https://openrouter.ai/api/v1",
+      modelId: "openai/gpt-5.6-luna",
+    });
     assert.equal(configForProvider("openrouter", undefined, { OPENROUTER_API_KEY: "  " }), null);
   });
 
@@ -483,7 +480,9 @@ describe("configForProvider", () => {
         object: "chat.completion.chunk",
         created: 0,
         model: "openai/gpt-5.6-luna",
-        choices: [{ index: 0, delta: { role: "assistant", content: "Hello" }, finish_reason: null }],
+        choices: [
+          { index: 0, delta: { role: "assistant", content: "Hello" }, finish_reason: null },
+        ],
       },
       {
         id: "chatcmpl-test",

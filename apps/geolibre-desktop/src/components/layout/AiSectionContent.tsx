@@ -168,7 +168,6 @@ export function AiSectionContent({
   const [newProfileFieldValues, setNewProfileFieldValues] = useState<Record<string, string>>({});
   const ollamaDiscovery = useOllamaModels();
 
-
   /** Update a single credential field value in the new-profile draft. */
   const updateNewFieldValue = (envKey: string, value: string) => {
     setNewProfileFieldValues((prev) => {
@@ -671,45 +670,45 @@ function ProfileEditor({
       {models.length > 0 ? (
         <div className="space-y-1.5">
           <Label className="text-xs">{t("assistant.model")}</Label>
-            {profile.provider === "openrouter" ? (
-              <OpenRouterModelPicker
-                value={profile.modelId || defaultModelFor(profile.provider, modelEnv)}
-                onChange={updateModel}
-              />
-            ) : (
-              <>
-                <div className="flex items-center gap-2">
-                  <Select
-                    value={profile.modelId || defaultModelFor(profile.provider)}
-                    onChange={(e) => updateModel(e.target.value)}
+          {profile.provider === "openrouter" ? (
+            <OpenRouterModelPicker
+              value={profile.modelId || defaultModelFor(profile.provider, modelEnv)}
+              onChange={updateModel}
+            />
+          ) : (
+            <>
+              <div className="flex items-center gap-2">
+                <Select
+                  value={profile.modelId || defaultModelFor(profile.provider)}
+                  onChange={(e) => updateModel(e.target.value)}
+                >
+                  {selectableModels.map((id) => (
+                    <option key={id} value={id}>
+                      {id}
+                    </option>
+                  ))}
+                </Select>
+                {profile.provider === "ollama" ? (
+                  <Button
+                    type="button"
+                    size="icon"
+                    variant="outline"
+                    disabled={ollamaDiscovery.loading}
+                    aria-label={t("settings.ai.refreshModels")}
+                    title={t("settings.ai.refreshModels")}
+                    onClick={() => void refreshOllamaModels()}
                   >
-                    {selectableModels.map((id) => (
-                      <option key={id} value={id}>
-                        {id}
-                      </option>
-                    ))}
-                  </Select>
-                  {profile.provider === "ollama" ? (
-                    <Button
-                      type="button"
-                      size="icon"
-                      variant="outline"
-                      disabled={ollamaDiscovery.loading}
-                      aria-label={t("settings.ai.refreshModels")}
-                      title={t("settings.ai.refreshModels")}
-                      onClick={() => void refreshOllamaModels()}
-                    >
-                      <RefreshCw
-                        className={cn("h-3.5 w-3.5", ollamaDiscovery.loading && "animate-spin")}
-                      />
-                    </Button>
-                  ) : null}
-                </div>
-                {ollamaDiscovery.error ? (
-                  <p className="text-xs text-destructive">{ollamaDiscovery.error}</p>
+                    <RefreshCw
+                      className={cn("h-3.5 w-3.5", ollamaDiscovery.loading && "animate-spin")}
+                    />
+                  </Button>
                 ) : null}
-              </>
-            )}
+              </div>
+              {ollamaDiscovery.error ? (
+                <p className="text-xs text-destructive">{ollamaDiscovery.error}</p>
+              ) : null}
+            </>
+          )}
         </div>
       ) : null}
 
@@ -815,4 +814,3 @@ function ProfileEditor({
     </div>
   );
 }
-
