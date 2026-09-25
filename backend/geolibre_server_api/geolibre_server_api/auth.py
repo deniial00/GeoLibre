@@ -1185,7 +1185,15 @@ def build_identity_router() -> APIRouter:
         principal: AuthPrincipal = Depends(require_scope(MANAGEMENT_SCOPE)),
         session: Session = Depends(get_session),
     ):
-        """List active project grants and personal tokens, never manager grants."""
+        """List active project grants and personal tokens, never manager grants.
+
+        Legacy PATs are backfilled before exposure because their policy row
+        carries the public revocable ID; the per-account SELECT plus any
+        single-row commits is deliberate and cheap for typical accounts. Rows
+        are then sorted and sliced in Python rather than in SQL so the
+        mixed-kind ordering (oauth + personal-token) stays deterministic and
+        the total reflects every active credential family.
+        """
         now_ts = get_clock(request)()
         account_id = principal.account.id
         if currentSessionId is not None:

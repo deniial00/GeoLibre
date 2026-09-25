@@ -64,6 +64,25 @@ describe("desktop OAuth callback", () => {
     assert.equal(await retry.code, "one-time-code");
   });
 
+  it("ignores a late callback for an older abandoned attempt during a newer one", async () => {
+    let cold = 0;
+    const receiver = new NativeShareAuthReceiver(() => {
+      cold += 1;
+    });
+    for (const abandonedState of ["state-a", "state-b"]) {
+      const abandoned = receiver.waitForCode(abandonedState, issuer, 300_000);
+      abandoned.code.catch(() => {});
+      abandoned.cancel();
+    }
+    assert.equal(receiver.accept(callback.replace(state, "state-a")), true);
+    assert.equal(cold, 0);
+
+    const retryState = "state-c";
+    const retry = receiver.waitForCode(retryState, issuer, 300_000);
+    assert.equal(receiver.accept(callback.replace(state, retryState)), true);
+    assert.equal(await retry.code, "one-time-code");
+  });
+
   it("rejects ambiguous, authority-bearing, unknown, or fragment-bearing callbacks", () => {
     const invalid = [
       callback.replace(":/oauth/", "://host/oauth/"),
@@ -112,6 +131,8 @@ describe("desktop OAuth callback", () => {
     assert.equal(receiver.accept(callback), true);
     assert.equal(cold, 1);
     assert.equal(receiver.accept("geo:1,2"), false);
+    assert.equal(receiver.accept("org.geolibre.desktop:/oauth/callback"), true);
+    assert.equal(cold, 1);
   });
 
   it("rejects expired transactions even with the correct callback", async () => {

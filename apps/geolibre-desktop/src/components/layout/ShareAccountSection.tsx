@@ -186,7 +186,7 @@ export function ShareAccountSection({
   };
 
   const revoke = async (session: ManagedSession) => {
-    const current = request.current;
+    const current = ++request.current;
     setRevokeId(session.id);
     setManagementFailure(null);
     try {
@@ -206,7 +206,7 @@ export function ShareAccountSection({
   };
 
   const revokeOthers = async () => {
-    const current = request.current;
+    const current = ++request.current;
     setConfirmOthers(false);
     setConfirmRevokeId(null);
     setBusy(true);

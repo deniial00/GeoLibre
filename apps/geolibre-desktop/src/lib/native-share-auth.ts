@@ -64,12 +64,25 @@ type Pending = {
   timer: ReturnType<typeof setTimeout>;
 };
 
+/**
+ * How many terminated transactions to remember. Each attempt lives at most
+ * POPUP_TIMEOUT_MS, so this bounds the stale-callback window in real time
+ * while keeping memory fixed.
+ */
+const MAX_RETIRED_STATES = 32;
+
 /** One live verifier transaction; no callback data survives process restart. */
 export class NativeShareAuthReceiver {
   private pending: Pending | null = null;
-  private lastState: string | null = null;
+  /** States whose transactions ended, newest last; replay and late-callback guard. */
+  private retired: string[] = [];
 
   constructor(private readonly coldCallback: () => void) {}
+
+  private retire(state: string): void {
+    this.retired.push(state);
+    if (this.retired.length > MAX_RETIRED_STATES) this.retired.shift();
+  }
 
   waitForCode(
     state: string,
@@ -84,7 +97,7 @@ export class NativeShareAuthReceiver {
     const code = new Promise<string>((resolve, reject) => {
       const timer = setTimeout(() => {
         if (this.pending?.state === state) {
-          this.lastState = state;
+          this.retire(state);
           this.pending = null;
           reject(new NativeShareCallbackError("timeout"));
         }
@@ -100,7 +113,7 @@ export class NativeShareAuthReceiver {
       cancel = () => {
         if (this.pending?.state !== state) return;
         clearTimeout(timer);
-        this.lastState = state;
+        this.retire(state);
         this.pending = null;
         reject(new NativeShareCallbackError("malformed"));
       };
@@ -113,16 +126,20 @@ export class NativeShareAuthReceiver {
     // OAuth URL through those queues and never log its raw value.
     if (!raw.toLowerCase().startsWith("org.geolibre.desktop:")) return false;
     const callback = parseNativeShareCallback(raw);
-    if (callback?.state === this.lastState) return true;
+    // A callback for any terminated transaction is stale — never consume the
+    // pending attempt with it. Replays of a consumed state are ignored too.
+    if (callback && this.retired.includes(callback.state)) return true;
     const pending = this.pending;
     if (!pending) {
-      if (callback?.state !== this.lastState) this.coldCallback();
+      // Only a well-formed callback with no retained verifier is a genuine
+      // cold-start sign-in; malformed deep links are not sign-in attempts.
+      if (callback) this.coldCallback();
       return true;
     }
     // Once this state is consumed, even a synchronous duplicate event has no
-    // verifier to exchange again. The last state is only retained in memory.
+    // verifier to exchange again. Retired states are only retained in memory.
     this.pending = null;
-    this.lastState = pending.state;
+    this.retire(pending.state);
     clearTimeout(pending.timer);
     if (!callback) pending.reject(new NativeShareCallbackError("malformed"));
     else if (Date.now() >= pending.expiresAt)
