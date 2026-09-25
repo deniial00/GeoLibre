@@ -33,6 +33,7 @@ import { isOllamaNetworkFailure, withOllamaOriginHint } from "../../lib/assistan
 import { selectActiveAssistantProfile } from "../../lib/assistant/profiles";
 import { isSendKey } from "../../lib/assistant/send-key";
 import { openSettingsSection } from "../layout/SettingsDialog";
+import { OpenRouterModelPicker } from "../OpenRouterModelPicker";
 import {
   ASSISTANT_PROVIDER_IDS,
   availableProviders,
@@ -75,6 +76,7 @@ const SETUP_PROVIDERS: ReadonlyArray<{
   { id: "google", envs: ["GEMINI_API_KEY"] },
   { id: "anthropic", envs: ["ANTHROPIC_API_KEY"] },
   { id: "openai", envs: ["OPENAI_API_KEY"] },
+  { id: "openrouter", envs: ["OPENROUTER_API_KEY"] },
   { id: "ollama", envs: ["OLLAMA_BASE_URL"] },
   { id: "bedrock", envs: ["AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY"] },
   { id: "custom", envs: ["OPENAI_COMPATIBLE_BASE_URL", "OPENAI_COMPATIBLE_MODEL"] },
@@ -770,25 +772,35 @@ export function AssistantPanel({ mapControllerRef }: AssistantPanelProps) {
                 ))}
               </Select>
               {activeProfile && PROVIDER_MODELS[activeProfile.provider].length > 0 ? (
-                <Select
-                  aria-label={t("assistant.model")}
-                  className="h-8 w-auto max-w-[180px] text-xs"
-                  value={activeProfile.modelId || defaultModelFor(activeProfile.provider)}
-                  disabled={running}
-                  onChange={(event) => onModelChange(event.target.value)}
-                >
-                  {[
-                    ...new Set(
-                      [activeProfile.modelId, ...PROVIDER_MODELS[activeProfile.provider]].filter(
-                        Boolean,
+                activeProfile.provider === "openrouter" ? (
+                  <OpenRouterModelPicker
+                    key={activeProfile.id}
+                    value={activeProfile.modelId || defaultModelFor(activeProfile.provider)}
+                    onChange={onModelChange}
+                    disabled={running}
+                    compact
+                  />
+                ) : (
+                  <Select
+                    aria-label={t("assistant.model")}
+                    className="h-8 w-auto max-w-[180px] text-xs"
+                    value={activeProfile.modelId || defaultModelFor(activeProfile.provider)}
+                    disabled={running}
+                    onChange={(event) => onModelChange(event.target.value)}
+                  >
+                    {[
+                      ...new Set(
+                        [activeProfile.modelId, ...PROVIDER_MODELS[activeProfile.provider]].filter(
+                          Boolean,
+                        ),
                       ),
-                    ),
-                  ].map((modelId) => (
-                    <option key={modelId} value={modelId}>
-                      {modelId}
-                    </option>
-                  ))}
-                </Select>
+                    ].map((modelId) => (
+                      <option key={modelId} value={modelId}>
+                        {modelId}
+                      </option>
+                    ))}
+                  </Select>
+                )
               ) : null}
             </>
           ) : null}

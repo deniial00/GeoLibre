@@ -25,7 +25,7 @@ import {
   Trash2,
   TriangleAlert,
 } from "lucide-react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
   DEFAULT_OLLAMA_BASE_URL,
@@ -33,6 +33,7 @@ import {
   withOllamaOriginHint,
 } from "../../lib/assistant/ollama";
 import { classifyFetchFailure } from "../../lib/fetch-error";
+import { OpenRouterModelPicker } from "../OpenRouterModelPicker";
 
 // ── Locally-defined types to avoid circular import with SettingsDialog ──
 
@@ -54,10 +55,9 @@ interface AiSectionContentProps {
   isCreatingProfile: boolean;
   setIsCreatingProfile: (v: boolean) => void;
   editingProfile: AssistantProfile | null;
-  editingProvider: AssistantProviderId;
   defaultAiProfileId: string | null;
   scopedOsEnv: Record<string, string>;
-  effectiveEnv: Record<string, string>;
+  modelEnv: Record<string, string>;
   revealedValueIds: Set<string>;
   toggleValueVisibility: (id: string) => void;
   getProviderField: (field: ProviderField) => string;
@@ -149,10 +149,9 @@ export function AiSectionContent({
   isCreatingProfile,
   setIsCreatingProfile,
   editingProfile,
-  editingProvider,
   defaultAiProfileId,
   scopedOsEnv,
-  effectiveEnv,
+  modelEnv,
   revealedValueIds,
   toggleValueVisibility,
   getProviderField,
@@ -169,17 +168,6 @@ export function AiSectionContent({
   const [newProfileFieldValues, setNewProfileFieldValues] = useState<Record<string, string>>({});
   const ollamaDiscovery = useOllamaModels();
 
-  // Resolve which providers are configured from the effective env (from parent).
-  // Re-derived here for internal status use.
-  const configuredProviders = useMemo(() => {
-    const order = ASSISTANT_PROVIDER_IDS;
-    const result = new Set<AssistantProviderId>();
-    for (const provider of order) {
-      const config = providerConfigFromEnv(provider, effectiveEnv);
-      if (config) result.add(provider);
-    }
-    return result;
-  }, [effectiveEnv]);
 
   /** Update a single credential field value in the new-profile draft. */
   const updateNewFieldValue = (envKey: string, value: string) => {
@@ -257,7 +245,7 @@ export function AiSectionContent({
       id,
       name,
       provider: newProfileProvider,
-      modelId: newProfileModel || defaultModelFor(newProfileProvider),
+      modelId: newProfileModel || defaultModelFor(newProfileProvider, modelEnv),
       fieldValues: { ...newProfileFieldValues },
     };
     setDraftDesktopSettings((current: any) => ({
@@ -286,6 +274,7 @@ export function AiSectionContent({
           onBack={cancelEditing}
           onDelete={() => deleteProfile(editingProfile.id)}
           scopedOsEnv={scopedOsEnv}
+          modelEnv={modelEnv}
           revealedValueIds={revealedValueIds}
           toggleValueVisibility={toggleValueVisibility}
           getProviderField={getProviderField}
@@ -320,7 +309,7 @@ export function AiSectionContent({
               onChange={(e) => {
                 const provider = e.target.value as AssistantProviderId;
                 setNewProfileProvider(provider);
-                setNewProfileModel(defaultModelFor(provider));
+                setNewProfileModel(defaultModelFor(provider, modelEnv));
                 setNewProfileFieldValues(initialFieldValues(provider));
                 ollamaDiscovery.reset();
               }}
@@ -333,60 +322,66 @@ export function AiSectionContent({
             </Select>
           </div>
 
-          {/* Model selector (only for providers with preset models) */}
+          {/* Model selector for providers with preset or live model lists */}
           {PROVIDER_MODELS[newProfileProvider].length > 0 ? (
             <div className="space-y-1.5">
               <Label className="text-xs">{t("assistant.model")}</Label>
-              <div className="flex items-center gap-2">
-                <Select
-                  value={newProfileModel}
-                  onChange={(e) => setNewProfileModel(e.target.value)}
-                >
-                  {(newProfileProvider === "ollama" && ollamaDiscovery.models.length > 0
-                    ? ollamaDiscovery.models
-                    : PROVIDER_MODELS[newProfileProvider]
-                  ).map((id) => (
-                    <option key={id} value={id}>
-                      {id}
-                    </option>
-                  ))}
-                </Select>
-                {newProfileProvider === "ollama" ? (
-                  <Button
-                    type="button"
-                    size="icon"
-                    variant="outline"
-                    disabled={ollamaDiscovery.loading}
-                    aria-label={t("settings.ai.refreshModels")}
-                    title={t("settings.ai.refreshModels")}
-                    onClick={() =>
-                      void ollamaDiscovery
-                        .refresh(
-                          newProfileFieldValues.OLLAMA_BASE_URL ||
-                            scopedOsEnv.OLLAMA_BASE_URL ||
-                            scopedOsEnv.OLLAMA_HOST ||
-                            "",
-                        )
-                        .then((discovered) => {
-                          // The presets are a guess at what a user might have
-                          // pulled; once discovery says otherwise, a selection
-                          // the server does not offer cannot be used, so fall
-                          // back to one it does.
-                          if (discovered?.length && !discovered.includes(newProfileModel)) {
-                            setNewProfileModel(discovered[0]);
-                          }
-                        })
-                    }
-                  >
-                    <RefreshCw
-                      className={cn("h-3.5 w-3.5", ollamaDiscovery.loading && "animate-spin")}
-                    />
-                  </Button>
-                ) : null}
-              </div>
-              {ollamaDiscovery.error ? (
-                <p className="text-xs text-destructive">{ollamaDiscovery.error}</p>
-              ) : null}
+              {newProfileProvider === "openrouter" ? (
+                <OpenRouterModelPicker value={newProfileModel} onChange={setNewProfileModel} />
+              ) : (
+                <>
+                  <div className="flex items-center gap-2">
+                    <Select
+                      value={newProfileModel}
+                      onChange={(e) => setNewProfileModel(e.target.value)}
+                    >
+                      {(newProfileProvider === "ollama" && ollamaDiscovery.models.length > 0
+                        ? ollamaDiscovery.models
+                        : PROVIDER_MODELS[newProfileProvider]
+                      ).map((id) => (
+                        <option key={id} value={id}>
+                          {id}
+                        </option>
+                      ))}
+                    </Select>
+                    {newProfileProvider === "ollama" ? (
+                      <Button
+                        type="button"
+                        size="icon"
+                        variant="outline"
+                        disabled={ollamaDiscovery.loading}
+                        aria-label={t("settings.ai.refreshModels")}
+                        title={t("settings.ai.refreshModels")}
+                        onClick={() =>
+                          void ollamaDiscovery
+                            .refresh(
+                              newProfileFieldValues.OLLAMA_BASE_URL ||
+                                scopedOsEnv.OLLAMA_BASE_URL ||
+                                scopedOsEnv.OLLAMA_HOST ||
+                                "",
+                            )
+                            .then((discovered) => {
+                              // The presets are a guess at what a user might have
+                              // pulled; once discovery says otherwise, a selection
+                              // the server does not offer cannot be used, so fall
+                              // back to one it does.
+                              if (discovered?.length && !discovered.includes(newProfileModel)) {
+                                setNewProfileModel(discovered[0]);
+                              }
+                            })
+                        }
+                      >
+                        <RefreshCw
+                          className={cn("h-3.5 w-3.5", ollamaDiscovery.loading && "animate-spin")}
+                        />
+                      </Button>
+                    ) : null}
+                  </div>
+                  {ollamaDiscovery.error ? (
+                    <p className="text-xs text-destructive">{ollamaDiscovery.error}</p>
+                  ) : null}
+                </>
+              )}
             </div>
           ) : null}
 
@@ -544,6 +539,7 @@ interface ProfileEditorProps {
   onBack: () => void;
   onDelete: () => void;
   scopedOsEnv: Record<string, string>;
+  modelEnv: Record<string, string>;
   revealedValueIds: Set<string>;
   toggleValueVisibility: (id: string) => void;
   getProviderField: (field: ProviderField) => string;
@@ -557,6 +553,7 @@ function ProfileEditor({
   onBack,
   onDelete,
   scopedOsEnv,
+  modelEnv,
   revealedValueIds,
   toggleValueVisibility,
   getProviderField,
@@ -587,7 +584,7 @@ function ProfileEditor({
           ? {
               ...p,
               provider,
-              modelId: defaultModelFor(provider),
+              modelId: defaultModelFor(provider, modelEnv),
               // `getProviderField` resolves OLLAMA_BASE_URL before its
               // OLLAMA_HOST alias, so seeding the default over a profile that
               // only carries the alias would shadow a real custom value.
@@ -674,36 +671,45 @@ function ProfileEditor({
       {models.length > 0 ? (
         <div className="space-y-1.5">
           <Label className="text-xs">{t("assistant.model")}</Label>
-          <div className="flex items-center gap-2">
-            <Select
-              value={profile.modelId || defaultModelFor(profile.provider)}
-              onChange={(e) => updateModel(e.target.value)}
-            >
-              {selectableModels.map((id) => (
-                <option key={id} value={id}>
-                  {id}
-                </option>
-              ))}
-            </Select>
-            {profile.provider === "ollama" ? (
-              <Button
-                type="button"
-                size="icon"
-                variant="outline"
-                disabled={ollamaDiscovery.loading}
-                aria-label={t("settings.ai.refreshModels")}
-                title={t("settings.ai.refreshModels")}
-                onClick={() => void refreshOllamaModels()}
-              >
-                <RefreshCw
-                  className={cn("h-3.5 w-3.5", ollamaDiscovery.loading && "animate-spin")}
-                />
-              </Button>
-            ) : null}
-          </div>
-          {ollamaDiscovery.error ? (
-            <p className="text-xs text-destructive">{ollamaDiscovery.error}</p>
-          ) : null}
+            {profile.provider === "openrouter" ? (
+              <OpenRouterModelPicker
+                value={profile.modelId || defaultModelFor(profile.provider, modelEnv)}
+                onChange={updateModel}
+              />
+            ) : (
+              <>
+                <div className="flex items-center gap-2">
+                  <Select
+                    value={profile.modelId || defaultModelFor(profile.provider)}
+                    onChange={(e) => updateModel(e.target.value)}
+                  >
+                    {selectableModels.map((id) => (
+                      <option key={id} value={id}>
+                        {id}
+                      </option>
+                    ))}
+                  </Select>
+                  {profile.provider === "ollama" ? (
+                    <Button
+                      type="button"
+                      size="icon"
+                      variant="outline"
+                      disabled={ollamaDiscovery.loading}
+                      aria-label={t("settings.ai.refreshModels")}
+                      title={t("settings.ai.refreshModels")}
+                      onClick={() => void refreshOllamaModels()}
+                    >
+                      <RefreshCw
+                        className={cn("h-3.5 w-3.5", ollamaDiscovery.loading && "animate-spin")}
+                      />
+                    </Button>
+                  ) : null}
+                </div>
+                {ollamaDiscovery.error ? (
+                  <p className="text-xs text-destructive">{ollamaDiscovery.error}</p>
+                ) : null}
+              </>
+            )}
         </div>
       ) : null}
 
@@ -810,39 +816,3 @@ function ProfileEditor({
   );
 }
 
-/**
- * Minimal standalone provider config check — mirrors `configForProvider` from
- * provider.ts without importing it (avoids a heavy dependency chain in this
- * component). Returns a truthy value when the provider has its required env
- * fields set.
- */
-function providerConfigFromEnv(
-  provider: AssistantProviderId,
-  env: Record<string, string>,
-): unknown {
-  switch (provider) {
-    case "google":
-    case "anthropic":
-    case "openai": {
-      const names =
-        provider === "google"
-          ? ["GEMINI_API_KEY", "GOOGLE_API_KEY", "GOOGLE_GENAI_API_KEY"]
-          : provider === "anthropic"
-            ? ["ANTHROPIC_API_KEY"]
-            : ["OPENAI_API_KEY"];
-      return names.some((n) => env[n]?.trim()) ? { provider } : null;
-    }
-    case "ollama":
-      return env.OLLAMA_BASE_URL?.trim() || env.OLLAMA_HOST?.trim() ? { provider } : null;
-    case "custom":
-      return env.OPENAI_COMPATIBLE_BASE_URL?.trim() && env.OPENAI_COMPATIBLE_MODEL?.trim()
-        ? { provider }
-        : null;
-    case "bedrock":
-      return env.AWS_ACCESS_KEY_ID?.trim() && env.AWS_SECRET_ACCESS_KEY?.trim()
-        ? { provider }
-        : null;
-    default:
-      return null;
-  }
-}

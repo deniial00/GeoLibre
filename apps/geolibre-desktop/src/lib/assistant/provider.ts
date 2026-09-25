@@ -11,6 +11,7 @@ export type AssistantProviderId =
   | "google"
   | "anthropic"
   | "openai"
+  | "openrouter"
   | "ollama"
   | "bedrock"
   | "custom";
@@ -20,6 +21,7 @@ export const ASSISTANT_PROVIDER_IDS: readonly AssistantProviderId[] = [
   "google",
   "anthropic",
   "openai",
+  "openrouter",
   "ollama",
   "bedrock",
   "custom",
@@ -80,6 +82,7 @@ const PROVIDER_KEY_NAMES: Partial<Record<AssistantProviderId, readonly string[]>
   google: ["GEMINI_API_KEY", "GOOGLE_API_KEY", "GOOGLE_GENAI_API_KEY"],
   anthropic: ["ANTHROPIC_API_KEY"],
   openai: ["OPENAI_API_KEY"],
+  openrouter: ["OPENROUTER_API_KEY"],
 };
 
 /**
@@ -113,6 +116,9 @@ export const OS_ENV_VAR_NAMES: readonly string[] = [
   "ANTHROPIC_API_KEY",
   // OpenAI.
   "OPENAI_API_KEY",
+  // OpenRouter.
+  "OPENROUTER_API_KEY",
+  "OPENROUTER_MODEL",
   // Ollama (local). `OLLAMA_HOST` is intentionally omitted — it is the ambient
   // Ollama variable; `OLLAMA_BASE_URL` is GeoLibre's own documented setting.
   "OLLAMA_BASE_URL",
@@ -232,6 +238,7 @@ export const PROVIDER_MODELS: Record<AssistantProviderId, readonly string[]> = {
   ],
   anthropic: ["claude-opus-5", "claude-fable-5", "claude-sonnet-5", "claude-haiku-4-5"],
   openai: ["gpt-5.6", "gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"],
+  openrouter: ["openai/gpt-5.6-luna"],
   ollama: ["gemma4", "qwen3.6", "qwen3.5", "llama4", "gpt-oss"],
   bedrock: [
     "global.anthropic.claude-opus-5",
@@ -249,6 +256,7 @@ const DEFAULT_MODEL: Record<AssistantProviderId, string> = {
   google: PROVIDER_MODELS.google[0],
   anthropic: PROVIDER_MODELS.anthropic[0],
   openai: PROVIDER_MODELS.openai[0],
+  openrouter: PROVIDER_MODELS.openrouter[0],
   ollama: PROVIDER_MODELS.ollama[0],
   bedrock: PROVIDER_MODELS.bedrock[0],
   custom: "",
@@ -259,6 +267,7 @@ export const PROVIDER_LABELS: Record<AssistantProviderId, string> = {
   google: "Google Gemini",
   anthropic: "Anthropic",
   openai: "OpenAI",
+  openrouter: "OpenRouter",
   ollama: "Ollama (local)",
   bedrock: "Amazon Bedrock",
   custom: "Custom (OpenAI-compatible)",
@@ -394,9 +403,13 @@ export function getApiKey(
   return names ? firstValue(env, ...names) : null;
 }
 
-/** The default model id for a provider. */
-export function defaultModelFor(provider: AssistantProviderId): string {
-  return DEFAULT_MODEL[provider];
+/** The default model id for a provider, honoring OpenRouter's model override. */
+export function defaultModelFor(
+  provider: AssistantProviderId,
+  env: RuntimeEnv = readRuntimeEnv(),
+): string {
+  const openrouterModel = provider === "openrouter" ? env.OPENROUTER_MODEL?.trim() : undefined;
+  return openrouterModel || DEFAULT_MODEL[provider];
 }
 
 /** Resolve the model id for a provider: explicit → env → provider default. */
@@ -412,7 +425,9 @@ function resolveModelId(
         ? env.BEDROCK_MODEL
         : provider === "custom"
           ? env.OPENAI_COMPATIBLE_MODEL
-          : undefined;
+          : provider === "openrouter"
+            ? env.OPENROUTER_MODEL
+            : undefined;
   return (
     model?.trim() ||
     env.GEOLIBRE_ASSISTANT_MODEL?.trim() ||
@@ -426,7 +441,7 @@ function resolveModelId(
  * or null when that provider is not configured. Each provider type reads its own
  * Settings → Environment variables:
  *
- * - google / anthropic / openai — an API key (see {@link PROVIDER_KEY_NAMES}).
+ * - google / anthropic / openai / openrouter — an API key (see {@link PROVIDER_KEY_NAMES}).
  * - ollama — `OLLAMA_BASE_URL` (or `OLLAMA_HOST`); keyless, local.
  * - bedrock — `AWS_ACCESS_KEY_ID` + `AWS_SECRET_ACCESS_KEY` (+ `AWS_REGION`,
  *   `AWS_SESSION_TOKEN`).
@@ -447,6 +462,16 @@ export function configForProvider(
       const apiKey = getApiKey(provider, env);
       if (!apiKey) return null;
       return { provider, apiKey, modelId };
+    }
+    case "openrouter": {
+      const apiKey = getApiKey(provider, env);
+      if (!apiKey) return null;
+      return {
+        provider,
+        apiKey,
+        baseURL: "https://openrouter.ai/api/v1",
+        modelId,
+      };
     }
     case "ollama": {
       const baseURL = ollamaBaseUrl(env);
@@ -622,10 +647,11 @@ export async function createModel(config: AssistantProviderConfig): Promise<Mode
         clientConfig: { dangerouslyAllowBrowser: true },
       }) as unknown as Model;
     }
+    case "openrouter":
     case "ollama":
     case "custom": {
-      // Ollama and custom endpoints speak the OpenAI Chat Completions API; the
-      // Responses API (OpenAI's default) is not generally supported there.
+      // Ollama, OpenRouter, and custom endpoints speak OpenAI Chat Completions;
+      // the Responses API (OpenAI's default) is not generally supported there.
       const { OpenAIModel } = await import("@strands-agents/sdk/models/openai");
       return new OpenAIModel({
         api: "chat",

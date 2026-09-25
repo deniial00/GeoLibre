@@ -153,7 +153,6 @@ import {
   PROVIDER_LABELS,
   scopeOsEnvToProject,
   type AssistantProfile,
-  type AssistantProviderId,
   type RuntimeEnv,
 } from "../../lib/assistant/provider";
 import { loadOsEnvVars, readOsEnv } from "../../lib/assistant/os-env";
@@ -687,9 +686,8 @@ export function SettingsDialog({
   const [editingProfileId, setEditingProfileId] = useState<string | null>(null);
   // Whether the user is creating a new profile (transient — no id yet).
   const [isCreatingProfile, setIsCreatingProfile] = useState(false);
-  // The draft env vars as a plain name→value map (enabled, named only), matching
-  // what the live runtime env will hold after Save. Drives the per-provider
-  // "configured" status without re-implementing provider.ts resolution.
+  // Enabled, named project environment values shadow OS values when the settings
+  // fields resolve which credential to surface.
   const draftEnv = useMemo(() => {
     const env: Record<string, string> = {};
     for (const variable of draftPreferences.environmentVariables) {
@@ -706,13 +704,10 @@ export function SettingsDialog({
     return draftDesktopSettings.aiProfiles.find((p) => p.id === editingProfileId) ?? null;
   }, [editingProfileId, isCreatingProfile, draftDesktopSettings.aiProfiles]);
 
-  /** The provider shown in the editing fields. Derived from the editing profile. */
-  const editingProvider: AssistantProviderId = editingProfile?.provider ?? "google";
 
   /**
-   * Flat env map from all profiles' fieldValues. Projected into the runtime env
-   * alongside OS and project values so provider "configured" status reflects
-   * what the assistant will actually resolve.
+   * Flat env map from saved profile fieldValues. Its names prevent matching OS
+   * credentials from shadowing the values shown in the profile editor.
    */
   const draftProfilesEnv = useMemo(() => {
     const env: Record<string, string> = {};
@@ -724,11 +719,8 @@ export function SettingsDialog({
     }
     return env;
   }, [draftDesktopSettings.aiProfiles]);
-  // AI keys read from the user's OS environment (desktop only). This dialog is
-  // mounted eagerly at startup — before the App-root loader populates the cache
-  // and before the async Tauri read resolves — so a mount-only read would freeze
-  // at `{}`. Load it here through state (mirroring useRuntimeEnvironmentVariables)
-  // so provider status and the badges below reflect env-sourced credentials.
+  // Read OS keys here because the dialog mounts before the app-root cache is
+  // populated; state keeps the field badges current after the async read.
   const [osEnv, setOsEnv] = useState<RuntimeEnv>(() => readOsEnv());
   useEffect(() => {
     let cancelled = false;
@@ -739,11 +731,8 @@ export function SettingsDialog({
       cancelled = true;
     };
   }, []);
-  // Scope OS values against the draft exactly as the runtime merge does
-  // (useRuntimeEnvironmentVariables), so this dialog's notion of "configured"
-  // and the field badges match what the assistant will actually resolve — a
-  // plain spread would disagree in the alias-collision case (e.g. an empty
-  // project GOOGLE_API_KEY row shadows the whole Google OS alias group).
+  // Scope OS values against draft credentials so fields surface the same value
+  // as runtime resolution, including credential aliases.
   const scopedOsEnv = useMemo(
     () =>
       scopeOsEnvToProject(
@@ -752,12 +741,11 @@ export function SettingsDialog({
       ),
     [osEnv, draftEnv, draftProfilesEnv],
   );
-  // Merge OS env under the drafts so a provider configured purely via a system
-  // environment variable still reports "ready". Precedence mirrors the live
-  // runtime merge: OS < device AI keys < project Environment variables.
-  const effectiveEnv = useMemo(
-    () => ({ ...scopedOsEnv, ...draftProfilesEnv, ...draftEnv }),
-    [scopedOsEnv, draftProfilesEnv, draftEnv],
+  const modelEnv = useMemo(
+    () => ({
+      OPENROUTER_MODEL: draftEnv.OPENROUTER_MODEL ?? scopedOsEnv.OPENROUTER_MODEL ?? "",
+    }),
+    [scopedOsEnv.OPENROUTER_MODEL, draftEnv.OPENROUTER_MODEL],
   );
 
   // Seed the draft from the store only when the dialog opens. Depending on
@@ -2845,10 +2833,9 @@ export function SettingsDialog({
                   isCreatingProfile={isCreatingProfile}
                   setIsCreatingProfile={setIsCreatingProfile}
                   editingProfile={editingProfile}
-                  editingProvider={editingProvider}
                   defaultAiProfileId={draftDesktopSettings.defaultAiProfileId}
                   scopedOsEnv={scopedOsEnv}
-                  effectiveEnv={effectiveEnv}
+                  modelEnv={modelEnv}
                   revealedValueIds={revealedValueIds}
                   toggleValueVisibility={toggleValueVisibility}
                   getProviderField={getProviderField}
