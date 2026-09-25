@@ -44,6 +44,26 @@ describe("desktop OAuth callback", () => {
     assert.equal(await retry.code, "one-time-code");
   });
 
+  it("ignores late callbacks after a timed-out sign-in, even during a retry", async () => {
+    let cold = 0;
+    const receiver = new NativeShareAuthReceiver(() => {
+      cold += 1;
+    });
+    const expired = receiver.waitForCode(state, issuer, 0);
+    await assert.rejects(
+      expired.code,
+      (error: unknown) => error instanceof NativeShareCallbackError && error.code === "timeout",
+    );
+    assert.equal(receiver.accept(callback), true);
+    assert.equal(cold, 0);
+
+    const nextState = "next-random-state";
+    const retry = receiver.waitForCode(nextState, issuer, 300_000);
+    assert.equal(receiver.accept(callback), true);
+    assert.equal(receiver.accept(callback.replace(`state=${state}`, `state=${nextState}`)), true);
+    assert.equal(await retry.code, "one-time-code");
+  });
+
   it("rejects ambiguous, authority-bearing, unknown, or fragment-bearing callbacks", () => {
     const invalid = [
       callback.replace(":/oauth/", "://host/oauth/"),

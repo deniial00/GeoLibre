@@ -96,7 +96,9 @@ through the installed app's OS URI handler. No socket binds, so this does
 **not** require `com.apple.security.network.server`. The app starts the
 callback listener before accepting a sign-in; a callback that launches a cold
 process has no pending verifier and shows a restart-sign-in message rather than
-exchanging its code. A fresh management consent lasts at most five minutes,
+exchanging its code. A late callback from a timed-out or cancelled consent is
+ignored so it cannot interrupt an immediate retry. A fresh management consent
+lasts at most five minutes,
 has no refresh token, and stays in memory only. The desktop project's refresh
 credential is also memory-only and is lost when the app quits. Pasted personal
 API tokens remain a separate optional fallback.

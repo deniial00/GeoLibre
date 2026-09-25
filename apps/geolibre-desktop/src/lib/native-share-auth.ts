@@ -84,6 +84,7 @@ export class NativeShareAuthReceiver {
     const code = new Promise<string>((resolve, reject) => {
       const timer = setTimeout(() => {
         if (this.pending?.state === state) {
+          this.lastState = state;
           this.pending = null;
           reject(new NativeShareCallbackError("timeout"));
         }
