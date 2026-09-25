@@ -74,11 +74,12 @@ describe("desktop OAuth callback", () => {
       abandoned.code.catch(() => {});
       abandoned.cancel();
     }
-    assert.equal(receiver.accept(callback.replace(state, "state-a")), true);
-    assert.equal(cold, 0);
-
     const retryState = "state-c";
     const retry = receiver.waitForCode(retryState, issuer, 300_000);
+    // The stale callback for state A must be recognized without consuming the
+    // pending state-C transaction.
+    assert.equal(receiver.accept(callback.replace(state, "state-a")), true);
+    assert.equal(cold, 0);
     assert.equal(receiver.accept(callback.replace(state, retryState)), true);
     assert.equal(await retry.code, "one-time-code");
   });
