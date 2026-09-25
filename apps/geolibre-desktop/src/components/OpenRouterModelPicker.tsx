@@ -12,6 +12,10 @@ export interface OpenRouterModelPickerProps {
   compact?: boolean;
 }
 
+/**
+ * Searchable OpenRouter model picker with a live catalog, refresh, and manual
+ * model-ID entry. Failed discovery never changes {@link OpenRouterModelPickerProps.value}.
+ */
 export function OpenRouterModelPicker({
   value,
   onChange,
@@ -34,6 +38,7 @@ export function OpenRouterModelPicker({
   const searchRef = useRef<HTMLInputElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
 
+  /** Load the live OpenRouter catalog, ignoring stale results after a newer refresh or unmount. */
   const refresh = useCallback(async () => {
     const generation = ++requestGeneration.current;
     inFlight.current?.abort();
@@ -90,6 +95,7 @@ export function OpenRouterModelPicker({
     setActiveIndex((index) => Math.min(index, Math.max(matchingModels.length - 1, 0)));
   }, [matchingModels.length]);
 
+  /** Close the popup, optionally restoring focus to the trigger. */
   const close = useCallback((restoreFocus = false) => {
     setOpen(false);
     setQuery("");
@@ -102,6 +108,7 @@ export function OpenRouterModelPicker({
 
   useEffect(() => {
     if (!open) return;
+    /** Close the popup on pointer-down outside the picker container. */
     const onPointerDown = (event: PointerEvent) => {
       if (!containerRef.current?.contains(event.target as Node)) close();
     };
@@ -122,12 +129,14 @@ export function OpenRouterModelPicker({
       ?.scrollIntoView?.({ block: "nearest" });
   }, [activeIndex, listId, matchingModels.length, open]);
 
+  /** Apply a catalog model and close the popup, restoring focus. */
   const choose = (model: OpenRouterModel) => {
     if (disabled) return;
     onChange(model.id);
     close(true);
   };
 
+  /** Toggle the popup, resetting the search query and reselecting the current model. */
   const showPicker = () => {
     if (open) {
       close(true);
@@ -139,6 +148,7 @@ export function OpenRouterModelPicker({
     setOpen(true);
   };
 
+  /** Apply the trimmed manual model ID (no-op when blank) and close the popup. */
   const applyManualModelId = () => {
     const id = manualModelId.trim();
     if (disabled || !id) return;
@@ -151,7 +161,10 @@ export function OpenRouterModelPicker({
       ref={containerRef}
       className="relative min-w-0"
       onBlur={(event) => {
-        if (open && !containerRef.current?.contains(event.relatedTarget as Node | null)) close();
+        const next = event.relatedTarget as Node | null;
+        // A null target means a WebKit mouse click on a non-focusable button or
+        // window deactivation; the pointerdown listener handles outside clicks.
+        if (open && next && !containerRef.current?.contains(next)) close();
       }}
     >
       <Button
@@ -172,7 +185,10 @@ export function OpenRouterModelPicker({
       {open ? (
         <div
           ref={panelRef}
-          className="absolute start-0 top-full z-40 mt-1 w-[min(24rem,calc(100vw-2rem))] overflow-hidden rounded-md border bg-popover text-popover-foreground shadow-md"
+          className={cn(
+            "absolute top-full z-40 mt-1 w-[min(24rem,calc(100vw-2rem))] overflow-hidden rounded-md border bg-popover text-popover-foreground shadow-md",
+            compact ? "end-0" : "start-0",
+          )}
           onKeyDown={(event) => {
             if (event.key === "Escape") {
               event.preventDefault();
