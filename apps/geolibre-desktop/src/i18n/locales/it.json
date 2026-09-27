@@ -2371,7 +2371,6 @@
       "oauthSigningIn": "Accesso in corso…",
       "oauthSignOut": "Esci",
       "oauthWebLifetime": "Il token di accesso resta in memoria; la sessione di aggiornamento è limitata a questa scheda del browser. Chiudendo la scheda dovrai accedere di nuovo.",
-      "oauthDesktopLifetime": "Le credenziali di accesso restano solo nella memoria dell'app. Riavviando GeoLibre dovrai accedere di nuovo.",
       "accountLoading": "Caricamento dell'account…",
       "accountRetry": "Riprova",
       "accountIdentity": "Account: {{account}}",

@@ -267,6 +267,16 @@ const sharedSettingsReady = sharedSettingsUrl
       })
   : Promise.resolve(null);
 
+const desktopCredentialsReady = sharedSettingsReady
+  .then(() =>
+    import("./lib/credential-hydration").then(({ hydrateDesktopCredentials }) =>
+      hydrateDesktopCredentials(),
+    ),
+  )
+  .catch((error: unknown) => {
+    console.error("[GeoLibre] Failed to load desktop credentials", error);
+  });
+
 const startupLanguageReady = Promise.all([i18nReady, sharedSettingsReady]).then(
   async ([, settings]) => {
     if (!settings) return;
@@ -305,6 +315,8 @@ void Promise.all([
   // Gate the first render on i18next being initialized with the active locale's
   // (lazily loaded) catalog, so the UI never paints raw translation keys.
   startupLanguageReady,
+  // Keychain-held tokens must be in the settings store before any consumer reads them.
+  desktopCredentialsReady,
 ])
   .then(([{ default: App }, { AppErrorBoundary }, withAuthGate]) => {
     const app = <App />;

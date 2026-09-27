@@ -2417,7 +2417,6 @@
       "oauthSigningIn": "מתחבר…",
       "oauthSignOut": "התנתק",
       "oauthWebLifetime": "אסימון הגישה נשמר בזיכרון; הפעלת הרענון מוגבלת ללשונית הדפדפן הזו. סגירת הלשונית תחייב התחברות מחדש.",
-      "oauthDesktopLifetime": "פרטי ההתחברות נשמרים בזיכרון האפליקציה בלבד. הפעלה מחדש של GeoLibre תחייב התחברות מחדש.",
       "accountLoading": "טוען את החשבון שלך…",
       "accountRetry": "נסה שוב",
       "accountIdentity": "חשבון: {{account}}",

@@ -2325,7 +2325,6 @@
       "oauthSigningIn": "Sedang masuk…",
       "oauthSignOut": "Keluar",
       "oauthWebLifetime": "Token akses disimpan di memori; sesi penyegaran terbatas pada tab browser ini. Menutup tab mengharuskan Anda masuk lagi.",
-      "oauthDesktopLifetime": "Kredensial masuk hanya disimpan di memori aplikasi. Memulai ulang GeoLibre mengharuskan Anda masuk lagi.",
       "accountLoading": "Memuat akun Anda…",
       "accountRetry": "Coba lagi",
       "accountIdentity": "Akun: {{account}}",

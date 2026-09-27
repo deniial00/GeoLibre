@@ -77,6 +77,7 @@ import { useCommandBridge } from "../../hooks/useCommandBridge";
 import { useEmbedApi } from "../../hooks/useEmbedApi";
 import { useJupyterRelay } from "../../hooks/useJupyterRelay";
 import { appendDiagnostic, useDiagnosticsSnapshot } from "../../lib/diagnostics";
+import { useCredentialStorageStatus } from "../../lib/credential-store";
 import { SectionErrorBoundary, SilentErrorBoundary } from "../common/error-boundaries";
 import { AttributeTable } from "../panels/AttributeTable";
 import { RasterAttributeTable } from "../panels/RasterAttributeTable";
@@ -277,6 +278,10 @@ export function DesktopShell({
     setDropError,
     setDropMessage,
   } = useDropStatus();
+  const credentialStorageError = useCredentialStorageStatus((s) => s.error);
+  const credentialStorageRevision = useCredentialStorageStatus((s) => s.revision);
+  // A new failure bumps the revision, which re-shows a dismissed warning.
+  const [dismissedCredentialRevision, setDismissedCredentialRevision] = useState(0);
   const [diagnosticsOpen, setDiagnosticsOpen] = useState(false);
   const diagnostics = useDiagnosticsSnapshot();
   const externalPluginsReady = useExternalPluginsReady(mapControllerRef);
@@ -1162,6 +1167,22 @@ export function DesktopShell({
           <button
             type="button"
             onClick={() => setCrsWarning(null)}
+            className="ms-2 underline underline-offset-2"
+          >
+            {t("common.close")}
+          </button>
+        </div>
+      ) : null}
+      {credentialStorageError && credentialStorageRevision !== dismissedCredentialRevision ? (
+        <div
+          data-testid="credential-storage-warning"
+          role="alert"
+          className="absolute bottom-36 left-1/2 z-50 max-w-[min(90vw,36rem)] -translate-x-1/2 rounded-md border border-destructive/40 bg-background px-3 py-2 text-center text-sm text-destructive shadow-lg"
+        >
+          {t("settings.credentials.unavailable", { error: credentialStorageError })}
+          <button
+            type="button"
+            onClick={() => setDismissedCredentialRevision(credentialStorageRevision)}
             className="ms-2 underline underline-offset-2"
           >
             {t("common.close")}

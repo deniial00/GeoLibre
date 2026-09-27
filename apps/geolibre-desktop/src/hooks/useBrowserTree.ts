@@ -64,7 +64,8 @@ export function useBrowserTree(): BrowserTreeState {
   const favoritesLabel = t("browser.favorites");
   const myDataLabel = t("browser.myData");
 
-  // Saved connections live in localStorage (no reactive store), so re-read them
+  // Saved connections are not a reactive store (localStorage on the web, an
+  // in-memory cache over the OS credential store on desktop), so re-read them
   // when one is added/removed — otherwise a connection saved from the Add Data
   // dialog wouldn't appear until the (still-mounted) panel is reopened. The
   // pinned folders are the same story (see the Files section below).

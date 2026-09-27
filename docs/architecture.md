@@ -70,7 +70,7 @@ The default MapLibre map can be joined by — or replaced with — a 3D globe re
   - **As a secondary pane.** Each pane in the map grid carries a 2D/3D toggle (`SecondaryMapView.viewKind`), so a globe sits beside the 2D map for comparison.
   - **As the primary map** (issue #2217). **View → Rendering engine → Cesium** selects the globe through the store's `primaryRenderer`. `DesktopShell` mounts `PrimaryCesiumCanvas` in place of the previous engine's canvas, so that renderer is not merely hidden — it is unmounted and stops consuming GPU resources. Switching adds or removes no panes, and a multi-pane grid can still mix all four engines. `CesiumCanvas` distinguishes the two roles by whether it is given a `viewId`: with one it is a pane backed by a `secondaryMapViews` record (own camera, own visibility overrides); without one it _is_ the primary map, reading and writing the shared `mapView` directly and ignoring the `syncView` toggle (which exists to make panes follow the primary camera). Because every engine reads the same store, the camera, basemap, layers, groups, visibility, and opacity survive the switch untouched where supported.
 - **What the globe cannot do (yet).** Every tool that drives a `MapController` — the map context menu, legend, comments, story map, terrain settings, the ML panels, and the MapLibre-typed plugin API — is MapLibre-only. Rather than leave them broken, `DesktopShell` does not mount them while the globe owns the primary area, and the View menu greys out the items that drive a controller (zoom, viewport history, Reset Orientation, Set View, the Google Maps/Earth hand-offs) instead of letting them silently do nothing. Renderer-neutral, store-driven surfaces (the Layers panel, Style Manager, the attribute table, processing, the Dashboard) stay available. Layer kinds the globe cannot draw stay in the project and are tagged "2D only" in the Layers panel, and come back when MapLibre does. A renderer-neutral controller interface is the follow-up milestone in #2217.
-- **Enabling it.** The 2D/3D pane toggle and the Rendering engine menu are both offered whether or not a Cesium Ion token is configured — the globe draws the project basemap, which needs no token. A token adds Cesium World Terrain and supplies Ion World Imagery as the fallback for a basemap with no raster form; without one the view shows a one-line hint saying so. The token is resolved through `getCesiumIonToken()` (`@geolibre/core`), which reads `VITE_CESIUM_TOKEN`/`CESIUM_TOKEN` from the build **or** from a runtime override, so it can be set at build time (`CESIUM_TOKEN`; see [Optional 3D globe credentials](getting-started.md#optional-3d-globe-credentials-cesium-ion)) or at runtime with no rebuild. Settings → Environment Variables has a dedicated masked **Cesium Ion token** field backed by device-local `DesktopSettings` (localStorage, never the shared project file); `useRuntimeEnvironmentVariables` projects it into `VITE_CESIUM_TOKEN` on the `window.__GEOLIBRE_RUNTIME_ENV__` global (empty values are not projected, so they cannot blank a build-time token). The shared `useCesiumIonToken()` hook re-resolves the token on the `geolibre:runtime-env-change` event and both mount sites key the globe on it, so a newly entered token takes effect without a reload.
+- **Enabling it.** The 2D/3D pane toggle and the Rendering engine menu are both offered whether or not a Cesium Ion token is configured — the globe draws the project basemap, which needs no token. A token adds Cesium World Terrain and supplies Ion World Imagery as the fallback for a basemap with no raster form; without one the view shows a one-line hint saying so. The token is resolved through `getCesiumIonToken()` (`@geolibre/core`), which reads `VITE_CESIUM_TOKEN`/`CESIUM_TOKEN` from the build **or** from a runtime override, so it can be set at build time (`CESIUM_TOKEN`; see [Optional 3D globe credentials](getting-started.md#optional-3d-globe-credentials-cesium-ion)) or at runtime with no rebuild. Settings → Environment Variables has a dedicated masked **Cesium Ion token** field backed by device-local `DesktopSettings` (the OS credential store on desktop, localStorage on the web; never the shared project file); `useRuntimeEnvironmentVariables` projects it into `VITE_CESIUM_TOKEN` on the `window.__GEOLIBRE_RUNTIME_ENV__` global (empty values are not projected, so they cannot blank a build-time token). The shared `useCesiumIonToken()` hook re-resolves the token on the `geolibre:runtime-env-change` event and both mount sites key the globe on it, so a newly entered token takes effect without a reload.
 - **Basemap.** `basemapToCesiumImagery()` (`@geolibre/core`) translates the project's `basemapStyleUrl` into a plain descriptor of what the globe should draw, and `applyBasemapImagery()` (`packages/map/src/cesium-basemap.ts`) turns that into imagery layers. The split keeps the decision engine-free and beside the basemap catalogs it reads, so the 2D and 3D renderers share one source of truth. Planetary and regional basemaps are already raster tile sets and carry straight over (TMS sources get `{y}` swapped for Cesium's `{reverseY}`, and a hybrid basemap's labels overlay rides directly above its imagery); GeoLibre's own vector styles map to a keyless raster basemap of matching tone, so a dark project basemap gives a dark globe; the blank basemap leaves a bare ellipsoid. Anything else — a provider style, a custom URL, an offline archive — has no raster form, and the renderer falls back to Ion World Imagery when a token is configured and OpenStreetMap when not. The basemap layers are inserted at the bottom of the imagery stack (index 0, the overlay at 1), which is what keeps them below the data layers `CesiumLayerSync` appends and raises to the top.
 - **Lazy loading.** The whole Cesium engine (~4.8 MB) is `import()`-ed only when a globe first mounts, kept in its own build chunk (`CODE_SPLITTING_GROUPS` in `vite.config.ts`) and off the 2D boot path. The build fails if Cesium, or more than 3 MB of JS, ends up in the app entry's static import graph (`bootBundleBudgetPlugin`). A Vite plugin (`vite-plugins/copy-cesium-assets.ts`) stages Cesium's runtime Workers/Assets/Widgets into `public/cesium/` and the canvas sets `window.CESIUM_BASE_URL` so the engine finds them.
 - **Drawing.** Both engines implement `drawExtent` with a shared pointer lifecycle and geographic extents. Cesium uses a draggable entity for manual placement and ground-clamped rectangles for extraction previews. Escape, pointer cancellation, focus loss, and renderer teardown restore navigation. The raster-subset panel uses these operations on both renderers; crossing extents retain west > east so the extractor can explain that they must be split. The basemap extraction panel shares the drawing helper, while its menu remains gated on vector-style support.
@@ -156,6 +156,41 @@ The image also bundles the optional Python sidecar (uvicorn) and reverse-proxies
 
 - Tauri CSP allowlists tile and style hosts (OpenFreeMap, CARTO).
 - File access uses dialog-selected paths only.
+
+### Credential storage
+
+Tokens and API keys saved in Settings (share token, Cesium Ion token, Mapbox
+token, ArcGIS API key, the secret fields of AI Assistant profiles), saved
+PostGIS connection strings, and the Share.GeoLibre OAuth refresh token live in
+different places per build:
+
+- **Desktop (Tauri, macOS/Windows/Linux):** the OS credential store (macOS
+  Keychain, Windows Credential Manager, Linux Secret Service) under the service
+  `org.geolibre.desktop`, one entry per credential, through the
+  `secure_store_*` commands in `src-tauri/src/secure_store.rs`. The
+  `geolibre.desktopSettings` localStorage blob keeps those fields empty, and
+  `geolibre.postgres.connectionIds` holds only the non-secret order of the
+  `postgres.connection.<uuid>` entries. `lib/credential-hydration.ts` loads
+  them into memory before the app renders and migrates any plaintext values
+  left in localStorage by an older build, removing each only after its
+  keychain write succeeds. The OAuth refresh token is stored per issuer as
+  `share.oauth.refreshToken.<issuer>` and rotates on every refresh; the access
+  token and the PKCE verifier stay in memory. Because the server revokes a
+  session when a consumed refresh token is presented, the issuer is recorded
+  in the non-secret `geolibre.share.oauth.unsavedIssuers` list before each
+  keychain write and removed once the latest queued write for it completes. A
+  launch that finds its issuer listed deletes the stored token and starts
+  signed out rather than trusting a possibly consumed one. If the list itself
+  cannot be written, the new token is not stored: a delete of the stored copy
+  is queued and the sign-in lasts only until GeoLibre closes. That delete is
+  best effort; quitting before it finishes leaves the consumed token stored,
+  so the next launch signs out on its first refresh instead of at startup.
+- **Web, Jupyter embed, mobile:** localStorage, as before. The web OAuth
+  refresh token stays in tab-scoped sessionStorage.
+
+If the credential store is unavailable (for example, no Secret Service on a
+Linux session), credentials stay in memory for the session only, nothing new is
+written as plaintext, and the app shows a warning in the shell and in Settings.
 
 ### Native HTTP trust store and mutual TLS
 

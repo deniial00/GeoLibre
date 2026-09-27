@@ -2,11 +2,13 @@ import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Button } from "@geolibre/ui";
 import { CircleCheck, LoaderCircle, LogIn, LogOut } from "lucide-react";
+import { useCredentialStorageStatus } from "../../lib/credential-store";
 import { isDesktopRuntime } from "../../lib/is-mobile";
 import {
   ShareOAuthError,
   cancelShareSignIn,
   shareOAuthErrorKey,
+  shareRefreshTokenAccount,
   signInToShare,
   signOutOfShare,
   supportsShareOAuth,
@@ -63,6 +65,13 @@ export function ShareAccountSection({
   const startupError = useShareOAuthStore((state) => state.startupError);
   const supported = supportsShareOAuth();
   const desktop = isDesktopRuntime();
+  // Only this sign-in's own persistence decides the wording: a failure on some
+  // other credential (or one that a retry already fixed) must not claim the
+  // session is memory-only.
+  const desktopSessionOnly = useShareOAuthStore((state) => state.desktopSessionOnly);
+  const refreshSaveFailed = useCredentialStorageStatus((state) =>
+    issuer ? state.failedAccounts[shareRefreshTokenAccount(issuer)] === true : false,
+  );
   const [oauthError, setOauthError] = useState<string | null>(null);
   const [identity, setIdentity] = useState<ShareAccountIdentity | null>(null);
   const [identityLoading, setIdentityLoading] = useState(false);
@@ -290,7 +299,13 @@ export function ShareAccountSection({
             </Button>
           </div>
           <p className="text-xs text-muted-foreground">
-            {t(desktop ? "settings.env.oauthDesktopLifetime" : "settings.env.oauthWebLifetime")}
+            {t(
+              !desktop
+                ? "settings.env.oauthWebLifetime"
+                : desktopSessionOnly || refreshSaveFailed
+                  ? "settings.env.oauthDesktopSessionOnly"
+                  : "settings.env.oauthDesktopKeychain",
+            )}
           </p>
           {identityLoading ? (
             <p role="status" className="text-xs text-muted-foreground">

@@ -2371,7 +2371,6 @@
       "oauthSigningIn": "Entrando…",
       "oauthSignOut": "Sair",
       "oauthWebLifetime": "O token de acesso fica na memória; a sessão de renovação fica restrita a esta aba do navegador. Ao fechar a aba, será necessário entrar novamente.",
-      "oauthDesktopLifetime": "As credenciais de login ficam apenas na memória do aplicativo. Ao reiniciar o GeoLibre, será necessário entrar novamente.",
       "accountLoading": "Carregando sua conta…",
       "accountRetry": "Tentar novamente",
       "accountIdentity": "Conta: {{account}}",

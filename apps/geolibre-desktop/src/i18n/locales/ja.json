@@ -2325,7 +2325,6 @@
       "oauthSigningIn": "サインイン中…",
       "oauthSignOut": "サインアウト",
       "oauthWebLifetime": "アクセストークンはメモリ内に保持され、更新セッションはこのブラウザタブに限定されます。タブを閉じると、再度サインインが必要です。",
-      "oauthDesktopLifetime": "サインイン認証情報はアプリのメモリ内にのみ保持されます。GeoLibre を再起動すると、再度サインインが必要です。",
       "accountLoading": "アカウントを読み込み中…",
       "accountRetry": "再試行",
       "accountIdentity": "アカウント: {{account}}",

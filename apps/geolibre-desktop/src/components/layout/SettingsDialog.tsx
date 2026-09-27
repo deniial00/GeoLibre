@@ -153,6 +153,7 @@ import {
   type ProviderField,
 } from "../../lib/assistant/provider-fields";
 import { AiSectionContent } from "./AiSectionContent";
+import { CredentialStorageNotice } from "./CredentialStorageNotice";
 
 export type SettingsSection =
   | "language"
@@ -2797,27 +2798,31 @@ export function SettingsDialog({
                 </div>
               ) : null}
               {effectiveSection === "ai" ? (
-                <AiSectionContent
-                  draftDesktopSettings={draftDesktopSettings}
-                  draftEnv={draftEnv}
-                  setDraftDesktopSettings={setDraftDesktopSettings}
-                  editingProfileId={editingProfileId}
-                  setEditingProfileId={setEditingProfileId}
-                  isCreatingProfile={isCreatingProfile}
-                  setIsCreatingProfile={setIsCreatingProfile}
-                  editingProfile={editingProfile}
-                  defaultAiProfileId={draftDesktopSettings.defaultAiProfileId}
-                  scopedOsEnv={scopedOsEnv}
-                  modelEnv={modelEnv}
-                  revealedValueIds={revealedValueIds}
-                  toggleValueVisibility={toggleValueVisibility}
-                  getProviderField={getProviderField}
-                  setProviderField={setProviderField}
-                  osFieldEnvName={osFieldEnvName}
-                />
+                <div className="space-y-5">
+                  <CredentialStorageNotice />
+                  <AiSectionContent
+                    draftDesktopSettings={draftDesktopSettings}
+                    draftEnv={draftEnv}
+                    setDraftDesktopSettings={setDraftDesktopSettings}
+                    editingProfileId={editingProfileId}
+                    setEditingProfileId={setEditingProfileId}
+                    isCreatingProfile={isCreatingProfile}
+                    setIsCreatingProfile={setIsCreatingProfile}
+                    editingProfile={editingProfile}
+                    defaultAiProfileId={draftDesktopSettings.defaultAiProfileId}
+                    scopedOsEnv={scopedOsEnv}
+                    modelEnv={modelEnv}
+                    revealedValueIds={revealedValueIds}
+                    toggleValueVisibility={toggleValueVisibility}
+                    getProviderField={getProviderField}
+                    setProviderField={setProviderField}
+                    osFieldEnvName={osFieldEnvName}
+                  />
+                </div>
               ) : null}
               {effectiveSection === "environment" ? (
                 <div className="space-y-5">
+                  <CredentialStorageNotice />
                   {shareTokenUsable && (oauthSupported || oauthSetupError) ? (
                     <ShareAccountSection
                       shareHost={shareHost}

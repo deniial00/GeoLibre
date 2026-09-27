@@ -2325,7 +2325,6 @@
       "oauthSigningIn": "로그인 중…",
       "oauthSignOut": "로그아웃",
       "oauthWebLifetime": "액세스 토큰은 메모리에 보관되며, 갱신 세션은 이 브라우저 탭으로 한정됩니다. 탭을 닫으면 다시 로그인해야 합니다.",
-      "oauthDesktopLifetime": "로그인 자격 증명은 앱 메모리에만 보관됩니다. GeoLibre를 다시 시작하면 다시 로그인해야 합니다.",
       "accountLoading": "계정을 불러오는 중…",
       "accountRetry": "다시 시도",
       "accountIdentity": "계정: {{account}}",

@@ -103,3 +103,16 @@ windows-sys = { version = "0.61", features = [
   "Win32_NetworkManagement_IpHelper",
   "Win32_System_Threading",
 ] }
+
+# OS credential store for tokens and API keys saved in Settings (issue #1667).
+# Desktop only: mobile keeps the webview's localStorage path. Pinned to 3.6.3:
+# 4.x moved to the keyring-core store API and needs Rust 1.88. `vendored`
+# builds libdbus from source, so Linux builds need no libdbus-1-dev.
+[target.'cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))'.dependencies]
+keyring = { version = "=3.6.3", features = [
+  "apple-native",
+  "windows-native",
+  "sync-secret-service",
+  "crypto-rust",
+  "vendored",
+] }

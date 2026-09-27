@@ -1,10 +1,19 @@
 // Authorization Code + S256 PKCE for the reference share server. Web uses a
 // same-origin popup and issuer-keyed tab storage; desktop uses the system
-// browser and process-memory-only tokens. Neither mode stores an access token.
+// browser and keeps the refresh token in the OS credential store. Neither mode
+// stores an access token.
 // The manager step-up grant never enters the project-session cache or storage.
 
 import { create } from "zustand";
 import type { ParseKeys } from "i18next";
+import {
+  hasPendingCredential,
+  queueCredentialChanges,
+  readSecureCredentials,
+  reportCredentialStorageError,
+  useCredentialStorageStatus,
+  writeSecureCredential,
+} from "./credential-store";
 import { isDesktopRuntime } from "./is-mobile";
 import { isTauri } from "./is-tauri";
 import { getShareFetch } from "./share-fetch";
@@ -102,6 +111,11 @@ interface ShareOAuthState {
   pending: boolean;
   startupError: "restart-required" | null;
   setupError: boolean;
+  /**
+   * Desktop: the sign-in could not be marked for safe persistence, so it is
+   * kept in memory only and any stored copy is being removed.
+   */
+  desktopSessionOnly: boolean;
 }
 
 export const useShareOAuthStore = create<ShareOAuthState>(() => ({
@@ -110,6 +124,7 @@ export const useShareOAuthStore = create<ShareOAuthState>(() => ({
   pending: false,
   startupError: null,
   setupError: false,
+  desktopSessionOnly: false,
 }));
 
 // ---------------------------------------------------------------------------
@@ -238,7 +253,125 @@ interface StoredSession {
   refreshToken: string;
 }
 
+/**
+ * The desktop session. It is persisted to the OS credential store (issue
+ * #1667) through {@link persistDesktopRefresh} and restored before the app
+ * renders by {@link hydrateDesktopShareSession}; this variable is the source
+ * of truth while the app runs.
+ */
 let desktopRefresh: { issuer: string; refreshToken: string } | null = null;
+
+/** Credential-store account holding the desktop refresh token for `issuer`. */
+export function shareRefreshTokenAccount(issuer: string): string {
+  return `share.oauth.refreshToken.${issuer}`;
+}
+
+/**
+ * Non-secret localStorage list of issuers whose keychain entry may be stale:
+ * written synchronously before a keychain write is queued and cleared only
+ * once no write for that issuer is pending. Refresh tokens rotate and the
+ * server revokes the whole session when a consumed one is presented, so a
+ * stored token is trusted at startup only when this list does not name its
+ * issuer.
+ */
+export const SHARE_UNSAVED_ISSUERS_STORAGE_KEY = "geolibre.share.oauth.unsavedIssuers";
+
+/** Throws on unreadable storage or a malformed value, so callers stay conservative. */
+function readUnsavedIssuers(): string[] {
+  const raw = window.localStorage.getItem(SHARE_UNSAVED_ISSUERS_STORAGE_KEY);
+  if (raw === null) return [];
+  const parsed: unknown = JSON.parse(raw);
+  if (!Array.isArray(parsed) || !parsed.every((issuer) => typeof issuer === "string")) {
+    throw new Error("The saved sign-in marker is malformed.");
+  }
+  return parsed as string[];
+}
+
+function writeUnsavedIssuers(issuers: readonly string[]): void {
+  if (issuers.length === 0) window.localStorage.removeItem(SHARE_UNSAVED_ISSUERS_STORAGE_KEY);
+  else window.localStorage.setItem(SHARE_UNSAVED_ISSUERS_STORAGE_KEY, JSON.stringify(issuers));
+}
+
+/** Drop issuers whose keychain writes have all completed. */
+function reconcileUnsavedIssuers(): void {
+  try {
+    const unsaved = readUnsavedIssuers();
+    const still = unsaved.filter((issuer) =>
+      hasPendingCredential(shareRefreshTokenAccount(issuer)),
+    );
+    if (still.length !== unsaved.length) writeUnsavedIssuers(still);
+  } catch (error) {
+    reportCredentialStorageError(error);
+  }
+}
+
+let reconcilingOnRetry = false;
+
+/**
+ * Mirror a desktop session change into the OS credential store. The issuer is
+ * marked unsaved first, so quitting while the write is in flight, or after it
+ * failed, makes the next launch start signed out instead of presenting a
+ * consumed refresh token. A failed write is retried with the next queued
+ * credential change, and the marker clears once it succeeds.
+ *
+ * If the marker itself cannot be written (localStorage unavailable), the new
+ * token is not stored at all and a delete of any stored copy is queued; the
+ * session continues in memory only. This is best effort: the delete is
+ * asynchronous, so quitting before it completes leaves the previous token
+ * stored with no marker, and the next launch restores it. Rotation has
+ * already consumed that token, so the server rejects its first refresh and
+ * the app signs out (the pre-#1667 outcome, reached one request later).
+ */
+function persistDesktopRefresh(previous: typeof desktopRefresh, next: typeof desktopRefresh): void {
+  const secrets = (session: typeof desktopRefresh): Record<string, string> =>
+    session ? { [shareRefreshTokenAccount(session.issuer)]: session.refreshToken } : {};
+  const issuers = [previous?.issuer, next?.issuer].filter((issuer) => issuer !== undefined);
+  if (!reconcilingOnRetry) {
+    reconcilingOnRetry = true;
+    // A retry triggered by another credential change clears a failed account.
+    useCredentialStorageStatus.subscribe((state, before) => {
+      if (state.failedAccounts !== before.failedAccounts) reconcileUnsavedIssuers();
+    });
+  }
+  try {
+    writeUnsavedIssuers([...new Set([...readUnsavedIssuers(), ...issuers])]);
+  } catch (error) {
+    reportCredentialStorageError(error);
+    useShareOAuthStore.setState({ desktopSessionOnly: next !== null });
+    const stored = Object.fromEntries(
+      issuers.map((issuer) => [shareRefreshTokenAccount(issuer), "stored"]),
+    );
+    void queueCredentialChanges(stored, {});
+    return;
+  }
+  useShareOAuthStore.setState({ desktopSessionOnly: false });
+  void queueCredentialChanges(secrets(previous), secrets(next)).then(reconcileUnsavedIssuers);
+}
+
+/**
+ * Desktop startup: restore the sign-in for the configured issuer from the OS
+ * credential store. A token whose last save never completed may already be
+ * consumed, so it is deleted instead and the app starts signed out.
+ */
+export async function hydrateDesktopShareSession(): Promise<void> {
+  const issuer = resolveShareIssuer();
+  if (!issuer) return;
+  const account = shareRefreshTokenAccount(issuer);
+  try {
+    const unsaved = readUnsavedIssuers();
+    if (unsaved.includes(issuer)) {
+      await writeSecureCredential(account, "");
+      writeUnsavedIssuers(unsaved.filter((candidate) => candidate !== issuer));
+      return;
+    }
+    const refreshToken = (await readSecureCredentials([account]))[account];
+    if (!refreshToken) return;
+    desktopRefresh = { issuer, refreshToken };
+    setStoreIssuer(issuer);
+  } catch (error) {
+    reportCredentialStorageError(error);
+  }
+}
 
 /** Main installs listener and HTTP transport before enabling native sign-in. */
 let desktopOAuthReady: Promise<void> | null = null;
@@ -288,7 +421,9 @@ function readSession(issuer: string): StoredSession | null {
 
 function writeSession(issuer: string, refreshToken: string): void {
   if (isDesktopRuntime()) {
+    const previous = desktopRefresh;
     desktopRefresh = { issuer, refreshToken };
+    persistDesktopRefresh(previous, desktopRefresh);
     return;
   }
   try {
@@ -303,7 +438,10 @@ function writeSession(issuer: string, refreshToken: string): void {
 
 function clearStoredSession(issuer: string): void {
   if (isDesktopRuntime()) {
-    if (desktopRefresh?.issuer === issuer) desktopRefresh = null;
+    if (desktopRefresh?.issuer !== issuer) return;
+    const previous = desktopRefresh;
+    desktopRefresh = null;
+    persistDesktopRefresh(previous, null);
     return;
   }
   try {

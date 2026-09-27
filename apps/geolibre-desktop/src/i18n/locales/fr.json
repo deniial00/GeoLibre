@@ -2371,7 +2371,6 @@
       "oauthSigningIn": "Connexion…",
       "oauthSignOut": "Se déconnecter",
       "oauthWebLifetime": "Le jeton d'accès reste en mémoire ; la session d'actualisation est limitée à cet onglet du navigateur. Fermer l'onglet vous obligera à vous reconnecter.",
-      "oauthDesktopLifetime": "Les identifiants de connexion restent uniquement dans la mémoire de l'application. Après un redémarrage de GeoLibre, vous devrez vous reconnecter.",
       "accountLoading": "Chargement de votre compte…",
       "accountRetry": "Réessayer",
       "accountIdentity": "Compte : {{account}}",

@@ -2325,7 +2325,6 @@
       "oauthSigningIn": "正在登录…",
       "oauthSignOut": "退出登录",
       "oauthWebLifetime": "访问令牌保存在内存中；刷新会话仅限于此浏览器标签页。关闭标签页后需要重新登录。",
-      "oauthDesktopLifetime": "登录凭据仅保存在应用内存中。重启 GeoLibre 后需要重新登录。",
       "accountLoading": "正在加载您的账户…",
       "accountRetry": "重试",
       "accountIdentity": "账户：{{account}}",

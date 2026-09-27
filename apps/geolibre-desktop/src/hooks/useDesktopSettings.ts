@@ -8,6 +8,15 @@ import { create } from "zustand";
 import { normalizeStringList } from "../lib/string-lists";
 import { DESKTOP_SETTINGS_STORAGE_KEY } from "../lib/storage-keys";
 import {
+  credentialStorageLocation,
+  queueCredentialChanges,
+  reportCredentialStorageError,
+} from "../lib/credential-store";
+import {
+  mergeDesktopSettingsSecrets,
+  splitDesktopSettingsSecrets,
+} from "../lib/desktop-settings-secrets";
+import {
   DEFAULT_CUSTOM_COLOR,
   DEFAULT_THEME_SCHEME,
   isHexColor,
@@ -38,34 +47,38 @@ export interface DesktopSettings {
   layout: DesktopLayoutSettings;
   pluginManifestUrls: string[];
   /**
-   * Personal API token for uploading projects to share.geolibre.app. Stored in
-   * the same localStorage-backed settings as everything else, so on the web
-   * build it shares the exposure surface of any other localStorage entry (a
-   * same-origin script could read it). This is the well-understood "PAT in local
-   * storage" trade-off; the token is short-lived/revocable and scoped to one
-   * service. Moving it to OS secure storage on desktop is a possible future
-   * hardening (see PR #190 review).
+   * Personal API token for uploading projects to share.geolibre.app. The
+   * desktop build keeps it in the OS credential store (see
+   * `lib/credential-store.ts`) and writes only an empty string into this
+   * localStorage blob. The web build keeps it in this blob, where any
+   * same-origin script could read it: the well-understood "PAT in local
+   * storage" trade-off for a short-lived, revocable, single-service token.
    */
   shareToken: string;
   /**
    * Cesium Ion access token for the 3D-globe view (Cesium World Imagery +
-   * Terrain need one). Stored here — device-local localStorage, not the shared
-   * project file — so a personal credential is never serialized into a
-   * `.geolibre.json` a user shares. Projected into `VITE_CESIUM_TOKEN` at
-   * runtime by `useRuntimeEnvironmentVariables`, and resolved through
-   * `getCesiumIonToken`, so it overrides the build-time token with no rebuild.
-   * Same "token in localStorage" trade-off as {@link shareToken}.
+   * Terrain need one). Device-local, not the shared project file, so a personal
+   * credential is never serialized into a `.geolibre.json` a user shares.
+   * Projected into `VITE_CESIUM_TOKEN` at runtime by
+   * `useRuntimeEnvironmentVariables`, and resolved through `getCesiumIonToken`,
+   * so it overrides the build-time token with no rebuild. Stored like
+   * {@link shareToken}: OS credential store on desktop, this blob on the web.
    */
   cesiumIonToken: string;
-  /** Device-local Mapbox access token, excluded from shared project files. */
+  /** Device-local Mapbox access token, excluded from shared project files. Stored like {@link shareToken}. */
   mapboxAccessToken: string;
-  /** Device-local ArcGIS API key for the ArcGIS renderer, excluded from shared project files. */
+  /**
+   * Device-local ArcGIS API key for the ArcGIS renderer, excluded from shared
+   * project files. Stored like {@link shareToken}.
+   */
   arcgisApiKey: string;
   /**
    * AI Assistant provider profiles. Each profile bundles a provider, model, and
-   * credential values. Stored here — device-local localStorage, not the shared
-   * project file — so personal API keys survive app restarts yet are never
-   * serialized into a `.geolibre.json` a user shares.
+   * credential values. Device-local, not the shared project file, so personal
+   * API keys survive app restarts yet are never serialized into a
+   * `.geolibre.json` a user shares. On desktop the secret `fieldValues` (see
+   * `PROVIDER_FIELDS`) live in the OS credential store; on the web they stay in
+   * this blob.
    */
   aiProfiles: AssistantProfile[];
   /**
@@ -182,6 +195,25 @@ interface DesktopSettingsState {
 }
 
 let desktopSettingsAreTemporary = false;
+/**
+ * Legacy plaintext credentials whose migration into the OS credential store
+ * failed this session. They are written back into the blob unchanged, so a
+ * failed migration never loses them, and the next launch retries.
+ */
+let preservedLegacyCredentialSecrets: Record<string, string> | null = null;
+/**
+ * False after a failed settings hydration: edits then stay in memory, so new
+ * keychain writes never interleave with unmigrated legacy credentials.
+ */
+let settingsKeychainWritable = true;
+
+export function setPreservedLegacyCredentialSecrets(secrets: Record<string, string> | null): void {
+  preservedLegacyCredentialSecrets = secrets;
+}
+
+export function setSettingsKeychainWritable(writable: boolean): void {
+  settingsKeychainWritable = writable;
+}
 
 export const DEFAULT_DESKTOP_LAYOUT_SETTINGS: DesktopLayoutSettings = {
   browserPanelVisible: true,
@@ -495,13 +527,33 @@ function loadDesktopSettings(): DesktopSettings {
   }
 }
 
+/**
+ * The localStorage form of `settings`. On desktop the credentials are stripped
+ * (they live in the OS credential store), except legacy values whose migration
+ * failed this session.
+ */
+export function serializeDesktopSettingsForStorage(settings: DesktopSettings): string {
+  if (credentialStorageLocation() === "browser") return JSON.stringify(settings);
+  const { publicSettings } = splitDesktopSettingsSecrets(settings);
+  return JSON.stringify(
+    preservedLegacyCredentialSecrets
+      ? mergeDesktopSettingsSecrets(publicSettings, preservedLegacyCredentialSecrets)
+      : publicSettings,
+  );
+}
+
 function saveDesktopSettings(settings: DesktopSettings): void {
   if (typeof window === "undefined") return;
 
   try {
-    window.localStorage.setItem(DESKTOP_SETTINGS_STORAGE_KEY, JSON.stringify(settings));
-  } catch {
-    // Persistence is best-effort; ignore quota or disabled-storage errors.
+    window.localStorage.setItem(
+      DESKTOP_SETTINGS_STORAGE_KEY,
+      serializeDesktopSettingsForStorage(settings),
+    );
+  } catch (error) {
+    // Web persistence is best-effort (quota or disabled storage). On desktop a
+    // failed write can leave legacy plaintext credentials behind, so say so.
+    if (credentialStorageLocation() === "keychain") reportCredentialStorageError(error);
   }
 }
 
@@ -531,6 +583,12 @@ export function useDesktopSettingsPersistence() {
     return useDesktopSettingsStore.subscribe((state, previous) => {
       if (state.desktopSettings !== previous.desktopSettings) {
         saveDesktopSettings(state.desktopSettings);
+        if (credentialStorageLocation() === "keychain" && settingsKeychainWritable) {
+          void queueCredentialChanges(
+            splitDesktopSettingsSecrets(previous.desktopSettings).secrets,
+            splitDesktopSettingsSecrets(state.desktopSettings).secrets,
+          );
+        }
       }
     });
   }, []);

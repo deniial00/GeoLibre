@@ -100,7 +100,8 @@ exchanging its code. A late callback from a timed-out or cancelled consent is
 ignored so it cannot interrupt an immediate retry. A fresh management consent
 lasts at most five minutes,
 has no refresh token, and stays in memory only. The desktop project's refresh
-credential is also memory-only and is lost when the app quits. Pasted personal
+token is kept in the OS keychain, so the sign-in survives a restart until the
+user signs out. Pasted personal
 API tokens remain a separate optional fallback.
 
 For the shipped `https://share.geolibre.app` origin, authenticated desktop

@@ -2193,6 +2193,11 @@
     "title": "Settings",
     "description": "Configure project preferences and runtime settings.",
     "saveButton": "Save Settings",
+    "credentials": {
+      "keychain": "Tokens and API keys you save in GeoLibre are stored in your system keychain.",
+      "browser": "Tokens and API keys you save here are stored in this browser's local storage, where scripts running on this site can read them.",
+      "unavailable": "Your system keychain could not be used ({{error}}). New credentials last only until GeoLibre closes; previously saved credentials may remain in browser storage until migration succeeds."
+    },
     "section": {
       "language": "Language",
       "map": "Map",
@@ -2376,7 +2381,8 @@
       "oauthSigningIn": "Signing in…",
       "oauthSignOut": "Sign out",
       "oauthWebLifetime": "The access token stays in memory; the refresh session is scoped to this browser tab. Closing the tab requires signing in again.",
-      "oauthDesktopLifetime": "Sign-in credentials stay in app memory only. Restarting GeoLibre requires signing in again.",
+      "oauthDesktopKeychain": "Your sign-in is kept in your system keychain, so GeoLibre stays signed in after a restart until you sign out.",
+      "oauthDesktopSessionOnly": "This sign-in could not be saved to your system keychain, so it lasts only until GeoLibre closes.",
       "accountLoading": "Loading your account…",
       "accountRetry": "Try again",
       "accountIdentity": "Account: {{account}}",

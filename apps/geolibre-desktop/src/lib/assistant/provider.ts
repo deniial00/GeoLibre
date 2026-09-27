@@ -37,7 +37,8 @@ export interface BedrockCredentials {
 /**
  * A named, saved profile that bundles a provider, model, and credential values
  * together so users can define multiple LLM configurations and switch between
- * them. Profiles are stored in DesktopSettings (localStorage), never in the
+ * them. Profiles are stored in DesktopSettings (secret fields in the OS
+ * credential store on desktop, localStorage on the web), never in the
  * shared project file.
  */
 export interface AssistantProfile {

@@ -2371,7 +2371,6 @@
       "oauthSigningIn": "Aanmelden…",
       "oauthSignOut": "Afmelden",
       "oauthWebLifetime": "Het toegangstoken blijft in het geheugen; de vernieuwingssessie is beperkt tot dit browsertabblad. Na het sluiten van het tabblad moet u zich opnieuw aanmelden.",
-      "oauthDesktopLifetime": "Aanmeldgegevens blijven alleen in het geheugen van de app. Na het herstarten van GeoLibre moet u zich opnieuw aanmelden.",
       "accountLoading": "Uw account laden…",
       "accountRetry": "Opnieuw proberen",
       "accountIdentity": "Account: {{account}}",

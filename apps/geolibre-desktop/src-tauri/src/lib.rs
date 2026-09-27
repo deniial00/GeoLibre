@@ -58,6 +58,34 @@ mod native_duckdb {
 compile_error!("the `mas` (Mac App Store) build must not enable `native-duckdb`: DuckDB loads its spatial extension as unsigned native code at runtime, which App Sandbox and App Store guideline 2.5.2 forbid.");
 
 mod http_body;
+// OS credential store (macOS Keychain, Windows Credential Manager, Linux Secret
+// Service) for tokens and API keys saved in Settings (issue #1667). Mobile has
+// no keyring backend, and the keyring crate silently falls back to an
+// in-memory mock store on unsupported targets, which would lose credentials
+// without an error. Those targets get a stub that fails loudly instead.
+#[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
+mod secure_store;
+#[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "linux")))]
+mod secure_store {
+    use std::collections::HashMap;
+
+    const UNAVAILABLE: &str = "Secure credential storage is not available on this platform.";
+
+    #[tauri::command]
+    pub async fn secure_store_get_many(_accounts: Vec<String>) -> Result<HashMap<String, String>, String> {
+        Err(UNAVAILABLE.to_string())
+    }
+
+    #[tauri::command]
+    pub async fn secure_store_set(_account: String, _secret: String) -> Result<(), String> {
+        Err(UNAVAILABLE.to_string())
+    }
+
+    #[tauri::command]
+    pub async fn secure_store_delete(_account: String) -> Result<(), String> {
+        Err(UNAVAILABLE.to_string())
+    }
+}
 
 use earth_engine_oauth::{poll_earth_engine_oauth, start_earth_engine_oauth};
 #[cfg(not(any(feature = "mas", target_os = "ios")))]
@@ -466,7 +494,10 @@ pub fn run() {
             start_jupyter_server,
             stop_jupyter_server,
             start_earth_engine_oauth,
-            poll_earth_engine_oauth
+            poll_earth_engine_oauth,
+            secure_store::secure_store_get_many,
+            secure_store::secure_store_set,
+            secure_store::secure_store_delete
         ])
         .setup(|app| {
             create_main_window(app)?;

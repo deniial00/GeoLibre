@@ -2325,7 +2325,6 @@
       "oauthSigningIn": "Đang đăng nhập…",
       "oauthSignOut": "Đăng xuất",
       "oauthWebLifetime": "Mã thông báo truy cập được giữ trong bộ nhớ; phiên làm mới chỉ giới hạn trong thẻ trình duyệt này. Đóng thẻ sẽ yêu cầu đăng nhập lại.",
-      "oauthDesktopLifetime": "Thông tin đăng nhập chỉ được giữ trong bộ nhớ ứng dụng. Khởi động lại GeoLibre sẽ yêu cầu đăng nhập lại.",
       "accountLoading": "Đang tải tài khoản của bạn…",
       "accountRetry": "Thử lại",
       "accountIdentity": "Tài khoản: {{account}}",

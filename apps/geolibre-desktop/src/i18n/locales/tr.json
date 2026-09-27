@@ -2371,7 +2371,6 @@
       "oauthSigningIn": "Giriş yapılıyor…",
       "oauthSignOut": "Çıkış yap",
       "oauthWebLifetime": "Erişim belirteci bellekte tutulur; yenileme oturumu bu tarayıcı sekmesiyle sınırlıdır. Sekmeyi kapatırsanız tekrar giriş yapmanız gerekir.",
-      "oauthDesktopLifetime": "Giriş kimlik bilgileri yalnızca uygulama belleğinde tutulur. GeoLibre yeniden başlatıldığında tekrar giriş yapmanız gerekir.",
       "accountLoading": "Hesabınız yükleniyor…",
       "accountRetry": "Tekrar dene",
       "accountIdentity": "Hesap: {{account}}",

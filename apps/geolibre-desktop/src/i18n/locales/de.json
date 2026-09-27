@@ -2371,7 +2371,6 @@
       "oauthSigningIn": "Anmeldung läuft…",
       "oauthSignOut": "Abmelden",
       "oauthWebLifetime": "Das Zugriffstoken bleibt im Arbeitsspeicher; die Aktualisierungssitzung ist auf diesen Browser-Tab beschränkt. Nach dem Schließen des Tabs müssen Sie sich erneut anmelden.",
-      "oauthDesktopLifetime": "Anmeldedaten werden nur im Arbeitsspeicher der App gehalten. Nach einem Neustart von GeoLibre müssen Sie sich erneut anmelden.",
       "accountLoading": "Ihr Konto wird geladen…",
       "accountRetry": "Erneut versuchen",
       "accountIdentity": "Konto: {{account}}",
