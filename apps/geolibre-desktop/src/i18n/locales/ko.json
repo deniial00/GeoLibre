@@ -2385,7 +2385,6 @@
       "arcgisKeyStorageNote": "이 기기에 로컬로 저장되며(프로젝트 파일에는 저장되지 않으므로 공유되지 않음) Esri에만 전송됩니다. 웹 빌드에서는 다른 사이트 데이터와 동일한 브라우저 저장소를 공유합니다.",
       "variablesTitle": "환경 변수",
       "variablesCount_other": "활성화된 런타임 변수 {{count}}개.",
-      "secretsWarning": "값은 프로젝트 파일에 평문으로 저장되며 프로젝트를 공유할 때 노출될 수 있습니다. 프로젝트 파일이 비공개로 유지되지 않는 한 여기에 비밀 정보를 입력하지 마세요.",
       "empty": "구성된 환경 변수가 없습니다.",
       "variableFallback": "변수",
       "enableAria": "{{name}} 활성화",

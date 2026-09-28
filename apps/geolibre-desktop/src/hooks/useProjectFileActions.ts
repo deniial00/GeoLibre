@@ -6,6 +6,7 @@ import {
   redactProjectCredentials,
   excludeHiddenFieldsFromProject,
   serializeProject,
+  splitProjectCredentials,
   useAppStore,
   type GeoLibreLayer,
   type GeoLibreProject,
@@ -81,6 +82,10 @@ import { importArcgisProject, type ArcgisProjectImportWarning } from "../lib/arc
 import type { MapControllerRef } from "../components/layout/toolbar/constants";
 import { IS_MAS_BUILD } from "../lib/build-flags";
 import { resolveDroppedProjectIfCurrent } from "../lib/dropped-project";
+import {
+  projectCredentialsInKeychain,
+  rememberProjectCredentials,
+} from "../lib/project-credentials";
 
 /** A pending "strip credentials before saving?" prompt. */
 export interface CredentialStripPrompt {
@@ -1323,11 +1328,25 @@ export function useProjectFileActions(mapControllerRef: MapControllerRef) {
       undefined,
       layersForSave.layers,
     );
-    // Credentials are serialized in plain text for a local project that needs
-    // them. Make keeping them an explicit choice and use the same central
-    // redaction pass as every external egress.
+    // Desktop: geocoding keys, secret environment variables, and layer request
+    // headers move to the OS keychain and never reach the file. If a keychain
+    // write fails the unstripped project falls through to the prompt below, so
+    // the user neither writes plaintext silently nor loses the value.
+    let projectForSave = project;
+    let credentialsStripped = false;
+    if (projectCredentialsInKeychain()) {
+      const split = splitProjectCredentials(project);
+      if (await rememberProjectCredentials(split.secrets)) {
+        projectForSave = split.project;
+        credentialsStripped = true;
+      }
+      if (useAppStore.getState().projectGeneration !== saveProjectGeneration) return false;
+    }
+    // Remaining credentials are serialized in plain text for a local project
+    // that needs them. Make keeping them an explicit choice and use the same
+    // central redaction pass as every external egress.
     let contentToSave: string | null;
-    const projectToEgress = excludeHiddenFieldsFromProject(project);
+    const projectToEgress = excludeHiddenFieldsFromProject(projectForSave);
     const redacted = redactProjectCredentials(projectToEgress);
     if (redacted.redactedPaths.length > 0) {
       const remembered = saveChoicesForProject(saveChoicesRef.current, saveProjectGeneration);
@@ -1395,7 +1414,10 @@ export function useProjectFileActions(mapControllerRef: MapControllerRef) {
         };
         remoteProjectRef.current = updatedRemoteProject;
 
-        const liveProject = excludeHiddenFieldsFromProject(buildCurrentProject().project);
+        const live = buildCurrentProject().project;
+        const liveProject = excludeHiddenFieldsFromProject(
+          credentialsStripped ? splitProjectCredentials(live).project : live,
+        );
         const liveContent = serializeForSave(liveProject);
         if (liveContent && sharedProjectContentMatches(updated.savedContent, liveContent)) {
           markSaved();

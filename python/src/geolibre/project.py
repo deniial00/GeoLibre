@@ -211,7 +211,14 @@ def redact_credentials(project: dict[str, Any]) -> dict[str, Any]:
         safe["basemapStyleUrl"] = _redact_url(safe["basemapStyleUrl"])
     preferences = safe.get("preferences")
     if isinstance(preferences, dict):
-        preferences["environmentVariables"] = []
+        # Only rows explicitly marked non-secret travel (same rule as the app's
+        # redactProjectCredentials); everything else is a credential.
+        variables = preferences.get("environmentVariables")
+        preferences["environmentVariables"] = (
+            [v for v in variables if isinstance(v, dict) and v.get("secret") is False]
+            if isinstance(variables, list)
+            else []
+        )
         geocoding = preferences.get("geocoding")
         if isinstance(geocoding, dict):
             geocoding["apiKeys"] = {}

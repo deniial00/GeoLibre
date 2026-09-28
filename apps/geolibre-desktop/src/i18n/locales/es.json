@@ -2432,7 +2432,6 @@
       "variablesTitle": "Variables de entorno",
       "variablesCount_one": "{{count}} variable de tiempo de ejecución activada.",
       "variablesCount_other": "{{count}} variables de tiempo de ejecución activadas.",
-      "secretsWarning": "Los valores se almacenan en texto sin formato en el archivo del proyecto y pueden quedar expuestos al compartir el proyecto. Evite colocar aquí datos confidenciales a menos que el archivo del proyecto permanezca privado.",
       "empty": "No hay variables de entorno configuradas.",
       "variableFallback": "variable",
       "enableAria": "Activar {{name}}",

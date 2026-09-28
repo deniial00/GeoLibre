@@ -2432,7 +2432,6 @@
       "variablesTitle": "Umgebungsvariablen",
       "variablesCount_one": "{{count}} aktivierte Laufzeitvariable.",
       "variablesCount_other": "{{count}} aktivierte Laufzeitvariablen.",
-      "secretsWarning": "Werte werden im Klartext in der Projektdatei gespeichert und können beim Teilen des Projekts offengelegt werden. Vermeiden Sie es, hier Geheimnisse einzutragen, es sei denn, die Projektdatei bleibt privat.",
       "empty": "Keine Umgebungsvariablen konfiguriert.",
       "variableFallback": "Variable",
       "enableAria": "{{name}} aktivieren",

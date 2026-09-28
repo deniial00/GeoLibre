@@ -2395,7 +2395,6 @@
       "arcgisKeyStorageNote": "Được lưu trữ cục bộ trên thiết bị này (không có trong tệp dự án, vì vậy không bao giờ được chia sẻ) và chỉ được gửi tới Esri. Trên bản dựng web, nó chia sẻ cùng bộ lưu trữ trình duyệt với dữ liệu trang web khác.",
       "variablesTitle": "Biến môi trường",
       "variablesCount_other": "{{count}} đã bật các biến thời gian chạy.",
-      "secretsWarning": "Các giá trị được lưu trữ ở dạng văn bản thuần túy trong tệp dự án và có thể bị lộ khi dự án được chia sẻ. Tránh đặt bí mật ở đây trừ khi tệp dự án được giữ ở chế độ riêng tư.",
       "empty": "Không có biến môi trường nào được cấu hình.",
       "variableFallback": "biến",
       "enableAria": "Bật {{name}}",

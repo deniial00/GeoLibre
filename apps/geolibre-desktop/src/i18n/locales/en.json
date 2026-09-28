@@ -2453,7 +2453,10 @@
       "variablesTitle": "Environment variables",
       "variablesCount_one": "{{count}} enabled runtime variable.",
       "variablesCount_other": "{{count}} enabled runtime variables.",
-      "secretsWarning": "Values are stored in plain text in the project file and may be exposed when the project is shared. Avoid putting secrets here unless the project file stays private.",
+      "secretsWarning": "Values are saved in plain text in the project file. Values marked secret are removed when the project is shared or exported; other values are kept.",
+      "secretsWarningKeychain": "Values marked secret are kept in your system keychain, shared by every project on this computer that uses the same variable name; the project file keeps only the name. Other values are saved in the project file and are kept when the project is shared or exported.",
+      "secretOnAria": "{{name}} is a secret. Select to save its value in the project file instead.",
+      "secretOffAria": "{{name}} is saved in the project file. Select to treat it as a secret.",
       "empty": "No environment variables configured.",
       "variableFallback": "variable",
       "enableAria": "Enable {{name}}",
@@ -2487,6 +2490,7 @@
       "emailPlaceholder": "you@example.org",
       "emailHint": "Only used by Nominatim, which recommends providing it to help identify your application — sent only when provided.",
       "secretsWarning": "Keys are stored in plain text in the project file and may be exposed when the project is shared. They are also sent as query parameters, so they appear in geocoding request URLs visible in browser DevTools and any proxy logs.",
+      "secretsWarningKeychain": "Keys are kept in your system keychain and shared by every project on this computer, not saved in the project file. They are sent as query parameters, so they appear in geocoding request URLs visible in browser DevTools and any proxy logs.",
       "corsNote": "Google does not officially allow browser requests to its Geocoding API, so requests may be blocked unless served through a same-origin proxy."
     },
     "ai": {

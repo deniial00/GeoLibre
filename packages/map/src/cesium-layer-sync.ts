@@ -15,6 +15,7 @@ import {
   resolveThreeDTilesRequestHeaders,
   ruleBasedVisibilityFilter,
   transformGeojsonElevation,
+  withStoredRequestHeaders,
   type GeoLibreLayer,
   type LayerStyle,
 } from "@geolibre/core";
@@ -950,7 +951,10 @@ function imageryResourceFactory(
   Cesium: CesiumNs,
   layer: GeoLibreLayer,
 ): { requireSecure: RequireSecure; makeResource: ImageryResourceFactory } {
-  const headers = layer.source.requestHeaders as Record<string, string> | undefined;
+  const headers = withStoredRequestHeaders(
+    layer.id,
+    layer.source.requestHeaders as Record<string, string> | undefined,
+  );
   const hasHeaders = Boolean(headers && Object.keys(headers).length);
   // Credentials (request headers, an ArcGIS token) never go out over
   // plaintext — loopback excepted, so a local dev tile server still works.
@@ -3347,7 +3351,10 @@ export class CesiumLayerSync {
     // otherwise the tileset would silently 401/403 and never render on the globe.
     const headers = resolveThreeDTilesRequestHeaders(
       url,
-      layer.source.requestHeaders as Record<string, string> | undefined,
+      withStoredRequestHeaders(
+        layer.id,
+        layer.source.requestHeaders as Record<string, string> | undefined,
+      ),
     );
     const resource =
       headers && Object.keys(headers).length ? new Cesium.Resource({ url, headers }) : url;

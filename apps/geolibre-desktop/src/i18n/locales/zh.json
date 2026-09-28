@@ -2385,7 +2385,6 @@
       "arcgisKeyStorageNote": "仅存储在本设备上（不存储在项目文件中，因此永远不会被共享），并且仅发送到 Esri。在 Web 版本中，它与其他站点数据共用同一浏览器存储。",
       "variablesTitle": "环境变量",
       "variablesCount_other": "已启用 {{count}} 个运行时变量。",
-      "secretsWarning": "变量值以纯文本形式存储在项目文件中，在共享项目时可能会暴露。除非项目文件保持私有，否则请勿在此放置机密信息。",
       "empty": "尚未配置任何环境变量。",
       "variableFallback": "变量",
       "enableAria": "启用 {{name}}",

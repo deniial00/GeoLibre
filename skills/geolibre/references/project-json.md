@@ -129,7 +129,8 @@ declaration, not access control.
   geocoding API keys, environment variables, and plugin settings. Anything
   leaving the workspace must pass through `redactCredentials(project)` — which
   is what Share, HTML export, embed snapshots, and `Map.save_project()` already
-  do. Only a deliberate, trusted local save keeps them.
+  do. Only a deliberate, trusted local save keeps them. Environment variable
+  rows marked `"secret": false` are ordinary values and are kept.
 - **Check the URLs are reachable and CORS-enabled** — the browser fetches them
   directly, so a URL that works in `curl` can still fail in the app.
 - **Local `sourcePath` layers do not travel.** They resolve on the authoring

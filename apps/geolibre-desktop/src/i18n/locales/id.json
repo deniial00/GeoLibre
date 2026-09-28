@@ -2385,7 +2385,6 @@
       "arcgisKeyStorageNote": "Disimpan secara lokal di perangkat ini (bukan dalam file proyek, sehingga tidak pernah dibagikan) dan hanya dikirim ke Esri. Pada build web, kunci ini berbagi penyimpanan browser yang sama dengan data situs lainnya.",
       "variablesTitle": "Variabel lingkungan",
       "variablesCount_other": "{{count}} variabel runtime diaktifkan.",
-      "secretsWarning": "Nilai disimpan dalam teks biasa pada file proyek dan dapat terekspos saat proyek dibagikan. Hindari menaruh rahasia di sini kecuali file proyek tetap privat.",
       "empty": "Tidak ada variabel lingkungan yang dikonfigurasi.",
       "variableFallback": "variabel",
       "enableAria": "Aktifkan {{name}}",

@@ -2432,7 +2432,6 @@
       "variablesTitle": "Variables d'environnement",
       "variablesCount_one": "{{count}} variable d'exécution activée.",
       "variablesCount_other": "{{count}} variables d'exécution activées.",
-      "secretsWarning": "Les valeurs sont stockées en texte brut dans le fichier de projet et peuvent être exposées lorsque le projet est partagé. Évitez d'y mettre des secrets, sauf si le fichier de projet reste privé.",
       "empty": "Aucune variable d'environnement configurée.",
       "variableFallback": "variable",
       "enableAria": "Activer {{name}}",

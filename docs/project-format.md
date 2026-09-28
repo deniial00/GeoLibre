@@ -570,9 +570,17 @@ A local project may contain credentials needed to restore authenticated data,
 including layer request headers, geocoding API keys, environment variables, and
 plugin settings. Any project leaving the local workspace must pass through
 `redactCredentials(project)` first. GeoLibre applies this invariant to Share,
-standalone HTML export, embed snapshots, and collaboration snapshots. Local
-Save and Save As ask whether credentials should be stripped or deliberately
-kept.
+standalone HTML export, embed snapshots, and collaboration snapshots. On the
+desktop app, geocoding API keys, secret environment variables, and layer
+request headers are kept in the OS keychain and never written to the file; see
+[Credential storage](architecture.md#credential-storage). Local Save and Save
+As ask whether any remaining credentials (on the web build, these too) should
+be stripped or deliberately kept.
+
+Each `preferences.environmentVariables` row may carry `"secret": false`. Rows
+without it are secrets: redaction removes them, and the desktop app keeps
+their values in the keychain. Rows marked `"secret": false` are ordinary
+values: they stay in the file and survive Share and export.
 
 Saved model and processing-history parameter bags do not currently accept
 credentials and are treated as structural project content. If a future

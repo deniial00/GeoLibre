@@ -1,6 +1,11 @@
 import { onArcgisViewDestroy } from "@geolibre/map/arcgis-control-adapters";
 import { applyTilesetAltitudeOffset, type PositionedTileset } from "./tiles-altitude-offset";
-import { useAppStore, type GeoLibreLayer, resolveThreeDTilesRequestHeaders } from "@geolibre/core";
+import {
+  useAppStore,
+  type GeoLibreLayer,
+  resolveThreeDTilesRequestHeaders,
+  withStoredRequestHeaders,
+} from "@geolibre/core";
 import type { Layer } from "@deck.gl/core";
 import type { GeoLibreAppAPI } from "../types";
 import { ensureSharedDeckOverlay, setSharedDeckLayers } from "./shared-deck-overlay";
@@ -113,7 +118,10 @@ export async function restoreMapboxTiles(app: GeoLibreAppAPI, flyToId?: string):
             fetch: {
               headers: resolveThreeDTilesRequestHeaders(
                 String(layer.source.url),
-                layer.source.requestHeaders as Record<string, string> | undefined,
+                withStoredRequestHeaders(
+                  layer.id,
+                  layer.source.requestHeaders as Record<string, string> | undefined,
+                ),
               ),
             },
           },

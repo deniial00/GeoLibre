@@ -2432,7 +2432,6 @@
       "variablesTitle": "Ortam değişkenleri",
       "variablesCount_one": "{{count}} etkin çalışma zamanı değişkeni.",
       "variablesCount_other": "{{count}} etkin çalışma zamanı değişkeni.",
-      "secretsWarning": "Değerler, proje dosyasında düz metin olarak saklanır ve proje paylaşıldığında açığa çıkabilir. Proje dosyası gizli kalmayacaksa buraya gizli bilgi koymaktan kaçının.",
       "empty": "Ortam değişkeni yapılandırılmamış.",
       "variableFallback": "değişken",
       "enableAria": "{{name}} öğesini etkinleştir",

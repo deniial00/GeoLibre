@@ -422,6 +422,24 @@ def test_python_project_egress_redacts_credentials(m, tmp_path):
     assert m.to_project(keep_credentials=True)["plugins"]["settings"]
 
 
+def test_redact_credentials_keeps_only_non_secret_environment_variables():
+    """Same rule as the app: rows travel only when marked ``secret: false``."""
+    safe = redact_credentials(
+        {
+            "preferences": {
+                "environmentVariables": [
+                    {"key": "SERVICE_TOKEN", "value": "env-secret", "enabled": True},
+                    {"key": "MARKED", "value": "marked-secret", "enabled": True, "secret": True},
+                    {"key": "ENDPOINT", "value": "https://x", "enabled": True, "secret": False},
+                ]
+            }
+        }
+    )
+    assert safe["preferences"]["environmentVariables"] == [
+        {"key": "ENDPOINT", "value": "https://x", "enabled": True, "secret": False}
+    ]
+
+
 def test_redact_credentials_keeps_the_first_party_map_controls():
     """Wiping these stripped the legend/colorbar/swipe from every export."""
     safe = redact_credentials(

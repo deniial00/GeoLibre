@@ -2619,7 +2619,6 @@
       "variablesCount_few": "{{count}} متغيرات تشغيل مفعّلة.",
       "variablesCount_many": "{{count}} متغير تشغيل مفعّلًا.",
       "variablesCount_other": "{{count}} متغير تشغيل مفعّل.",
-      "secretsWarning": "تُخزن القيم كنص عادي في ملف المشروع وقد تنكشف عند مشاركة المشروع. تجنب وضع الأسرار هنا ما لم يبقَ ملف المشروع خاصًا.",
       "empty": "لم يتم تكوين أي متغيرات بيئة.",
       "variableFallback": "متغير",
       "enableAria": "تفعيل {{name}}",

@@ -2432,7 +2432,6 @@
       "variablesTitle": "Variabili d'ambiente",
       "variablesCount_one": "{{count}} variabile di runtime abilitata.",
       "variablesCount_other": "{{count}} variabili di runtime abilitate.",
-      "secretsWarning": "I valori sono memorizzati in chiaro nel file di progetto e potrebbero essere esposti quando il progetto viene condiviso. Evita di inserire qui dati riservati a meno che il file di progetto non resti privato.",
       "empty": "Nessuna variabile d'ambiente configurata.",
       "variableFallback": "variabile",
       "enableAria": "Abilita {{name}}",

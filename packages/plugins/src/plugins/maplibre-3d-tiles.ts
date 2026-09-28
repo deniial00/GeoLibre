@@ -11,6 +11,7 @@ import {
   stripGoogleMapsApiKeyHeader,
   type GeoLibreLayer,
   useAppStore,
+  withStoredRequestHeaders,
 } from "@geolibre/core";
 import type { Layer } from "@deck.gl/core";
 import type { Map as MapLibreMap } from "maplibre-gl";
@@ -507,7 +508,7 @@ function restoreThreeDTilesMapLayer(
   const altitudeOffset = numberValue(layer.source.altitudeOffset, 0);
   const requestHeaders = resolveThreeDTilesRequestHeaders(
     url,
-    stringRecordValue(layer.source.requestHeaders),
+    withStoredRequestHeaders(id, stringRecordValue(layer.source.requestHeaders)),
   );
   const existingTilesets = control.getState().tilesets.filter((tileset) => tileset.id !== id);
   const savedCenter = lngLatPairValue(layer.metadata.center);
@@ -1732,7 +1733,10 @@ function renderGooglePhotorealisticTilesLayers(): void {
 function googleTilesLayerSignature(layers: GeoLibreLayer[]): string {
   return layers
     .map((layer) => {
-      const headers = stringRecordValue(layer.source.requestHeaders);
+      const headers = withStoredRequestHeaders(
+        layer.id,
+        stringRecordValue(layer.source.requestHeaders),
+      );
       const altitudeOffset = numberValue(layer.source.altitudeOffset, 0);
       // Sign both header names AND values: a changed custom header value must
       // produce a new signature so the Tile3DLayer rebuilds rather than reusing
@@ -1752,7 +1756,7 @@ function buildGooglePhotorealisticTilesDeckLayer(layer: GeoLibreLayer): Layer | 
   const altitudeOffset = numberValue(layer.source.altitudeOffset, 0);
   const requestHeaders = resolveThreeDTilesRequestHeaders(
     GOOGLE_PHOTOREALISTIC_TILES_URL,
-    stringRecordValue(layer.source.requestHeaders),
+    withStoredRequestHeaders(layer.id, stringRecordValue(layer.source.requestHeaders)),
     googleTilesApiKeysByLayerId.get(layer.id),
   );
 

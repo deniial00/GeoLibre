@@ -2432,7 +2432,6 @@
       "variablesTitle": "Omgevingsvariabelen",
       "variablesCount_one": "{{count}} ingeschakelde runtimevariabele.",
       "variablesCount_other": "{{count}} ingeschakelde runtimevariabelen.",
-      "secretsWarning": "Waarden worden als platte tekst opgeslagen in het projectbestand en kunnen zichtbaar worden wanneer het project wordt gedeeld. Vermijd het plaatsen van geheimen hier, tenzij het projectbestand privé blijft.",
       "empty": "Geen omgevingsvariabelen geconfigureerd.",
       "variableFallback": "variabele",
       "enableAria": "{{name}} inschakelen",

@@ -366,15 +366,23 @@ export function redactProjectCredentials(project: GeoLibreProject): CredentialRe
   const preferences = project.preferences
     ? {
         ...project.preferences,
-        environmentVariables: [],
+        // Only rows explicitly marked non-secret travel; everything else is
+        // treated as a credential.
+        environmentVariables: (project.preferences.environmentVariables ?? []).filter(
+          (variable) => variable.secret === false,
+        ),
         geocoding,
         ...(redactedMapboxStyleUrl !== mapboxStyleUrl
           ? { map: { ...project.preferences.map, mapboxStyleUrl: redactedMapboxStyleUrl } }
           : {}),
       }
     : project.preferences;
+  // A secret row with an empty value carries nothing (desktop keeps the value
+  // in the keychain), so it must not count toward the save prompt.
   const populatedEnvironmentVariables =
-    project.preferences?.environmentVariables?.filter((variable) => variable.key.trim()) ?? [];
+    project.preferences?.environmentVariables?.filter(
+      (variable) => variable.key.trim() && variable.secret !== false && variable.value !== "",
+    ) ?? [];
   if (populatedEnvironmentVariables.length > 0) {
     recordRedaction(
       accumulator,

@@ -180,7 +180,8 @@ m2
 ```
 
 `to_project()`, `save_project()`, and `to_html()` redact credentials — API keys,
-tokens, authenticated request headers, environment variables, geocoder keys, and
+tokens, authenticated request headers, secret environment variables (every row
+not marked `"secret": false`), geocoder keys, and
 credential URL parameters — so anything you serialize, commit, or share is safe
 by default. Pass `keep_credentials=True` to `to_project()` or `save_project()`
 for a trusted local file that must keep working without re-entering them:
