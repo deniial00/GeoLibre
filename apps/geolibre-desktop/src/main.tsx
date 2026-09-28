@@ -179,13 +179,14 @@ const isHostedWebApp = !isTauri() && !__GEOLIBRE_EMBED_BUILD__;
 startAnalytics(isHostedWebApp);
 // Clerk or Auth0, whichever this deployment configured (neither, normally).
 const authGate = resolveAuthGate(isHostedWebApp);
-if (authGate) {
+if (authGate || isDesktopRuntime()) {
   // Apply the initial theme now rather than leaving it to <App />. A gate paints
-  // a full-screen signed-out page *before* App mounts, and App is where
-  // useThemeMode adds the `dark` class — so without this a dark-mode visitor
-  // gets a white sign-in screen that flips to dark only after signing in. This
-  // sets exactly what useThemeMode's layout effect will set a moment later
-  // (same helper, same `?theme=` handling), so it is a no-op once App mounts.
+  // a full-screen signed-out page, and desktop may paint the keychain waiting
+  // screen, *before* App mounts, and App is where useThemeMode adds the `dark`
+  // class — so without this a dark-mode user gets a white screen that flips to
+  // dark only once the app renders. This sets exactly what useThemeMode's
+  // layout effect will set a moment later (same helper, same `?theme=`
+  // handling), so it is a no-op once App mounts.
   const initialTheme = getInitialThemeMode();
   document.documentElement.classList.toggle("dark", initialTheme === "dark");
   document.documentElement.style.colorScheme = initialTheme;
