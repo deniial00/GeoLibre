@@ -15,6 +15,11 @@ let setMode: "ok" | "fail" | "hold" = "ok";
 const writeStarted = Promise.withResolvers<void>();
 const release = Promise.withResolvers<void>();
 let markerWritable = true;
+// When set, the next delete signals `started` and waits for `release`.
+let deleteHold: {
+  started: PromiseWithResolvers<void>;
+  release: PromiseWithResolvers<void>;
+} | null = null;
 
 (globalThis as { window?: unknown }).window = {
   localStorage: {
@@ -43,6 +48,12 @@ let markerWritable = true;
         return null;
       }
       if (cmd === "secure_store_delete") {
+        const held = deleteHold;
+        deleteHold = null;
+        if (held) {
+          held.started.resolve();
+          await held.release.promise;
+        }
         keychain.delete(args.account as string);
         return null;
       }
@@ -69,12 +80,15 @@ configureShareOAuthReadiness(Promise.resolve());
 // Every refresh rotates: rt-0 → rt-1 → rt-2 …; access tokens expire inside
 // the refresh buffer so each getShareAccessToken() call refreshes.
 const presented: string[] = [];
+const revoked: string[] = [];
 setShareFetch(async (input, init) => {
+  const body = new URLSearchParams(String(init?.body));
   if (String(input).endsWith("/oauth/token")) {
-    presented.push(new URLSearchParams(String(init?.body)).get("refresh_token") ?? "");
+    presented.push(body.get("refresh_token") ?? "");
     const n = presented.length;
     return Response.json({ access_token: `at-${n}`, refresh_token: `rt-${n}`, expires_in: 1 });
   }
+  if (String(input).endsWith("/oauth/revoke")) revoked.push(body.get("token") ?? "");
   return new Response(null, { status: 200 });
 });
 
@@ -135,12 +149,25 @@ describe("desktop share sign-in in the OS keychain", () => {
     assert.equal(useShareOAuthStore.getState().desktopSessionOnly, false);
   });
 
-  it("removes the keychain entry on sign-out", async () => {
-    await signOutOfShare();
-    await settled();
+  it("waits for the keychain delete on sign-out, even without a marker, and still revokes", async () => {
+    markerWritable = false;
+    const hold = { started: Promise.withResolvers<void>(), release: Promise.withResolvers<void>() };
+    deleteHold = hold;
+    let done = false;
+    const signOut = signOutOfShare().then(() => (done = true));
+    try {
+      await hold.started.promise;
+      assert.equal(done, false, "sign-out must not finish before the delete");
+      assert.equal(useShareOAuthStore.getState().issuer, ISSUER, "not reported signed out yet");
+      assert.equal(keychain.get(ACCOUNT), "rt-4");
+      assert.deepEqual(revoked, ["rt-4"], "the revoke does not wait for the delete");
+    } finally {
+      hold.release.resolve();
+      markerWritable = true;
+    }
+    await signOut;
     assert.equal(useShareOAuthStore.getState().issuer, null);
     assert.equal(keychain.has(ACCOUNT), false);
-    assert.deepEqual(marker(), []);
     assert.ok(![...storage.values()].some((value) => value.includes("rt-")));
   });
 });

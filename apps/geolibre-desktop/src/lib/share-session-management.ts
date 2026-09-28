@@ -122,7 +122,8 @@ export async function getShareAccountIdentity(): Promise<ShareAccountIdentity> {
     throw new SessionManagementError("request-failed");
   }
   if (response.status === 401) {
-    void signOutOfShare();
+    // A failed keychain delete is already shown through the credential warning.
+    void signOutOfShare().catch(() => {});
     throw new SessionManagementError("no-project-session");
   }
   if (!response.ok) throw new SessionManagementError("request-failed");

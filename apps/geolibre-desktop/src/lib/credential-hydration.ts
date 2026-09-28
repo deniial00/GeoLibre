@@ -84,15 +84,26 @@ async function hydratePostgresConnections(): Promise<void> {
     });
     setKeychainPostgresConnections(entries);
     if (entries.length < ids.length) {
-      // An interrupted write left an indexed id without a credential. Keep the
-      // index as is and stay read-only so no edit erases what is left.
+      // An indexed id has no credential: its keychain write failed or was
+      // interrupted after the index was written. The read reports an account
+      // as missing only when it has no entry (any other error throws above),
+      // so dropping the id erases nothing. Rewrite the index and stay
+      // writable; otherwise one failed save would lock the list for good.
       reportCredentialStorageError(
-        new Error("Saved PostGIS credential is unavailable from your system keychain."),
+        new Error("A saved PostGIS connection could not be restored from your system keychain."),
       );
-      setPostgresKeychainWritable(false);
-    } else {
-      setPostgresKeychainWritable(true);
+      try {
+        window.localStorage.setItem(
+          POSTGRES_CONNECTION_IDS_STORAGE_KEY,
+          JSON.stringify(entries.map(({ id }) => id)),
+        );
+      } catch (error) {
+        reportCredentialStorageError(error);
+        setPostgresKeychainWritable(false);
+        return;
+      }
     }
+    setPostgresKeychainWritable(true);
     return;
   }
 

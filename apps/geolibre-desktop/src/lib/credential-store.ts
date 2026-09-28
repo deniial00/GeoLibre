@@ -71,11 +71,13 @@ async function drainPending(): Promise<void> {
     try {
       await writeSecureCredential(account, value);
     } catch (error) {
+      // Record the failure and move on: accounts are independent, so one that
+      // keeps failing must not stop later accounts from being written.
       useCredentialStorageStatus.setState((state) => ({
         failedAccounts: { ...state.failedAccounts, [account]: true },
       }));
       reportCredentialStorageError(error);
-      return;
+      continue;
     }
     // A newer value queued while this write was in flight stays pending, and so
     // does the account's failure mark: the stored value is not the latest yet.

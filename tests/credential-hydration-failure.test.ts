@@ -12,6 +12,8 @@ let keychainAvailable = false;
 // When set, the next write signals `started` and waits for `release`.
 let hold: { started: PromiseWithResolvers<void>; release: PromiseWithResolvers<void> } | null =
   null;
+// Writes to these accounts fail even while the keychain is available.
+const brokenAccounts = new Set<string>();
 
 (globalThis as { window?: unknown }).window = {
   localStorage: {
@@ -27,6 +29,9 @@ let hold: { started: PromiseWithResolvers<void>; release: PromiseWithResolvers<v
         );
       }
       if (cmd === "secure_store_set") {
+        if (brokenAccounts.has(args.account as string)) {
+          throw new Error("Platform secure storage failure: item is corrupted");
+        }
         const held = hold;
         hold = null;
         if (held) {
@@ -135,5 +140,25 @@ describe("desktop credential hydration without a keychain", () => {
     await newer;
     assert.equal(keychain.get(account), "pk.new");
     assert.equal(failed(), undefined);
+  });
+
+  it("keeps writing other accounts while one account keeps failing", async () => {
+    const status = () => useCredentialStorageStatus.getState().failedAccounts;
+    keychainAvailable = true;
+    brokenAccounts.add("settings.arcgisApiKey");
+    try {
+      await queueCredentialChanges({}, { "settings.arcgisApiKey": "AAPT-stuck" });
+      // Queued after the stuck account, so it is drained after it.
+      await queueCredentialChanges({}, { "settings.shareToken": "glb_after" });
+      assert.equal(keychain.get("settings.shareToken"), "glb_after");
+      assert.equal(status()["settings.shareToken"], undefined);
+      assert.equal(status()["settings.arcgisApiKey"], true);
+      assert.equal(keychain.has("settings.arcgisApiKey"), false);
+    } finally {
+      brokenAccounts.clear();
+    }
+    await queueCredentialChanges({}, {});
+    assert.equal(keychain.get("settings.arcgisApiKey"), "AAPT-stuck");
+    assert.equal(status()["settings.arcgisApiKey"], undefined);
   });
 });

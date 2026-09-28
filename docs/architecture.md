@@ -170,10 +170,13 @@ different places per build:
   `secure_store_*` commands in `src-tauri/src/secure_store.rs`. The
   `geolibre.desktopSettings` localStorage blob keeps those fields empty, and
   `geolibre.postgres.connectionIds` holds only the non-secret order of the
-  `postgres.connection.<uuid>` entries. `lib/credential-hydration.ts` loads
-  them into memory before the app renders and migrates any plaintext values
-  left in localStorage by an older build, removing each only after its
-  keychain write succeeds. The OAuth refresh token is stored per issuer as
+  `postgres.connection.<uuid>` entries. The index is written before a new
+  entry, so a crash never leaves an unreferenced credential; a startup that
+  finds an indexed id without a credential (its write failed) drops the id and
+  shows the warning. `lib/credential-hydration.ts` loads them into memory
+  before the app renders and migrates any plaintext values left in
+  localStorage by an older build, removing each only after its keychain write
+  succeeds. The OAuth refresh token is stored per issuer as
   `share.oauth.refreshToken.<issuer>` and rotates on every refresh; the access
   token and the PKCE verifier stay in memory. Because the server revokes a
   session when a consumed refresh token is presented, the issuer is recorded
@@ -182,9 +185,16 @@ different places per build:
   launch that finds its issuer listed deletes the stored token and starts
   signed out rather than trusting a possibly consumed one. If the list itself
   cannot be written, the new token is not stored: a delete of the stored copy
-  is queued and the sign-in lasts only until GeoLibre closes. That delete is
-  best effort; quitting before it finishes leaves the consumed token stored,
-  so the next launch signs out on its first refresh instead of at startup.
+  is queued and the sign-in lasts only until GeoLibre closes. After a refresh
+  that delete is best effort; quitting before it finishes leaves the consumed
+  token stored, so the next launch signs out on its first refresh instead of
+  at startup. Sign-out waits for its delete before reporting signed out, and
+  sends the revoke request whether or not the delete succeeds. If the delete
+  fails, Settings reports the sign-out as incomplete and the app retries the
+  delete only while it keeps running. After a restart the token is discarded
+  if its issuer is on the unsaved list; if that list could not be written
+  either, the token is restored, and it still works only if the revoke
+  request also failed.
 - **Web, Jupyter embed, mobile:** localStorage, as before. The web OAuth
   refresh token stays in tab-scoped sessionStorage.
 
