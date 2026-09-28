@@ -145,6 +145,7 @@ describe("changedPreferenceCredentials", () => {
 
   it("returns only edits, keeping untouched overrides out of the keychain", () => {
     // OVERRIDE is plaintext from the opened file; the others were stored.
+    withStored({ "project.env.CLEARED": "stored-cleared" });
     const seeded = prefs({ mapbox: "file-geo", maptiler: "stored-mt" }, [
       ["EDITED", "stored"],
       ["OVERRIDE", "file-value"],
@@ -161,6 +162,25 @@ describe("changedPreferenceCredentials", () => {
       "project.geocoding.apiKey.maptiler": "new-mt",
       "project.env.EDITED": "changed",
       "project.env.CLEARED": "",
+    });
+  });
+
+  it("clearing a file override keeps the shared key; clearing the shared key deletes it", () => {
+    withStored({
+      "project.geocoding.apiKey.mapbox": "shared-geo",
+      "project.env.TOKEN": "shared-token",
+    });
+    const cleared = prefs({ mapbox: "" }, [["TOKEN", ""]]);
+
+    // The opened file carried its own values, so the fields showed those.
+    const fromFile = prefs({ mapbox: "file-geo" }, [["TOKEN", "file-token"]]);
+    assert.deepEqual(changedPreferenceCredentials(fromFile, cleared), {});
+
+    // The fields showed the shared values, so clearing them is a deletion.
+    const fromStore = prefs({ mapbox: "shared-geo" }, [["TOKEN", "shared-token"]]);
+    assert.deepEqual(changedPreferenceCredentials(fromStore, cleared), {
+      "project.geocoding.apiKey.mapbox": "",
+      "project.env.TOKEN": "",
     });
   });
 });

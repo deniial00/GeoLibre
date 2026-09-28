@@ -113,21 +113,31 @@ export function overlayStoredPreferenceCredentials(
  * (plaintext from the opened file) stays out of the keychain and opening a
  * file never writes it. Removing, renaming, or un-secreting a variable never
  * deletes its stored value: names are shared by every project on the device.
+ * Clearing a field deletes the stored value only when the field showed that
+ * stored value; clearing a file override that differed from it just drops the
+ * override, so the shared value applies again and other projects keep it.
  */
 export function changedPreferenceCredentials(
   seeded: ProjectPreferences,
   next: ProjectPreferences,
 ): Record<string, string> {
   const changes: Record<string, string> = {};
+  const record = (account: string, seededValue: string, nextValue: string) => {
+    if (nextValue === seededValue) return;
+    if (nextValue === "" && seededValue !== lookupProjectCredential(account)) return;
+    changes[account] = nextValue;
+  };
 
   const providerIds = new Set([
     ...Object.keys(seeded.geocoding.apiKeys),
     ...Object.keys(next.geocoding.apiKeys),
   ]);
   for (const providerId of providerIds) {
-    const seededKey = seeded.geocoding.apiKeys[providerId]?.trim() ?? "";
-    const nextKey = next.geocoding.apiKeys[providerId]?.trim() ?? "";
-    if (nextKey !== seededKey) changes[geocodingApiKeyAccount(providerId)] = nextKey;
+    record(
+      geocodingApiKeyAccount(providerId),
+      seeded.geocoding.apiKeys[providerId]?.trim() ?? "",
+      next.geocoding.apiKeys[providerId]?.trim() ?? "",
+    );
   }
 
   const seededSecrets = new Map<string, string>();
@@ -141,9 +151,7 @@ export function changedPreferenceCredentials(
     // A new blank row falls back to any value stored under the name; it
     // never deletes it.
     if (seededValue === undefined && variable.value === "") continue;
-    if (variable.value !== seededValue) {
-      changes[environmentVariableAccount(variable.key)] = variable.value;
-    }
+    record(environmentVariableAccount(variable.key), seededValue ?? "", variable.value);
   }
 
   return changes;

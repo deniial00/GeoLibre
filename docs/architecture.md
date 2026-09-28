@@ -204,7 +204,10 @@ different places per build:
   named secret environment values to the keychain, leaving empty values in
   the file. Duplicate or nameless secret environment rows cannot be assigned
   a unique account and remain for the local keep/strip save prompt.
-  Settings writes a value only when the user changes it. Opening a file that
+  Settings writes a value only when the user changes it. Clearing a field
+  deletes the stored value only if the field showed that value; clearing a
+  project-file override that differed from it drops the override and the
+  shared value applies again. Opening a file that
   still carries plaintext values uses them for that session and writes nothing
   until the next save. `@geolibre/core`'s `project-credential-refs.ts` fills
   empty values from the stored ones where they are used (runtime environment,
