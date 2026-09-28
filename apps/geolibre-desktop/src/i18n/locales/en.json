@@ -1497,7 +1497,7 @@
     "reauthSignIn": "Sign in again",
     "liveAt": "Your project is live at:",
     "credentialsRemoved": "{{count}} credential field(s) were not included. Recipients must provide their own credentials or use a brokered reference.",
-    "oauthSignOutIncomplete": "You are signed out, but the saved sign-in could not be removed from your system keychain. GeoLibre keeps retrying while it is open.",
+    "oauthSignOutIncomplete": "You are signed out, but the saved sign-in could not be removed from your system keychain, so it may be restored the next time GeoLibre starts. Check that your keychain is available, then sign in and sign out again.",
     "copyLink": "Copy link",
     "open": "Open",
     "done": "Done",

@@ -933,8 +933,9 @@ export async function signOutOfShare(baseUrl?: string): Promise<void> {
   if (loadSignedInIssuer() === null) setStoreIssuer(null);
   await revoked;
   // The session is gone from memory either way, but a failed delete leaves the
-  // token on this device. The queue retries it only while the app runs, so
-  // report the sign-out as incomplete instead of as clean.
+  // token on this device. The delete stays queued and is retried only with a
+  // later credential write in this process, so report the sign-out as
+  // incomplete instead of as clean.
   if (session && isDesktopRuntime() && hasPendingCredential(shareRefreshTokenAccount(issuer))) {
     throw new ShareOAuthError("sign-out-incomplete");
   }

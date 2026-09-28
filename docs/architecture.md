@@ -190,11 +190,11 @@ different places per build:
   token stored, so the next launch signs out on its first refresh instead of
   at startup. Sign-out waits for its delete before reporting signed out, and
   sends the revoke request whether or not the delete succeeds. If the delete
-  fails, Settings reports the sign-out as incomplete and the app retries the
-  delete only while it keeps running. After a restart the token is discarded
-  if its issuer is on the unsaved list; if that list could not be written
-  either, the token is restored, and it still works only if the revoke
-  request also failed.
+  fails, Settings reports the sign-out as incomplete; the delete stays queued
+  and is retried only with a later credential write while the app runs. After
+  a restart the token is discarded if its issuer is on the unsaved list; if
+  that list could not be written either, the token is restored, and it still
+  works only if the revoke request also failed.
 - **Web, Jupyter embed, mobile:** localStorage, as before. The web OAuth
   refresh token stays in tab-scoped sessionStorage.
 
