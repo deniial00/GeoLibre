@@ -5,7 +5,7 @@ import {
   DEFAULT_PROJECT_PREFERENCES,
   ELLIPSOIDS,
   GEOCODING_PROVIDERS,
-  commitPreferenceCredentials,
+  changedPreferenceCredentials,
   getGeocodingProvider,
   isSecretEnvironmentVariable,
   normalizeGeocodingProviderId,
@@ -645,15 +645,18 @@ export function SettingsDialog({
     ? section
     : // "interface" has no gate, so it is always a valid, visible fallback.
       (SECTION_ITEMS.find((item) => isSectionVisible(item.id))?.id ?? "interface");
+  // The preferences (with stored credentials filled in) the draft is seeded
+  // from, so saving writes only the credentials the user actually changed.
+  const [initialCredentialPreferences] = useState(() =>
+    overlayStoredPreferenceCredentials(preferences),
+  );
   const [draftPreferences, setDraftPreferences] = useState<DraftPreferences>(() =>
-    clonePreferences(overlayStoredPreferenceCredentials(preferences)),
+    clonePreferences(initialCredentialPreferences),
   );
   const [draftDesktopSettings, setDraftDesktopSettings] = useState<DraftDesktopSettings>(() =>
-    cloneDesktopSettings(desktopSettings, overlayStoredPreferenceCredentials(preferences)),
+    cloneDesktopSettings(desktopSettings, initialCredentialPreferences),
   );
-  // The preferences (with stored credentials filled in) the draft was seeded
-  // from, so saving writes only the credentials the user actually changed.
-  const seededCredentialPreferencesRef = useRef<ProjectPreferences>(preferences);
+  const seededCredentialPreferencesRef = useRef<ProjectPreferences>(initialCredentialPreferences);
   const [error, setError] = useState<string | null>(null);
   // Live map projection, captured when the dialog opens. The Globe projection
   // lets the map drift slightly past restricted bounds, so we warn users to
@@ -1391,18 +1394,15 @@ export function SettingsDialog({
     }
 
     if (projectCredentialsInKeychain()) {
-      const committed = commitPreferenceCredentials(
-        seededCredentialPreferencesRef.current,
-        normalized,
-        useAppStore.getState().preferences,
+      // Before setPreferences: the cache update is synchronous, so a cleared
+      // value is gone before the runtime env re-projects. The store keeps the
+      // plaintext until a project save moves it out, so a failed keychain
+      // write never loses the value: that save falls back to the prompt.
+      void rememberProjectCredentials(
+        changedPreferenceCredentials(seededCredentialPreferencesRef.current, normalized),
       );
-      // Before setPreferences: the cache update is synchronous, so the runtime
-      // env never re-projects without the key.
-      void rememberProjectCredentials(committed.secrets);
-      setPreferences(committed.preferences);
-    } else {
-      setPreferences(normalized);
     }
+    setPreferences(normalized);
     // When a level preset is still active, recompute its hidden lists from the
     // current plugin registry at save time. The draft was snapshotted when the
     // dialog opened, so this picks up any external plugins that loaded since

@@ -197,7 +197,7 @@ export {
   stripGoogleMapsApiKeyHeader,
 } from "./three-d-tiles";
 export {
-  commitPreferenceCredentials,
+  changedPreferenceCredentials,
   environmentVariableAccount,
   geocodingApiKeyAccount,
   isSecretEnvironmentVariable,

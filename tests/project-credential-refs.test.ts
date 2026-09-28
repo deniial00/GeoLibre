@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { after, describe, it } from "node:test";
 import {
-  commitPreferenceCredentials,
+  changedPreferenceCredentials,
   createEmptyProject,
   overlayStoredPreferenceCredentials,
   redactProjectCredentials,
@@ -88,7 +88,7 @@ describe("overlayStoredPreferenceCredentials", () => {
   });
 });
 
-describe("commitPreferenceCredentials", () => {
+describe("changedPreferenceCredentials", () => {
   function prefs(
     apiKeys: Record<string, string>,
     rows: Array<[string, string]>,
@@ -101,13 +101,8 @@ describe("commitPreferenceCredentials", () => {
     };
   }
 
-  it("writes edits, keeps untouched overrides out of the keychain", () => {
-    // Store: EDITED came from the keychain; OVERRIDE is plaintext from the file.
-    const current = prefs({ mapbox: "file-geo" }, [
-      ["EDITED", ""],
-      ["OVERRIDE", "file-value"],
-      ["CLEARED", ""],
-    ]);
+  it("returns only edits, keeping untouched overrides out of the keychain", () => {
+    // OVERRIDE is plaintext from the opened file; the others were stored.
     const seeded = prefs({ mapbox: "file-geo", maptiler: "stored-mt" }, [
       ["EDITED", "stored"],
       ["OVERRIDE", "file-value"],
@@ -120,23 +115,11 @@ describe("commitPreferenceCredentials", () => {
       ["NEW_BLANK", ""],
     ]);
 
-    const { preferences, secrets } = commitPreferenceCredentials(seeded, next, current);
-
-    assert.deepEqual(secrets, {
+    assert.deepEqual(changedPreferenceCredentials(seeded, next), {
       "project.geocoding.apiKey.maptiler": "new-mt",
       "project.env.EDITED": "changed",
       "project.env.CLEARED": "",
     });
-    assert.deepEqual(preferences.geocoding.apiKeys, { mapbox: "file-geo" });
-    assert.deepEqual(
-      preferences.environmentVariables.map(({ key, value }) => [key, value]),
-      [
-        ["EDITED", ""],
-        ["OVERRIDE", "file-value"],
-        ["CLEARED", ""],
-        ["NEW_BLANK", ""],
-      ],
-    );
   });
 });
 

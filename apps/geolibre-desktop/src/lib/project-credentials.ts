@@ -50,20 +50,31 @@ export function readProjectCredentialIndex(): string[] {
   const value = window.localStorage.getItem(PROJECT_CREDENTIAL_ACCOUNTS_STORAGE_KEY);
   if (value === null) return [];
   const parsed: unknown = JSON.parse(value);
-  const encoder = new TextEncoder();
   if (
     !Array.isArray(parsed) ||
     new Set(parsed).size !== parsed.length ||
     !parsed.every(
       (account) =>
-        typeof account === "string" &&
-        account.startsWith("project.") &&
-        encoder.encode(account).length <= MAX_ACCOUNT_BYTES,
+        typeof account === "string" && account.startsWith("project.") && isStorableAccount(account),
     )
   ) {
     throw new Error("The saved project credential index is malformed.");
   }
   return parsed as string[];
+}
+
+/**
+ * Whether the credential store accepts `account` (same rules as
+ * `validate_account` in `secure_store.rs`). Names come from user-typed
+ * variable names and project-file layer IDs, so they are checked before they
+ * reach the index: one rejected name there would fail every later read.
+ */
+function isStorableAccount(account: string): boolean {
+  return (
+    account.length > 0 &&
+    new TextEncoder().encode(account).length <= MAX_ACCOUNT_BYTES &&
+    !/\p{Cc}/u.test(account)
+  );
 }
 
 /**
@@ -108,7 +119,9 @@ export function hydrateProjectCredentials(
  * Applies credential changes (`""` deletes) to the session cache and, when
  * writable, to the credential store. Resolves `true` only when every change
  * is durably stored; the cache is updated either way so the session keeps
- * working.
+ * working. A name the credential store would reject is kept in the session
+ * only and makes the result `false`, so a project save keeps the value in the
+ * file (behind the keep/strip prompt) rather than losing it.
  */
 export async function rememberProjectCredentials(
   changes: Readonly<Record<string, string>>,
@@ -117,10 +130,8 @@ export async function rememberProjectCredentials(
   if (accounts.length === 0) return true;
 
   const current = useProjectCredentialStore.getState().values;
-  const previous: Record<string, string> = {};
   const values = { ...current };
   for (const account of accounts) {
-    if (current[account]) previous[account] = current[account];
     if (changes[account]) values[account] = changes[account];
     else delete values[account];
   }
@@ -128,20 +139,32 @@ export async function rememberProjectCredentials(
 
   if (!projectCredentialsInKeychain()) return false;
 
-  try {
-    const index = new Set(readProjectCredentialIndex());
-    for (const account of accounts) {
-      if (changes[account]) index.add(account);
-      else index.delete(account);
-    }
-    window.localStorage.setItem(
-      PROJECT_CREDENTIAL_ACCOUNTS_STORAGE_KEY,
-      JSON.stringify([...index]),
-    );
-  } catch (error) {
-    reportCredentialStorageError(error);
-    return false;
+  const storable = accounts.filter(isStorableAccount);
+  const previous: Record<string, string> = {};
+  const storableChanges: Record<string, string> = {};
+  for (const account of storable) {
+    if (current[account]) previous[account] = current[account];
+    storableChanges[account] = changes[account];
   }
-  await queueCredentialChanges(previous, changes);
-  return accounts.every((account) => !hasPendingCredential(account));
+  if (storable.length > 0) {
+    try {
+      const index = new Set(readProjectCredentialIndex());
+      for (const account of storable) {
+        if (changes[account]) index.add(account);
+        else index.delete(account);
+      }
+      window.localStorage.setItem(
+        PROJECT_CREDENTIAL_ACCOUNTS_STORAGE_KEY,
+        JSON.stringify([...index]),
+      );
+    } catch (error) {
+      reportCredentialStorageError(error);
+      return false;
+    }
+    await queueCredentialChanges(previous, storableChanges);
+  }
+  return (
+    storable.length === accounts.length &&
+    storable.every((account) => !hasPendingCredential(account))
+  );
 }

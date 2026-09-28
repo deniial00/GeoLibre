@@ -74,4 +74,16 @@ describe("desktop project credentials", () => {
     assert.equal(keychain.has("project.env.D"), false);
     assert.equal(lookupProjectCredential("project.env.D"), "d");
   });
+
+  it("keeps a name the keychain rejects out of the index", async () => {
+    const tooLong = `project.env.${"X".repeat(600)}`;
+    const stored = await rememberProjectCredentials({ [tooLong]: "long", "project.env.E": "e" });
+    assert.equal(stored, false);
+    assert.equal(lookupProjectCredential(tooLong), "long");
+    assert.equal(keychain.get("project.env.E"), "e");
+    assert.ok(!index().includes(tooLong));
+    // The index stays readable, so later writes still reach the keychain.
+    assert.equal(await rememberProjectCredentials({ "project.env.F": "f" }), true);
+    assert.equal(keychain.get("project.env.F"), "f");
+  });
 });

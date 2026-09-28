@@ -104,27 +104,23 @@ export function overlayStoredPreferenceCredentials(
 }
 
 /**
- * Split an edited Settings draft into the preferences for the store and the
- * credential changes for the keychain (`""` deletes).
+ * The credential changes an edited Settings draft makes, keyed by account
+ * (`""` deletes).
  *
  * - `seeded`: the overlaid preferences the dialog opened with.
  * - `next`: the normalized draft being saved.
- * - `current`: the store's preferences now.
  *
- * Only values the user changed are written. An untouched session override
- * (plaintext from the opened file) stays in the store and out of the keychain,
- * so opening a file never writes the keychain. Removing, renaming, or
- * un-secreting a variable never deletes its stored value: names are shared by
- * every project on the device.
+ * Only values the user changed are returned, so an untouched session override
+ * (plaintext from the opened file) stays out of the keychain and opening a
+ * file never writes it. Removing, renaming, or un-secreting a variable never
+ * deletes its stored value: names are shared by every project on the device.
  */
-export function commitPreferenceCredentials(
+export function changedPreferenceCredentials(
   seeded: ProjectPreferences,
   next: ProjectPreferences,
-  current: ProjectPreferences,
-): { preferences: ProjectPreferences; secrets: Record<string, string> } {
-  const secrets: Record<string, string> = {};
+): Record<string, string> {
+  const changes: Record<string, string> = {};
 
-  const apiKeys: Record<string, string> = {};
   const providerIds = new Set([
     ...Object.keys(seeded.geocoding.apiKeys),
     ...Object.keys(next.geocoding.apiKeys),
@@ -132,12 +128,7 @@ export function commitPreferenceCredentials(
   for (const providerId of providerIds) {
     const seededKey = seeded.geocoding.apiKeys[providerId]?.trim() ?? "";
     const nextKey = next.geocoding.apiKeys[providerId]?.trim() ?? "";
-    if (nextKey !== seededKey) {
-      secrets[geocodingApiKeyAccount(providerId)] = nextKey;
-      continue;
-    }
-    const override = current.geocoding.apiKeys[providerId];
-    if (override?.trim()) apiKeys[providerId] = override;
+    if (nextKey !== seededKey) changes[geocodingApiKeyAccount(providerId)] = nextKey;
   }
 
   const seededSecrets = new Map<string, string>();
@@ -145,32 +136,18 @@ export function commitPreferenceCredentials(
     if (!isSecretEnvironmentVariable(variable) || seededSecrets.has(variable.key)) continue;
     seededSecrets.set(variable.key, variable.value);
   }
-  const environmentVariables = next.environmentVariables.map((variable) => {
-    if (!isSecretEnvironmentVariable(variable)) return variable;
+  for (const variable of next.environmentVariables) {
+    if (!isSecretEnvironmentVariable(variable)) continue;
     const seededValue = seededSecrets.get(variable.key);
-    if (seededValue === undefined && variable.value === "") {
-      // A new blank row falls back to any value stored under the name; it
-      // never deletes it.
-      return variable;
+    // A new blank row falls back to any value stored under the name; it
+    // never deletes it.
+    if (seededValue === undefined && variable.value === "") continue;
+    if (variable.value !== seededValue) {
+      changes[environmentVariableAccount(variable.key)] = variable.value;
     }
-    if (seededValue === undefined || variable.value !== seededValue) {
-      secrets[environmentVariableAccount(variable.key)] = variable.value;
-      return { ...variable, value: "" };
-    }
-    const override = current.environmentVariables.find(
-      (row) => row.key === variable.key && isSecretEnvironmentVariable(row),
-    );
-    return { ...variable, value: override?.value ?? "" };
-  });
+  }
 
-  return {
-    preferences: {
-      ...next,
-      geocoding: { ...next.geocoding, apiKeys },
-      environmentVariables,
-    },
-    secrets,
-  };
+  return changes;
 }
 
 function stringEntries(value: unknown): Record<string, string> | null {
