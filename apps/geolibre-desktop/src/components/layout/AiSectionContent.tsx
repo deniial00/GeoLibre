@@ -35,6 +35,7 @@ import {
   withOllamaOriginHint,
 } from "../../lib/assistant/ollama";
 import { classifyFetchFailure } from "../../lib/fetch-error";
+import { credentialStorageLocation } from "../../lib/credential-store";
 import { bedrockAuthFromConfig, hasModelPicker } from "../../lib/assistant/model-discovery";
 import { ProviderModelPicker } from "../ProviderModelPicker";
 
@@ -426,7 +427,13 @@ export function AiSectionContent({
           {/* Secrets note */}
           <div className="flex items-start gap-2 rounded-md border border-amber-500/40 bg-amber-500/10 p-3 text-xs text-amber-700 dark:text-amber-300">
             <TriangleAlert className="mt-0.5 h-4 w-4 shrink-0" />
-            <span>{t("settings.ai.secretsNote")}</span>
+            <span>
+              {t(
+                credentialStorageLocation() === "keychain"
+                  ? "settings.ai.secretsNoteKeychain"
+                  : "settings.ai.secretsNote",
+              )}
+            </span>
           </div>
 
           {/* Credential fields for the selected provider */}
@@ -776,7 +783,13 @@ function ProfileEditor({
       {/* Secrets note */}
       <div className="flex items-start gap-2 rounded-md border border-amber-500/40 bg-amber-500/10 p-3 text-xs text-amber-700 dark:text-amber-300">
         <TriangleAlert className="mt-0.5 h-4 w-4 shrink-0" />
-        <span>{t("settings.ai.secretsNote")}</span>
+        <span>
+          {t(
+            credentialStorageLocation() === "keychain"
+              ? "settings.ai.secretsNoteKeychain"
+              : "settings.ai.secretsNote",
+          )}
+        </span>
       </div>
 
       {/* OS env note */}

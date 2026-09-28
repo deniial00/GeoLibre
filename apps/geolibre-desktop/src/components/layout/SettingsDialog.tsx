@@ -124,6 +124,7 @@ import {
   removeLanguagePack,
 } from "../../i18n";
 import { resolveShareHost, shareHostLabel } from "../../lib/share-geolibre";
+import { credentialStorageLocation } from "../../lib/credential-store";
 import { IS_STORE_BUILD, type UpdateNotificationLevel } from "../../lib/updates";
 import { ensureStartupProjectSnapshot, openProjectFile } from "../../lib/tauri-io";
 import {
@@ -533,6 +534,7 @@ export function SettingsDialog({
   const shareBaseUrl = shareHostState.baseUrl;
   const shareHost = shareHostLabel();
   const shareSettingsUrl = shareBaseUrl ? `${shareBaseUrl}/settings` : null;
+  const keychainStorage = credentialStorageLocation() === "keychain";
   const shareTokenComponents: TransComponents = {
     tokenLink: (
       <a
@@ -2857,7 +2859,12 @@ export function SettingsDialog({
                           onChange={(event) => updateShareToken(event.target.value)}
                         />
                         <p className="text-xs text-muted-foreground">
-                          {t("settings.env.tokenStorageNote", { shareHost })}
+                          {t(
+                            keychainStorage
+                              ? "settings.env.tokenStorageNoteKeychain"
+                              : "settings.env.tokenStorageNote",
+                            { shareHost },
+                          )}
                         </p>
                       </>
                     ) : (
@@ -2884,7 +2891,11 @@ export function SettingsDialog({
                       onChange={(event) => updateCesiumIonToken(event.target.value)}
                     />
                     <p className="text-xs text-muted-foreground">
-                      {t("settings.env.cesiumTokenStorageNote")}
+                      {t(
+                        keychainStorage
+                          ? "settings.env.cesiumTokenStorageNoteKeychain"
+                          : "settings.env.cesiumTokenStorageNote",
+                      )}
                     </p>
                   </div>
                   <div className="space-y-2 border-t pt-5">
@@ -2910,7 +2921,11 @@ export function SettingsDialog({
                       }
                     />
                     <p className="text-xs text-muted-foreground">
-                      {t("settings.env.mapboxTokenStorageNote")}
+                      {t(
+                        keychainStorage
+                          ? "settings.env.mapboxTokenStorageNoteKeychain"
+                          : "settings.env.mapboxTokenStorageNote",
+                      )}
                     </p>
                   </div>
                   <div className="space-y-2 border-t pt-5">
@@ -2936,7 +2951,11 @@ export function SettingsDialog({
                       }
                     />
                     <p className="text-xs text-muted-foreground">
-                      {t("settings.env.arcgisKeyStorageNote")}
+                      {t(
+                        keychainStorage
+                          ? "settings.env.arcgisKeyStorageNoteKeychain"
+                          : "settings.env.arcgisKeyStorageNote",
+                      )}
                     </p>
                   </div>
                   <div className="flex items-center justify-between gap-3 border-t pt-5">

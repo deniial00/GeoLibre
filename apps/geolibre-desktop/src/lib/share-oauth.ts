@@ -9,7 +9,6 @@ import type { ParseKeys } from "i18next";
 import {
   hasPendingCredential,
   queueCredentialChanges,
-  readSecureCredentials,
   reportCredentialStorageError,
   useCredentialStorageStatus,
   writeSecureCredential,
@@ -269,6 +268,12 @@ export function shareRefreshTokenAccount(issuer: string): string {
   return `share.oauth.refreshToken.${issuer}`;
 }
 
+/** Keychain accounts the desktop Share sign-in reads at startup. */
+export function desktopShareSessionAccounts(): string[] {
+  const issuer = resolveShareIssuer();
+  return issuer ? [shareRefreshTokenAccount(issuer)] : [];
+}
+
 /**
  * Non-secret localStorage list of issuers whose keychain entry may be stale:
  * written synchronously before a keychain write is queued and cleared only
@@ -356,13 +361,16 @@ function persistDesktopRefresh(
 }
 
 /**
- * Desktop startup: restore the sign-in for the configured issuer from the OS
- * credential store. A token whose last save never completed may already be
- * consumed, so it is deleted instead and the app starts signed out.
+ * Desktop startup: restore the sign-in for the configured issuer from the
+ * caller's single credential-store read (`null` when that read failed and was
+ * reported). A token whose last save never completed may already be consumed,
+ * so it is deleted instead and the app starts signed out.
  */
-export async function hydrateDesktopShareSession(): Promise<void> {
+export async function hydrateDesktopShareSession(
+  stored: Readonly<Record<string, string>> | null,
+): Promise<void> {
   const issuer = resolveShareIssuer();
-  if (!issuer) return;
+  if (!issuer || stored === null) return;
   const account = shareRefreshTokenAccount(issuer);
   try {
     const unsaved = readUnsavedIssuers();
@@ -371,7 +379,7 @@ export async function hydrateDesktopShareSession(): Promise<void> {
       writeUnsavedIssuers(unsaved.filter((candidate) => candidate !== issuer));
       return;
     }
-    const refreshToken = (await readSecureCredentials([account]))[account];
+    const refreshToken = stored[account];
     if (!refreshToken) return;
     desktopRefresh = { issuer, refreshToken };
     setStoreIssuer(issuer);

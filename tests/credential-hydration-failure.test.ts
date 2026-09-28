@@ -14,6 +14,8 @@ let hold: { started: PromiseWithResolvers<void>; release: PromiseWithResolvers<v
   null;
 // Writes to these accounts fail even while the keychain is available.
 const brokenAccounts = new Set<string>();
+// Every command the stub received, in order.
+const invoked: string[] = [];
 
 (globalThis as { window?: unknown }).window = {
   localStorage: {
@@ -23,6 +25,7 @@ const brokenAccounts = new Set<string>();
   },
   __TAURI_INTERNALS__: {
     invoke: async (cmd: string, args: Record<string, unknown>) => {
+      invoked.push(cmd);
       if (!keychainAvailable) {
         throw new Error(
           "Platform secure storage failure: org.freedesktop.DBus.Error.ServiceUnknown",
@@ -63,6 +66,8 @@ const { queueCredentialChanges, useCredentialStorageStatus } =
 describe("desktop credential hydration without a keychain", () => {
   it("keeps legacy values for the session and reports the failure", async () => {
     await hydrateDesktopCredentials();
+    // One read: a locked keyring prompts per read, so a cancel must not re-prompt.
+    assert.deepEqual(invoked, ["secure_store_get_many"]);
 
     assert.match(useCredentialStorageStatus.getState().error ?? "", /ServiceUnknown/);
     const settings = useDesktopSettingsStore.getState().desktopSettings;

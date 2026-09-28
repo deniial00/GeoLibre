@@ -3,6 +3,8 @@
  * and migrates legacy plaintext localStorage values into it (issue #1667).
  * `main.tsx` awaits this before rendering, so every consumer can keep reading
  * the settings store, the PostGIS list and the share sign-in synchronously.
+ * Every account is read in one call: with a locked keyring each separate read
+ * shows its own unlock prompt, so a cancelled prompt would reappear.
  *
  * A legacy localStorage value is removed only after its credential-store write
  * succeeded; when both hold a value, the legacy one wins because it is what
@@ -36,13 +38,42 @@ import {
   shouldPersistDesktopSettings,
   useDesktopSettingsStore,
 } from "../hooks/useDesktopSettings";
-import { hydrateDesktopShareSession } from "./share-oauth";
+import { desktopShareSessionAccounts, hydrateDesktopShareSession } from "./share-oauth";
 
 export async function hydrateDesktopCredentials(): Promise<void> {
   if (credentialStorageLocation() !== "keychain") return;
+  let postgresIds: string[] | null;
   try {
-    await hydratePostgresConnections();
-    await hydrateSettingsSecrets();
+    postgresIds = readKeychainPostgresIds();
+  } catch (error) {
+    reportCredentialStorageError(error);
+    postgresIds = null;
+  }
+  const settingsAccounts = shouldPersistDesktopSettings()
+    ? desktopSettingsSecretAccounts(
+        splitDesktopSettingsSecrets(useDesktopSettingsStore.getState().desktopSettings)
+          .publicSettings,
+      )
+    : [];
+  const accounts = [
+    ...(postgresIds ?? []).map(postgresConnectionAccount),
+    ...settingsAccounts,
+    ...desktopShareSessionAccounts(),
+  ];
+  // `null` means the read failed and was reported; nothing else touches the
+  // keychain during hydration, so a dismissed unlock prompt stays dismissed.
+  let stored: Readonly<Record<string, string>> | null = {};
+  if (accounts.length > 0) {
+    try {
+      stored = await readSecureCredentials(accounts);
+    } catch (error) {
+      reportCredentialStorageError(error);
+      stored = null;
+    }
+  }
+  try {
+    await hydratePostgresConnections(postgresIds, stored);
+    await hydrateSettingsSecrets(stored);
   } catch (error) {
     // Unforeseen failure: fall back to a session-only state that never writes
     // plaintext and never drops the legacy values.
@@ -56,22 +87,20 @@ export async function hydrateDesktopCredentials(): Promise<void> {
     if (Object.keys(secrets).length > 0) setPreservedLegacyCredentialSecrets(secrets);
   }
   // Never rejects; a failure starts signed out with the credential warning.
-  await hydrateDesktopShareSession();
+  await hydrateDesktopShareSession(stored);
 }
 
 function withNewIds(connections: string[]): KeychainPostgresConnection[] {
   return connections.map((connection) => ({ id: crypto.randomUUID(), connection }));
 }
 
-async function hydratePostgresConnections(): Promise<void> {
+async function hydratePostgresConnections(
+  ids: string[] | null,
+  stored: Readonly<Record<string, string>> | null,
+): Promise<void> {
   const legacy = readBrowserPostgresConnections();
-  let ids: string[];
-  let stored: Record<string, string>;
-  try {
-    ids = readKeychainPostgresIds();
-    stored = await readSecureCredentials(ids.map(postgresConnectionAccount));
-  } catch (error) {
-    reportCredentialStorageError(error);
+  if (ids === null || stored === null) {
+    // The caller already reported the failure.
     setPostgresKeychainWritable(false);
     setKeychainPostgresConnections(withNewIds(legacy));
     return;
@@ -152,7 +181,9 @@ async function hydratePostgresConnections(): Promise<void> {
   setPostgresKeychainWritable(true);
 }
 
-async function hydrateSettingsSecrets(): Promise<void> {
+async function hydrateSettingsSecrets(
+  stored: Readonly<Record<string, string>> | null,
+): Promise<void> {
   // A shared-settings URL session never persists, so it never touches credentials.
   if (!shouldPersistDesktopSettings()) return;
 
@@ -161,12 +192,9 @@ async function hydrateSettingsSecrets(): Promise<void> {
   );
   const hasLegacy = Object.keys(legacy).length > 0;
 
-  let stored: Record<string, string>;
-  try {
-    stored = await readSecureCredentials(desktopSettingsSecretAccounts(publicSettings));
-  } catch (error) {
-    // The store still holds the loaded legacy values, so this session works.
-    reportCredentialStorageError(error);
+  if (stored === null) {
+    // The caller reported the failed read. The store still holds the loaded
+    // legacy values, so this session works.
     setSettingsKeychainWritable(false);
     if (hasLegacy) setPreservedLegacyCredentialSecrets(legacy);
     return;

@@ -71,6 +71,7 @@ import { isTauri } from "./lib/is-tauri";
 import { installStaleChunkReload } from "./lib/stale-chunk-reload";
 import { resolveAuthGate, type AuthGateConfig } from "./lib/auth-gate";
 import { getInitialThemeMode } from "./hooks/useThemeMode";
+import { KeychainWaitScreen } from "./components/common/KeychainWaitScreen";
 import { applyTemporaryDesktopSettings } from "./hooks/useDesktopSettings";
 import {
   desktopSettingsUrl,
@@ -267,6 +268,8 @@ const sharedSettingsReady = sharedSettingsUrl
       })
   : Promise.resolve(null);
 
+const root = ReactDOM.createRoot(document.getElementById("root")!);
+
 const desktopCredentialsReady = sharedSettingsReady
   .then(() =>
     import("./lib/credential-hydration").then(({ hydrateDesktopCredentials }) =>
@@ -296,6 +299,28 @@ const startupLanguageReady = Promise.all([i18nReady, sharedSettingsReady]).then(
   },
 );
 
+// A locked keyring (common on Linux when it is not unlocked at login) holds
+// hydration until the user answers the unlock prompt. Say so rather than
+// leaving the window blank, which looks frozen when the prompt is behind it.
+const KEYCHAIN_WAIT_SCREEN_DELAY_MS = 300;
+let appRendered = false;
+if (isDesktopRuntime()) {
+  const waitTimer = window.setTimeout(() => {
+    void startupLanguageReady
+      .catch(() => undefined)
+      .then(() => {
+        if (appRendered) return;
+        root.render(
+          <KeychainWaitScreen
+            title={i18n.t("startup.keychainWaitTitle")}
+            detail={i18n.t("startup.keychainWaitDetail")}
+          />,
+        );
+      });
+  }, KEYCHAIN_WAIT_SCREEN_DELAY_MS);
+  void desktopCredentialsReady.finally(() => window.clearTimeout(waitTimer));
+}
+
 // Fetch both chunks in parallel rather than waterfalling the boundary import
 // after App resolves — a free win, and it matters over the network in the web
 // build where these are separate fetches.
@@ -321,7 +346,8 @@ void Promise.all([
   .then(([{ default: App }, { AppErrorBoundary }, withAuthGate]) => {
     const app = <App />;
     const authenticatedApp = withAuthGate ? withAuthGate(app) : app;
-    ReactDOM.createRoot(document.getElementById("root")!).render(
+    appRendered = true;
+    root.render(
       <React.StrictMode>
         <I18nextProvider i18n={i18n}>
           <AppErrorBoundary>
