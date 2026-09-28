@@ -100,6 +100,8 @@ export function hydrateProjectCredentials(
   if (present.length !== index.length) {
     // An indexed write that never landed (crash, failed write). Its value was
     // session-only at the time, so drop it from the index without a warning.
+    // An indexed write that never landed (crash, failed write). Its value was
+    // session-only at the time, so drop it from the index.
     console.warn(
       "[GeoLibre] Dropping project credentials missing from the credential store",
       index.filter((account) => stored[account] === undefined),
