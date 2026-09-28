@@ -35,28 +35,44 @@ export async function writeSecureCredential(account: string, value: string): Pro
 }
 
 interface CredentialStorageStatus {
-  /** The latest secure-storage failure this session, or null. Never cleared. */
+  /**
+   * The latest secure-storage failure, or null. Cleared once every failed
+   * queued write has been retried successfully, unless {@link lasting}.
+   */
   error: string | null;
+  /**
+   * Whether a failure that no later write fixes was reported this session: a
+   * failed startup read leaves credentials session-only until the app closes,
+   * and a failed localStorage write can leave plaintext behind.
+   */
+  lasting: boolean;
   /** Incremented on every failure so a dismissed warning re-appears. */
   revision: number;
   /**
    * Accounts whose latest queued write failed and is still waiting for a
-   * retry. Unlike {@link error}, an entry is removed once a retry succeeds,
-   * so it tells whether one credential is persisted right now.
+   * retry. An entry is removed once a retry succeeds, so it tells whether one
+   * credential is persisted right now.
    */
   failedAccounts: Readonly<Record<string, true>>;
 }
 
 export const useCredentialStorageStatus = create<CredentialStorageStatus>(() => ({
   error: null,
+  lasting: false,
   revision: 0,
   failedAccounts: {},
 }));
 
+/** Reports a failure that a later write does not fix; the warning stays for the session. */
 export function reportCredentialStorageError(error: unknown): void {
+  recordFailure(error, true);
+}
+
+function recordFailure(error: unknown, lasting: boolean): void {
   const message = error instanceof Error ? error.message : String(error);
   useCredentialStorageStatus.setState((state) => ({
     error: message,
+    lasting: state.lasting || lasting,
     revision: state.revision + 1,
   }));
   console.error("[GeoLibre] Secure credential storage failed", error);
@@ -76,7 +92,8 @@ async function drainPending(): Promise<void> {
       useCredentialStorageStatus.setState((state) => ({
         failedAccounts: { ...state.failedAccounts, [account]: true },
       }));
-      reportCredentialStorageError(error);
+      // The retry on the next queued change can fix this one.
+      recordFailure(error, false);
       continue;
     }
     // A newer value queued while this write was in flight stays pending, and so
@@ -87,7 +104,9 @@ async function drainPending(): Promise<void> {
       useCredentialStorageStatus.setState((state) => {
         const failedAccounts = { ...state.failedAccounts };
         delete failedAccounts[account];
-        return { failedAccounts };
+        // Every failed write is stored now; the warning would be out of date.
+        const recovered = !state.lasting && Object.keys(failedAccounts).length === 0;
+        return recovered ? { failedAccounts, error: null } : { failedAccounts };
       });
     }
   }

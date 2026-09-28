@@ -106,6 +106,8 @@ describe("desktop credential hydration without a keychain", () => {
     await queueCredentialChanges({}, {});
     assert.equal(keychain.get("settings.cesiumIonToken"), "new");
     assert.deepEqual(storage, storageBefore);
+    // The startup read failed, so values stay session-only: keep the warning.
+    assert.notEqual(useCredentialStorageStatus.getState().error, null);
   });
 
   it("keeps an account marked failed while a newer value is still queued", async () => {
