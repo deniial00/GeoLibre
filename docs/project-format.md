@@ -571,12 +571,19 @@ including layer request headers, geocoding API keys, environment variables, and
 plugin settings. Any project leaving the local workspace must pass through
 `redactCredentials(project)` first. GeoLibre applies this invariant to Share,
 standalone HTML export, embed snapshots, and collaboration snapshots. On the
-desktop app, geocoding API keys, uniquely named secret environment variables,
-and layer request headers move to the OS keychain rather than the file; see
+desktop app, geocoding API keys and uniquely named secret environment
+variables move to the OS keychain rather than the file; see
 [Credential storage](architecture.md#credential-storage). Duplicate or
 nameless secret environment rows cannot be stored under a unique account, so
 Local Save and Save As offer the same keep/strip prompt used when the keychain
 is unavailable or the web build contains project credentials.
+
+A layer `source.requestHeaders` value may reference an environment variable as
+`${NAME}`, e.g. `"Authorization": "Bearer ${TILES_TOKEN}"`. The reference is
+saved as written and resolved from the enabled `environmentVariables` rows when
+the request is made; a header whose variable is unset or empty is not sent. A
+value that is only an optional scheme word followed by one reference survives
+redaction; any other header value is removed.
 
 Each `preferences.environmentVariables` row may carry `"secret": false`. Rows
 without it are secrets: redaction removes them, and the desktop app stores

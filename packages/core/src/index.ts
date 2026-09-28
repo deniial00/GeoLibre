@@ -201,16 +201,20 @@ export {
   environmentVariableAccount,
   geocodingApiKeyAccount,
   isSecretEnvironmentVariable,
-  layerRequestHeadersAccount,
   lookupProjectCredential,
   overlayStoredEnvironmentVariables,
   overlayStoredGeocodingApiKeys,
   overlayStoredPreferenceCredentials,
+  resolveProjectHeaderReferences,
   setProjectCredentialLookup,
   splitProjectCredentials,
-  withStoredRequestHeaders,
   type ProjectCredentialLookup,
 } from "./project-credential-refs";
+export {
+  hasHeaderReferences,
+  isHeaderReferenceOnly,
+  resolveHeaderReferences,
+} from "./header-references";
 export {
   isCredentialFieldName,
   MAX_REDACT_DEPTH,

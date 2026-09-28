@@ -11,7 +11,8 @@ import {
   stripGoogleMapsApiKeyHeader,
   type GeoLibreLayer,
   useAppStore,
-  withStoredRequestHeaders,
+  hasHeaderReferences,
+  resolveProjectHeaderReferences,
 } from "@geolibre/core";
 import type { Layer } from "@deck.gl/core";
 import type { Map as MapLibreMap } from "maplibre-gl";
@@ -506,9 +507,12 @@ function restoreThreeDTilesMapLayer(
   const layerName = layer.name || layerNameFromUrl(url, id);
   const beforeId = validThreeDTilesBeforeId(control, layer.beforeId);
   const altitudeOffset = numberValue(layer.source.altitudeOffset, 0);
-  const requestHeaders = resolveThreeDTilesRequestHeaders(
+  // The control state is persisted back to the store (createThreeDTilesStoreLayer),
+  // so it keeps the `${NAME}` template; only the rendered layer gets values.
+  const requestHeaders = stringRecordValue(layer.source.requestHeaders);
+  const loadHeaders = resolveThreeDTilesRequestHeaders(
     url,
-    withStoredRequestHeaders(id, stringRecordValue(layer.source.requestHeaders)),
+    resolveProjectHeaderReferences(requestHeaders),
   );
   const existingTilesets = control.getState().tilesets.filter((tileset) => tileset.id !== id);
   const savedCenter = lngLatPairValue(layer.metadata.center);
@@ -560,7 +564,7 @@ function restoreThreeDTilesMapLayer(
     altitudeOffset,
     opacity: layer.opacity,
     visible: layer.visible,
-    requestHeaders,
+    requestHeaders: loadHeaders,
     ...getThreeDTilesDecoderOptions(control),
     onLoad: (metadata) => updateThreeDTilesLoaded(control, id, metadata),
     onError: (error) => updateThreeDTilesError(control, id, error),
@@ -790,6 +794,7 @@ function installThreeDTilesPanelHandlers(control: ThreeDTilesControl | null): vo
   const panel = getThreeDTilesPanel(control);
   if (panel) {
     panel.classList.add("geolibre-3d-tiles-panel");
+    applyThreeDTilesHeaderHint(panel);
     installThreeDTilesCloseHandler(control, panel);
     if (control) {
       installGooglePhotorealisticTilesPanelHandlers(control, panel);
@@ -798,6 +803,32 @@ function installThreeDTilesPanelHandlers(control: ThreeDTilesControl | null): vo
     }
   }
   installThreeDTilesToggleHandler(control);
+}
+
+const THREE_D_TILES_HEADER_PLACEHOLDER = "Authorization: Bearer ${TOKEN}";
+const THREE_D_TILES_HEADER_HINT =
+  "One per line as Name: Value. Use ${NAME} to insert an environment variable from Settings → Environment; the value is not saved with the layer.";
+
+/**
+ * Point the Request headers field at `${NAME}` references, so a token lives
+ * in Settings → Environment instead of on the layer.
+ */
+function applyThreeDTilesHeaderHint(panel: HTMLElement): void {
+  if (panel.dataset.geolibreHeaderHint === "true") return;
+  const headersInput = panel.querySelector<HTMLTextAreaElement>(
+    'textarea[aria-label="Request headers"]',
+  );
+  if (!headersInput) return;
+  panel.dataset.geolibreHeaderHint = "true";
+  headersInput.placeholder = THREE_D_TILES_HEADER_PLACEHOLDER;
+  const hint = headersInput
+    .closest(".three-d-tiles-field")
+    ?.querySelector<HTMLElement>(".three-d-tiles-field-hint");
+  if (hint) {
+    hint.textContent =
+      activeThreeDTilesApp?.translate?.("plugin.3d-tiles.headersHint", THREE_D_TILES_HEADER_HINT) ??
+      THREE_D_TILES_HEADER_HINT;
+  }
 }
 
 function addThreeDTilesRuntimeEnvListener(control: ThreeDTilesControl): void {
@@ -892,6 +923,32 @@ function installGooglePhotorealisticTilesPanelHandlers(
           panel.querySelector<HTMLInputElement>('input[aria-label="Fly to tileset after load"]')
             ?.checked ?? true;
         void restoreMapboxTiles(activeThreeDTilesApp, flyTo ? id : undefined).catch(console.error);
+        control.collapse();
+        return;
+      }
+      // The library's own `loadTileset` would send `${NAME}` literally and
+      // keep it in its state, so a templated header is loaded here instead:
+      // the store record and control state hold the template, only the
+      // ThreeDTilesLayer gets the resolved values.
+      if (
+        url &&
+        !isGooglePhotorealisticTilesetUrl(url) &&
+        !isArcgisI3sSceneLayerUrl(url) &&
+        hasHeaderReferences(
+          parseThreeDTilesRequestHeaders(
+            panel.querySelector<HTMLTextAreaElement>('textarea[aria-label="Request headers"]')
+              ?.value ?? "",
+          ),
+        )
+      ) {
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        const tileset = threeDTilesItemStateFromPanel(control, panel, url, "loading");
+        const layer = createThreeDTilesStoreLayer(tileset, control.getState().opacity);
+        runWithThreeDTilesStoreSyncSuspended(() => {
+          useAppStore.getState().addLayer(layer);
+          restoreThreeDTilesMapLayer(control, layer, url);
+        });
         control.collapse();
         return;
       }
@@ -1084,7 +1141,7 @@ function applyGooglePhotorealisticTilesPanelDefaults(control: ThreeDTilesControl
       headersInput.value = serializeThreeDTilesRequestHeaders(
         stripGoogleMapsApiKeyHeader(parseThreeDTilesRequestHeaders(headersInput.value)),
       );
-      headersInput.placeholder = "";
+      headersInput.placeholder = THREE_D_TILES_HEADER_PLACEHOLDER;
     }
     googleTilesApiKeysByPanel.delete(panel);
     panel.dataset.geolibreGoogleMapsApiKeyVisible = "false";
@@ -1733,8 +1790,7 @@ function renderGooglePhotorealisticTilesLayers(): void {
 function googleTilesLayerSignature(layers: GeoLibreLayer[]): string {
   return layers
     .map((layer) => {
-      const headers = withStoredRequestHeaders(
-        layer.id,
+      const headers = resolveProjectHeaderReferences(
         stringRecordValue(layer.source.requestHeaders),
       );
       const altitudeOffset = numberValue(layer.source.altitudeOffset, 0);
@@ -1756,7 +1812,7 @@ function buildGooglePhotorealisticTilesDeckLayer(layer: GeoLibreLayer): Layer | 
   const altitudeOffset = numberValue(layer.source.altitudeOffset, 0);
   const requestHeaders = resolveThreeDTilesRequestHeaders(
     GOOGLE_PHOTOREALISTIC_TILES_URL,
-    withStoredRequestHeaders(layer.id, stringRecordValue(layer.source.requestHeaders)),
+    resolveProjectHeaderReferences(stringRecordValue(layer.source.requestHeaders)),
     googleTilesApiKeysByLayerId.get(layer.id),
   );
 

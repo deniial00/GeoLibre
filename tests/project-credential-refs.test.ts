@@ -6,8 +6,9 @@ import {
   overlayStoredPreferenceCredentials,
   redactProjectCredentials,
   setProjectCredentialLookup,
+  resolveProjectHeaderReferences,
   splitProjectCredentials,
-  withStoredRequestHeaders,
+  useAppStore,
   type ProjectPreferences,
 } from "@geolibre/core";
 
@@ -28,7 +29,7 @@ function projectWithCredentials() {
       type: "3d-tiles",
       source: {
         url: "https://t/tileset.json",
-        requestHeaders: { Authorization: "Bearer t" },
+        requestHeaders: { Authorization: "Bearer ${TILES_TOKEN}" },
       },
       visible: true,
       opacity: 1,
@@ -46,7 +47,7 @@ function withStored(values: Record<string, string>) {
 after(() => setProjectCredentialLookup(null));
 
 describe("splitProjectCredentials", () => {
-  it("moves uniquely named project-file credentials out so the save prompt has nothing to ask", () => {
+  it("moves uniquely named preference credentials out and leaves header references on the layer", () => {
     const original = projectWithCredentials();
     const snapshot = structuredClone(original);
     const { project, secrets } = splitProjectCredentials(original);
@@ -54,14 +55,15 @@ describe("splitProjectCredentials", () => {
     assert.deepEqual(secrets, {
       "project.geocoding.apiKey.mapbox": "gk",
       "project.env.GOOGLE_MAPS_API_KEY": "g1",
-      "project.layer.tiles-1.requestHeaders": '{"Authorization":"Bearer t"}',
     });
     assert.deepEqual(project.preferences.geocoding.apiKeys, {});
     assert.deepEqual(project.preferences.environmentVariables, [
       { key: "GOOGLE_MAPS_API_KEY", value: "", enabled: true },
       { key: "ENDPOINT", value: "https://x", enabled: true, secret: false },
     ]);
-    assert.equal("requestHeaders" in project.layers[0].source, false);
+    assert.deepEqual(project.layers[0].source.requestHeaders, {
+      Authorization: "Bearer ${TILES_TOKEN}",
+    });
     assert.deepEqual(original, snapshot);
     assert.equal(redactProjectCredentials(project).redactedCount, 0);
   });
@@ -163,17 +165,34 @@ describe("changedPreferenceCredentials", () => {
   });
 });
 
-describe("withStoredRequestHeaders", () => {
-  it("prefers the layer's headers, else parses the stored map", () => {
-    withStored({
-      "project.layer.stored.requestHeaders": '{"Authorization":"Bearer s"}',
-      "project.layer.broken.requestHeaders": "{not json",
+describe("resolveProjectHeaderReferences", () => {
+  const initialPreferences = useAppStore.getState().preferences;
+  after(() => useAppStore.setState({ preferences: initialPreferences }));
+
+  function withRows(enabled: boolean) {
+    useAppStore.setState({
+      preferences: {
+        ...initialPreferences,
+        environmentVariables: [{ key: "TILES_TOKEN", value: "", enabled }],
+      },
     });
-    assert.deepEqual(withStoredRequestHeaders("stored", { "X-Key": "own" }), { "X-Key": "own" });
-    assert.deepEqual(withStoredRequestHeaders("stored", undefined), {
-      Authorization: "Bearer s",
+  }
+
+  it("fills a reference from the stored secret of an enabled row", () => {
+    withStored({ "project.env.TILES_TOKEN": "stored" });
+    withRows(true);
+    assert.deepEqual(resolveProjectHeaderReferences({ Authorization: "Bearer ${TILES_TOKEN}" }), {
+      Authorization: "Bearer stored",
     });
-    assert.equal(withStoredRequestHeaders("broken", undefined), undefined);
+  });
+
+  it("drops a header whose variable row is disabled", () => {
+    withStored({ "project.env.TILES_TOKEN": "stored" });
+    withRows(false);
+    assert.equal(
+      resolveProjectHeaderReferences({ Authorization: "Bearer ${TILES_TOKEN}" }),
+      undefined,
+    );
   });
 });
 

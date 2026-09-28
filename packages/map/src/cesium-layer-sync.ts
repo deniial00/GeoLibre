@@ -15,7 +15,7 @@ import {
   resolveThreeDTilesRequestHeaders,
   ruleBasedVisibilityFilter,
   transformGeojsonElevation,
-  withStoredRequestHeaders,
+  resolveProjectHeaderReferences,
   type GeoLibreLayer,
   type LayerStyle,
 } from "@geolibre/core";
@@ -951,8 +951,7 @@ function imageryResourceFactory(
   Cesium: CesiumNs,
   layer: GeoLibreLayer,
 ): { requireSecure: RequireSecure; makeResource: ImageryResourceFactory } {
-  const headers = withStoredRequestHeaders(
-    layer.id,
+  const headers = resolveProjectHeaderReferences(
     layer.source.requestHeaders as Record<string, string> | undefined,
   );
   const hasHeaders = Boolean(headers && Object.keys(headers).length);
@@ -3351,8 +3350,7 @@ export class CesiumLayerSync {
     // otherwise the tileset would silently 401/403 and never render on the globe.
     const headers = resolveThreeDTilesRequestHeaders(
       url,
-      withStoredRequestHeaders(
-        layer.id,
+      resolveProjectHeaderReferences(
         layer.source.requestHeaders as Record<string, string> | undefined,
       ),
     );

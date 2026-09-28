@@ -196,24 +196,29 @@ different places per build:
   that list could not be written either, the token is restored, and it still
   works only if the revoke request also failed.
   Credentials a project file would otherwise carry (geocoding API keys
-  `preferences.geocoding.apiKeys`, secret Environment Variables, and layer
-  `source.requestHeaders`) are stored device-wide by name as
-  `project.geocoding.apiKey.<providerId>`, `project.env.<VARIABLE>` and
-  `project.layer.<layerId>.requestHeaders` (the header map as JSON); the
-  non-secret `geolibre.projectCredentials.accounts` list indexes them, with the
-  same index-first write order. Saving a project moves geocoding keys,
-  uniquely named secret environment values, and layer request headers to the
-  keychain, leaving empty values and no `requestHeaders` key in the file.
-  Duplicate or nameless secret environment rows cannot be assigned a unique
-  account and remain for the local keep/strip save prompt.
-  Settings writes a value only when the user changes it. Opening a file that still
-  carries plaintext values uses them for that session and writes nothing
+  `preferences.geocoding.apiKeys` and secret Environment Variables) are
+  stored device-wide by name as `project.geocoding.apiKey.<providerId>` and
+  `project.env.<VARIABLE>`; the non-secret
+  `geolibre.projectCredentials.accounts` list indexes them, with the same
+  index-first write order. Saving a project moves geocoding keys and uniquely
+  named secret environment values to the keychain, leaving empty values in
+  the file. Duplicate or nameless secret environment rows cannot be assigned
+  a unique account and remain for the local keep/strip save prompt.
+  Settings writes a value only when the user changes it. Opening a file that
+  still carries plaintext values uses them for that session and writes nothing
   until the next save. `@geolibre/core`'s `project-credential-refs.ts` fills
   empty values from the stored ones where they are used (runtime environment,
-  3D Tiles and imagery request headers, Settings); a value in the file wins.
-  Removing or renaming a variable or layer never deletes its stored value,
-  since other projects on the device may use the same name. A failed keychain
-  write likewise falls back to the keep/strip save prompt.
+  Settings); a value in the file wins. Removing or renaming a variable never
+  deletes its stored value, since other projects on the device may use the
+  same name. A failed keychain write likewise falls back to the keep/strip
+  save prompt.
+  Layer request headers are not stored by layer: a header value references a
+  variable as `${NAME}` (for example `Authorization: Bearer ${TILES_TOKEN}`),
+  saved as typed and resolved from the project's enabled Environment
+  Variables when the request is made (`resolveProjectHeaderReferences`). A
+  header whose variable is unset is not sent. Redaction keeps a header value
+  that is only an optional scheme word plus one reference, and removes any
+  other header value as before.
 - **Web, Jupyter embed, mobile:** localStorage, as before. The web OAuth
   refresh token stays in tab-scoped sessionStorage. Project-file credentials
   stay in the project file, behind the keep/strip save prompt.

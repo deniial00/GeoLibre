@@ -3017,6 +3017,9 @@ export function SettingsDialog({
                           : t("settings.env.secretsWarning")}
                     </span>
                   </div>
+                  <p className="text-xs text-muted-foreground">
+                    {t("settings.env.headerReferenceHint")}
+                  </p>
                   {draftPreferences.environmentVariables.length === 0 ? (
                     <div className="rounded-md border border-dashed p-4 text-sm text-muted-foreground">
                       {t("settings.env.empty")}

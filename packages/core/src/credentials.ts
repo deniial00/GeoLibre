@@ -1,3 +1,4 @@
+import { isHeaderReferenceOnly } from "./header-references";
 import type { GeoLibreProject, LayerConnection } from "./types";
 
 /**
@@ -292,6 +293,27 @@ function redactConfigurationValue(
   const result: Record<string, unknown> = {};
   for (const [key, nested] of Object.entries(value)) {
     const nestedPath = path ? `${path}.${key}` : key;
+    const normalizedKey = normalizeCredentialName(key);
+    if (
+      (normalizedKey === "requestheaders" || normalizedKey === "headers") &&
+      isPlainObject(nested)
+    ) {
+      // `Bearer ${TOKEN}` names a variable instead of carrying a secret, so it
+      // survives; any other header value is dropped. Mirrors `_redact_config`
+      // in python/src/geolibre/project.py.
+      const kept: Record<string, string> = {};
+      const removed: Record<string, unknown> = {};
+      for (const [name, headerValue] of Object.entries(nested)) {
+        if (typeof headerValue === "string" && isHeaderReferenceOnly(headerValue)) {
+          kept[name] = headerValue;
+        } else {
+          removed[name] = headerValue;
+        }
+      }
+      if (Object.keys(removed).length > 0) recordRedaction(accumulator, nestedPath, removed);
+      if (Object.keys(kept).length > 0) result[key] = kept;
+      continue;
+    }
     if (isCredentialFieldName(key)) {
       recordRedaction(accumulator, nestedPath, nested);
       continue;

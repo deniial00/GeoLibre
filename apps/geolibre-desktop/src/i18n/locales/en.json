@@ -2457,6 +2457,7 @@
       "secretsWarning": "Values are saved in plain text in the project file. Values marked secret are removed when the project is shared or exported; other values are kept.",
       "secretsWarningKeychain": "Values marked secret are kept in your system keychain, shared by every project on this computer that uses the same variable name; the project file keeps only the name. Other values are saved in the project file and are kept when the project is shared or exported.",
       "secretsWarningUnavailable": "Project credential storage in the system keychain is unavailable. Secret values stay available this session; saving a local project asks whether to keep them in the file or strip them. Other values are saved in the project file and kept when shared or exported.",
+      "headerReferenceHint": "Use a variable in a layer's request headers as ${NAME}, e.g. Authorization: Bearer ${MY_TOKEN}.",
       "secretOnAria": "{{name}} is a secret. Select to save its value in the project file instead.",
       "secretOffAria": "{{name}} is saved in the project file. Select to treat it as a secret.",
       "empty": "No environment variables configured.",
@@ -8422,7 +8423,8 @@
   "plugin": {
     "3d-tiles": {
       "arcgisSourceUnsupported": "Use a 3D Tiles tileset.json URL in this ArcGIS view. Google Photorealistic and I3S tiles require another renderer.",
-      "globeGoogleKeyRequired": "Google Photorealistic 3D Tiles need a Google Maps API key in Settings to load on the globe."
+      "globeGoogleKeyRequired": "Google Photorealistic 3D Tiles need a Google Maps API key in Settings to load on the globe.",
+      "headersHint": "One per line as Name: Value. Use ${NAME} to insert an environment variable from Settings → Environment; the value is not saved with the layer."
     },
     "geolibre-osm-downloader": {
       "title": "OSM Downloader",

@@ -4,7 +4,7 @@ import {
   useAppStore,
   type GeoLibreLayer,
   resolveThreeDTilesRequestHeaders,
-  withStoredRequestHeaders,
+  resolveProjectHeaderReferences,
 } from "@geolibre/core";
 import type { Layer } from "@deck.gl/core";
 import type { GeoLibreAppAPI } from "../types";
@@ -118,8 +118,7 @@ export async function restoreMapboxTiles(app: GeoLibreAppAPI, flyToId?: string):
             fetch: {
               headers: resolveThreeDTilesRequestHeaders(
                 String(layer.source.url),
-                withStoredRequestHeaders(
-                  layer.id,
+                resolveProjectHeaderReferences(
                   layer.source.requestHeaders as Record<string, string> | undefined,
                 ),
               ),

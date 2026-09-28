@@ -204,6 +204,34 @@ describe("project credential redaction", () => {
     assert.deepEqual(PROJECT_CREDENTIAL_FIELDS.pluginState, ["plugins.settings"]);
   });
 
+  it("keeps header values that only reference a variable and drops literal secrets", () => {
+    const project = createEmptyProject("Header references");
+    project.layers = [
+      {
+        id: "tiles",
+        name: "Tiles",
+        type: "3d-tiles",
+        source: {
+          url: "https://example.com/tileset.json",
+          requestHeaders: { Authorization: "Bearer ${T}", "X-Key": "literal-secret" },
+        },
+        visible: true,
+        opacity: 1,
+        style: {},
+        metadata: {},
+      },
+    ];
+    const result = redactProjectCredentials(project);
+    assert.deepEqual(result.project.layers[0].source.requestHeaders, {
+      Authorization: "Bearer ${T}",
+    });
+    assert.equal(serializeProject(result.project).includes("literal-secret"), false);
+    assert.deepEqual(
+      result.redactedPaths.filter((path) => path.startsWith("layers")),
+      ["layers[0].source.requestHeaders"],
+    );
+  });
+
   it("is idempotent", () => {
     const once = redactCredentials(credentialProject());
     assert.deepEqual(redactCredentials(once), once);

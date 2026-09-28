@@ -1,10 +1,11 @@
 /**
  * Credentials a project refers to by name rather than carrying inline.
  *
- * On the desktop app the geocoding API keys, secret environment variables,
- * and 3D Tiles request headers of a project live in the OS keychain, keyed
- * device-wide by provider id / variable name / layer id. The project file
- * keeps the names with empty values. This module is the pure half of that
+ * On the desktop app the geocoding API keys and secret environment variables
+ * of a project live in the OS keychain, keyed device-wide by provider id /
+ * variable name. The project file keeps the names with empty values. Request
+ * headers never go there: they reference variables as `${NAME}` instead (see
+ * `resolveProjectHeaderReferences`). This module is the pure half of that
  * scheme: the account names, the overlay that fills empty values from the
  * stored ones, and the split that moves values out of a project before it is
  * written. The app installs the lookup; without one (web, Jupyter) every
@@ -16,6 +17,8 @@
  */
 
 import { GEOCODING_PROVIDERS } from "./geocoding";
+import { resolveHeaderReferences } from "./header-references";
+import { useAppStore } from "./store";
 import type {
   GeocodingPreferences,
   GeoLibreProject,
@@ -31,10 +34,6 @@ export function geocodingApiKeyAccount(providerId: string): string {
 
 export function environmentVariableAccount(key: string): string {
   return `project.env.${key}`;
-}
-
-export function layerRequestHeadersAccount(layerId: string): string {
-  return `project.layer.${layerId}.requestHeaders`;
 }
 
 /** Rows are secret unless explicitly marked `secret: false`. */
@@ -150,21 +149,13 @@ export function changedPreferenceCredentials(
   return changes;
 }
 
-function stringEntries(value: unknown): Record<string, string> | null {
-  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
-  const entries = Object.entries(value).filter(
-    (entry): entry is [string, string] => typeof entry[1] === "string",
-  );
-  return entries.length > 0 ? Object.fromEntries(entries) : null;
-}
-
 /**
- * Move unambiguous project-file credentials out of `project` (a copy; the input
- * is untouched) into `secrets`, keyed by account. Secret environment rows that
- * have no unique name remain in the project for an explicit keep/strip choice.
- * `requestHeaders` keys are deleted rather than blanked: credential redaction
- * counts any `requestHeaders` key regardless of value, so a blanked map would
- * still trigger the save prompt.
+ * Move unambiguous geocoding API keys and secret environment variable values
+ * out of `project` (a copy; the input is untouched) into `secrets`, keyed by
+ * account. Secret environment rows that have no unique name remain in the
+ * project for an explicit keep/strip choice. Layers pass through: their
+ * request headers reference variables as `${NAME}` rather than holding
+ * secrets that need moving.
  */
 export function splitProjectCredentials(project: GeoLibreProject): {
   project: GeoLibreProject;
@@ -192,14 +183,6 @@ export function splitProjectCredentials(project: GeoLibreProject): {
     return { ...variable, value: "" };
   });
 
-  const layers = project.layers.map((layer) => {
-    if (!layer.source || !("requestHeaders" in layer.source)) return layer;
-    const { requestHeaders, ...source } = layer.source;
-    const headers = stringEntries(requestHeaders);
-    if (headers) secrets[layerRequestHeadersAccount(layer.id)] = JSON.stringify(headers);
-    return { ...layer, source };
-  });
-
   return {
     project: {
       ...project,
@@ -208,32 +191,28 @@ export function splitProjectCredentials(project: GeoLibreProject): {
         geocoding: { ...project.preferences.geocoding, apiKeys: {} },
         environmentVariables,
       },
-      layers,
     },
     secrets,
   };
 }
 
 /**
- * The request headers a 3D Tiles layer should send: the layer's own headers
- * when it has any (session override), else the stored ones.
+ * `headers` with every `${NAME}` resolved from the project's enabled
+ * Environment Variables (stored secret values filled in). Only those rows
+ * count, not the OS environment or build-time values that share the runtime
+ * env. A header referencing an unset variable is dropped.
  */
-export function withStoredRequestHeaders(
-  layerId: string,
+export function resolveProjectHeaderReferences(
   headers: Record<string, string> | undefined,
 ): Record<string, string> | undefined {
-  if (headers && Object.keys(headers).length > 0) return headers;
-  const stored = lookupProjectCredential(layerRequestHeadersAccount(layerId));
-  if (!stored) return headers;
-  try {
-    const parsed: unknown = JSON.parse(stored);
-    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return headers;
-    const values = Object.values(parsed);
-    if (values.length === 0 || !values.every((value) => typeof value === "string")) {
-      return headers;
-    }
-    return parsed as Record<string, string>;
-  } catch {
-    return headers;
+  if (!headers) return headers;
+  const values: Record<string, string> = {};
+  const variables = overlayStoredEnvironmentVariables(
+    useAppStore.getState().preferences.environmentVariables,
+  );
+  for (const variable of variables) {
+    const key = variable.key.trim();
+    if (variable.enabled && key) values[key] = variable.value;
   }
+  return resolveHeaderReferences(headers, values);
 }

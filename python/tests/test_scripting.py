@@ -551,6 +551,26 @@ def test_python_credential_field_registry_matches_js():
     assert safe["layers"][0]["source"] == {"sr": 4326, "key": "layer-identifier"}
 
 
+def test_redact_credentials_keeps_header_values_that_only_reference_a_variable():
+    """Same rule as the app's isHeaderReferenceOnly: `Bearer ${T}` holds no secret."""
+    safe = redact_credentials(
+        {
+            "layers": [
+                {
+                    "source": {
+                        "requestHeaders": {
+                            "Authorization": "Bearer ${T}",
+                            "X-Key": "literal",
+                            "X-Mixed": "abc${T}",
+                        }
+                    }
+                }
+            ]
+        }
+    )
+    assert safe["layers"][0]["source"] == {"requestHeaders": {"Authorization": "Bearer ${T}"}}
+
+
 def test_python_redaction_sweeps_layer_connection():
     """`connection.lastError` is free-form error text and must be swept too."""
     safe = redact_credentials(
