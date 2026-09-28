@@ -378,10 +378,11 @@ export function redactProjectCredentials(project: GeoLibreProject): CredentialRe
       }
     : project.preferences;
   // A secret row with an empty value carries nothing (desktop keeps the value
-  // in the keychain), so it must not count toward the save prompt.
+  // in the keychain), so it must not count toward the save prompt. A populated
+  // row with no name still needs an explicit keep/strip choice.
   const populatedEnvironmentVariables =
     project.preferences?.environmentVariables?.filter(
-      (variable) => variable.key.trim() && variable.secret !== false && variable.value !== "",
+      (variable) => variable.secret !== false && variable.value !== "",
     ) ?? [];
   if (populatedEnvironmentVariables.length > 0) {
     recordRedaction(

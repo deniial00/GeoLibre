@@ -1328,9 +1328,9 @@ export function useProjectFileActions(mapControllerRef: MapControllerRef) {
       undefined,
       layersForSave.layers,
     );
-    // Desktop: geocoding keys, secret environment variables, and layer request
-    // headers move to the OS keychain and never reach the file. If a keychain
-    // write fails the unstripped project falls through to the prompt below, so
+    // Desktop: geocoding keys, uniquely named secret environment variables,
+    // and layer request headers move to the OS keychain. Ambiguous rows and
+    // failed keychain writes fall through to the keep/strip prompt below, so
     // the user neither writes plaintext silently nor loses the value.
     let projectForSave = project;
     let credentialsStripped = false;

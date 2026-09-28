@@ -14,6 +14,9 @@ import { createElement } from "react";
 // Loaded after the harness so its CSS imports and Vite globals are handled.
 const { SettingsDialog, openSettingsSection } =
   await import("../apps/geolibre-desktop/src/components/layout/SettingsDialog");
+// The same post-harness import rule applies to the Tauri-backed credential module.
+const { setProjectCredentialsWritable } =
+  await import("../apps/geolibre-desktop/src/lib/project-credentials");
 
 type Section = Parameters<typeof openSettingsSection>[0];
 
@@ -100,5 +103,42 @@ describe("SettingsDialog", () => {
     fireEvent.click(within(dialog).getByRole("button", { name: "Save Settings" }));
 
     assert.equal(useAppStore.getState().preferences.map.restrictBounds, !before);
+  });
+
+  it("does not promise project keychain storage when desktop hydration failed", () => {
+    Object.defineProperty(window, "__TAURI_INTERNALS__", { configurable: true, value: {} });
+    setProjectCredentialsWritable(false);
+    try {
+      renderSettings();
+      const dialog = openAt("geocoding");
+      fireEvent.change(within(dialog).getByRole("combobox"), { target: { value: "mapbox" } });
+      assert.match(
+        dialog.textContent ?? "",
+        /project credential storage in the system keychain is unavailable/i,
+      );
+      assert.doesNotMatch(
+        dialog.textContent ?? "",
+        /Tokens and API keys you save in GeoLibre are stored in your system keychain/,
+      );
+      assert.doesNotMatch(dialog.textContent ?? "", /Keys are kept in your system keychain/);
+
+      fireEvent.click(within(dialog).getByRole("button", { name: "Environment" }));
+      assert.match(dialog.textContent ?? "", /saving a local project asks whether to keep/i);
+      assert.doesNotMatch(
+        dialog.textContent ?? "",
+        /Values marked secret are kept in your system keychain/,
+      );
+      setProjectCredentialsWritable(true);
+      fireEvent.click(within(dialog).getByRole("button", { name: "Geocoding" }));
+      assert.match(dialog.textContent ?? "", /Keys are kept in your system keychain/);
+      fireEvent.click(within(dialog).getByRole("button", { name: "Environment" }));
+      assert.match(
+        dialog.textContent ?? "",
+        /Values marked secret are kept in your system keychain/,
+      );
+    } finally {
+      setProjectCredentialsWritable(false);
+      delete (window as Window & { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__;
+    }
   });
 });

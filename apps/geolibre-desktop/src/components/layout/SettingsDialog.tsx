@@ -545,6 +545,7 @@ export function SettingsDialog({
   const shareHost = shareHostLabel();
   const shareSettingsUrl = shareBaseUrl ? `${shareBaseUrl}/settings` : null;
   const keychainStorage = credentialStorageLocation() === "keychain";
+  const projectKeychainWritable = projectCredentialsInKeychain();
   const shareTokenComponents: TransComponents = {
     tokenLink: (
       <a
@@ -2767,9 +2768,11 @@ export function SettingsDialog({
                               </Button>
                             </div>
                             <p className="text-xs text-amber-600 dark:text-amber-500">
-                              {keychainStorage
+                              {projectKeychainWritable
                                 ? t("settings.geocoding.secretsWarningKeychain")
-                                : t("settings.geocoding.secretsWarning")}
+                                : keychainStorage
+                                  ? t("settings.geocoding.secretsWarningUnavailable")
+                                  : t("settings.geocoding.secretsWarning")}
                             </p>
                           </div>
                         ) : null}
@@ -3007,9 +3010,11 @@ export function SettingsDialog({
                   <div className="flex items-start gap-2 rounded-md border border-amber-500/40 bg-amber-500/10 p-3 text-xs text-amber-700 dark:text-amber-300">
                     <TriangleAlert className="mt-0.5 h-4 w-4 shrink-0" />
                     <span>
-                      {keychainStorage
+                      {projectKeychainWritable
                         ? t("settings.env.secretsWarningKeychain")
-                        : t("settings.env.secretsWarning")}
+                        : keychainStorage
+                          ? t("settings.env.secretsWarningUnavailable")
+                          : t("settings.env.secretsWarning")}
                     </span>
                   </div>
                   {draftPreferences.environmentVariables.length === 0 ? (

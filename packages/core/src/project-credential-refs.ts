@@ -159,9 +159,9 @@ function stringEntries(value: unknown): Record<string, string> | null {
 }
 
 /**
- * Move every project-file credential out of `project` (a copy; the input is
- * untouched) into `secrets`, keyed by account.
- *
+ * Move unambiguous project-file credentials out of `project` (a copy; the input
+ * is untouched) into `secrets`, keyed by account. Secret environment rows that
+ * have no unique name remain in the project for an explicit keep/strip choice.
  * `requestHeaders` keys are deleted rather than blanked: credential redaction
  * counts any `requestHeaders` key regardless of value, so a blanked map would
  * still trigger the save prompt.
@@ -176,10 +176,19 @@ export function splitProjectCredentials(project: GeoLibreProject): {
     const trimmed = apiKey.trim();
     if (trimmed) secrets[geocodingApiKeyAccount(providerId)] = trimmed;
   }
+  // A hand-edited file can contain duplicate names even though Settings
+  // rejects them. One keychain account cannot preserve two different values.
+  const nameCounts = new Map<string, number>();
+  for (const variable of project.preferences.environmentVariables) {
+    const key = variable.key.trim();
+    if (key) nameCounts.set(key, (nameCounts.get(key) ?? 0) + 1);
+  }
   const environmentVariables = project.preferences.environmentVariables.map((variable) => {
     if (!isSecretEnvironmentVariable(variable) || variable.value === "") return variable;
     const key = variable.key.trim();
-    if (key) secrets[environmentVariableAccount(key)] = variable.value;
+    // Keep ambiguous or nameless rows intact for the local keep/strip prompt.
+    if (!key || (nameCounts.get(key) ?? 0) > 1) return variable;
+    secrets[environmentVariableAccount(key)] = variable.value;
     return { ...variable, value: "" };
   });
 

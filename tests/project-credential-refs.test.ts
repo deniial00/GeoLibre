@@ -13,7 +13,10 @@ import {
 
 function projectWithCredentials() {
   const project = createEmptyProject("Keychain fixture");
-  project.preferences.geocoding.apiKeys = { mapbox: "gk" };
+  project.preferences.geocoding = {
+    ...project.preferences.geocoding,
+    apiKeys: { mapbox: "gk" },
+  };
   project.preferences.environmentVariables = [
     { key: "GOOGLE_MAPS_API_KEY", value: "g1", enabled: true },
     { key: "ENDPOINT", value: "https://x", enabled: true, secret: false },
@@ -43,7 +46,7 @@ function withStored(values: Record<string, string>) {
 after(() => setProjectCredentialLookup(null));
 
 describe("splitProjectCredentials", () => {
-  it("moves every project-file credential out so the save prompt has nothing to ask", () => {
+  it("moves uniquely named project-file credentials out so the save prompt has nothing to ask", () => {
     const original = projectWithCredentials();
     const snapshot = structuredClone(original);
     const { project, secrets } = splitProjectCredentials(original);
@@ -61,6 +64,43 @@ describe("splitProjectCredentials", () => {
     assert.equal("requestHeaders" in project.layers[0].source, false);
     assert.deepEqual(original, snapshot);
     assert.equal(redactProjectCredentials(project).redactedCount, 0);
+  });
+
+  it("keeps duplicate names for the keep/strip prompt instead of losing either value", () => {
+    const original = createEmptyProject("Duplicate credential names");
+    original.preferences.environmentVariables = [
+      { key: "TOKEN", value: "first", enabled: true },
+      { key: " TOKEN ", value: "second", enabled: true },
+      { key: "UNIQUE", value: "third", enabled: true },
+      { key: "PUBLIC", value: "plain", enabled: true, secret: false },
+    ];
+
+    const { project, secrets } = splitProjectCredentials(original);
+    assert.deepEqual(secrets, { "project.env.UNIQUE": "third" });
+    assert.deepEqual(project.preferences.environmentVariables, [
+      original.preferences.environmentVariables[0],
+      original.preferences.environmentVariables[1],
+      { key: "UNIQUE", value: "", enabled: true },
+      original.preferences.environmentVariables[3],
+    ]);
+    const redacted = redactProjectCredentials(project);
+    assert.equal(redacted.redactedCount, 2);
+    assert.deepEqual(redacted.project.preferences.environmentVariables, [
+      original.preferences.environmentVariables[3],
+    ]);
+  });
+
+  it("keeps a nameless secret for an explicit keep/strip choice", () => {
+    const original = createEmptyProject("Nameless credential");
+    original.preferences.environmentVariables = [{ key: " ", value: "secret", enabled: true }];
+
+    const { project, secrets } = splitProjectCredentials(original);
+    assert.deepEqual(secrets, {});
+    assert.deepEqual(
+      project.preferences.environmentVariables,
+      original.preferences.environmentVariables,
+    );
+    assert.equal(redactProjectCredentials(project).redactedCount, 1);
   });
 });
 
