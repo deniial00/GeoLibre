@@ -2,6 +2,7 @@ import { cesiumKmlSource, isCesiumKmlLayer } from "@geolibre/core";
 import { bindDocumentOpacity } from "./cesium-document-opacity";
 import { imageryColorAdjustments } from "./raster-color-adjustments";
 import {
+  allowsCredentialHeaders,
   cesiumIonAssetId,
   compileFeatureExpression,
   compileLayerFilters,
@@ -426,28 +427,24 @@ function escapeCreditHtml(value: string): string {
   });
 }
 
+/** See {@link allowsCredentialHeaders}; shared with the 2D 3D Tiles renderers. */
+const allowsCredentials = allowsCredentialHeaders;
+
 /**
- * Whether credential-bearing request headers may be sent to this URL.
- *
- * The scheme is read off a parsed URL rather than matched as a prefix, so an
- * unusually-cased `HTTPS://` from a hand-authored or MCP-generated project is
- * normalized instead of being misread as plaintext. A relative or unparseable
- * URL throws and is refused, matching `isAllowedPluginManifestUrl` in
- * `@geolibre/core`.
+ * A Cesium proxy that refuses any request a credential-bearing resource would
+ * send to a non-secure URL. Cesium hands the proxy to every resource derived
+ * from the tileset's, so child tiles named by absolute `http:` URLs in the
+ * tileset JSON fail instead of receiving the headers.
  */
-function allowsCredentials(url: string): boolean {
-  try {
-    const { protocol, hostname } = new URL(url);
-    if (protocol === "https:") return true;
-    // Loopback over http so a local dev tile server still works.
-    return (
-      protocol === "http:" &&
-      (hostname === "localhost" || hostname === "127.0.0.1" || hostname === "[::1]")
-    );
-  } catch {
-    return false;
-  }
-}
+const CREDENTIAL_PROXY = {
+  getURL(url: string): string {
+    // `data:`/`blob:` never leave the process (embedded glTF buffers).
+    if (!/^(?:data|blob):/i.test(url) && !allowsCredentials(url)) {
+      throw new Error(`Request headers are not sent over ${url}`);
+    }
+    return url;
+  },
+};
 
 function firstTile(layer: GeoLibreLayer): string | undefined {
   const tiles = layer.source.tiles;
@@ -3402,8 +3399,17 @@ export class CesiumLayerSync {
         layer.source.requestHeaders as Record<string, string> | undefined,
       ),
     );
-    const resource =
-      headers && Object.keys(headers).length ? new Cesium.Resource({ url, headers }) : url;
+    const hasHeaders = Boolean(headers && Object.keys(headers).length);
+    if (hasHeaders && !allowsCredentials(url)) {
+      console.warn(
+        `[GeoLibre] skipping "${layer.name}" on the globe: request headers cannot be sent over ${url}`,
+      );
+      entry.loadError = "Request headers require an HTTPS tileset URL";
+      return;
+    }
+    const resource = hasHeaders
+      ? new Cesium.Resource({ url, headers, proxy: CREDENTIAL_PROXY })
+      : url;
     try {
       if (isI3sLayer(layer)) {
         // An ArcGIS scene layer: Cesium's own I3S provider converts the

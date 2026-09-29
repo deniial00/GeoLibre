@@ -211,6 +211,7 @@ export {
   type ProjectCredentialLookup,
 } from "./project-credential-refs";
 export {
+  allowsCredentialHeaders,
   hasHeaderReferences,
   isHeaderReferenceOnly,
   resolveHeaderReferences,

@@ -1,6 +1,10 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { isHeaderReferenceOnly, resolveHeaderReferences } from "@geolibre/core";
+import {
+  allowsCredentialHeaders,
+  isHeaderReferenceOnly,
+  resolveHeaderReferences,
+} from "@geolibre/core";
 
 describe("resolveHeaderReferences", () => {
   it("substitutes variables and leaves literal headers alone", () => {
@@ -29,6 +33,28 @@ describe("isHeaderReferenceOnly", () => {
     }
     for (const value of ["abc${T}", "${T}${U}", "Bearer ${T} x", "Bearer abc", "Bearer ${1T}"]) {
       assert.equal(isHeaderReferenceOnly(value), false, value);
+    }
+  });
+});
+
+describe("allowsCredentialHeaders", () => {
+  it("allows HTTPS and loopback HTTP only", () => {
+    for (const url of [
+      "https://a.example/t.json",
+      "HTTPS://a.example/t.json",
+      "http://localhost:8080/t",
+      "http://127.0.0.1/t",
+      "http://[::1]/t",
+    ]) {
+      assert.equal(allowsCredentialHeaders(url), true, url);
+    }
+    for (const url of [
+      "http://a.example/t.json",
+      "ftp://a.example/t",
+      "/relative/t.json",
+      "not a url",
+    ]) {
+      assert.equal(allowsCredentialHeaders(url), false, url);
     }
   });
 });

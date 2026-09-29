@@ -35,6 +35,25 @@ export function isHeaderReferenceOnly(value: string): boolean {
 }
 
 /**
+ * Whether credential-bearing request headers may be sent to `url`: HTTPS, or
+ * plain HTTP to loopback so a local dev server still works. The scheme is read
+ * off a parsed URL, so an unusually cased `HTTPS://` is not misread as
+ * plaintext; a relative or unparseable URL is refused.
+ */
+export function allowsCredentialHeaders(url: string): boolean {
+  try {
+    const { protocol, hostname } = new URL(url);
+    if (protocol === "https:") return true;
+    return (
+      protocol === "http:" &&
+      (hostname === "localhost" || hostname === "127.0.0.1" || hostname === "[::1]")
+    );
+  } catch {
+    return false;
+  }
+}
+
+/**
  * `headers` with every `${NAME}` replaced by `values[NAME]`. A header that
  * references an unset (or empty) variable is omitted rather than sent with a
  * hole in it. Returns the input unchanged when nothing references a variable,

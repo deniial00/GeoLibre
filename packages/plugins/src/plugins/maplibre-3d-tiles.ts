@@ -1,5 +1,6 @@
 import { restoreMapboxTiles, isMapboxTilesLayer, flyToDeckTilesLocation } from "./mapbox-3d-tiles";
 import {
+  allowsCredentialHeaders,
   DEFAULT_LAYER_STYLE,
   getGoogleMapsApiKey,
   GOOGLE_MAPS_API_KEY_HEADER,
@@ -562,6 +563,14 @@ function restoreThreeDTilesMapLayer(
     return;
   }
 
+  if (loadHeaders && Object.keys(loadHeaders).length > 0 && !allowsCredentialHeaders(url)) {
+    updateThreeDTilesError(control, id, new Error(THREE_D_TILES_INSECURE_HEADERS));
+    return;
+  }
+  if (hasHeaderReferences(requestHeaders)) {
+    threeDTilesResolvedHeaders.set(id, JSON.stringify(loadHeaders ?? null));
+  }
+
   const { ThreeDTilesLayer } = requireThreeDTilesModule();
   const restoredLayer = new ThreeDTilesLayer({
     id: layerId,
@@ -582,6 +591,47 @@ function restoreThreeDTilesMapLayer(
   // this entry. The ThreeDTilesLayer itself carries the native map layer id.
   controlLayers.set(id, restoredLayer);
   map.addLayer(restoredLayer, beforeId);
+}
+
+const THREE_D_TILES_INSECURE_HEADERS =
+  "Request headers are only sent to an HTTPS tileset URL (or localhost).";
+
+/**
+ * The resolved `${NAME}` headers each native tileset was built with, so a
+ * changed variable can rebuild exactly the tilesets it affects.
+ */
+const threeDTilesResolvedHeaders = new Map<string, string>();
+
+/**
+ * Rebuild native tilesets whose `${NAME}` request headers resolve differently
+ * now. The store records hold only the template, so nothing else notices.
+ */
+function rebuildThreeDTilesWithChangedHeaders(control: ThreeDTilesControl): void {
+  if (isStoreDrivenThreeDTilesRenderer()) return;
+  const layers = new Map(
+    useAppStore
+      .getState()
+      .layers.filter(isThreeDTilesControlLayer)
+      .map((layer) => [layer.id, layer]),
+  );
+  for (const [id, built] of threeDTilesResolvedHeaders) {
+    const layer = layers.get(id);
+    const url = layer ? (stringValue(layer.source.url) ?? layer.sourcePath) : undefined;
+    if (!layer || !url) {
+      threeDTilesResolvedHeaders.delete(id);
+      continue;
+    }
+    const now = resolveThreeDTilesRequestHeaders(
+      url,
+      resolveProjectHeaderReferences(stringRecordValue(layer.source.requestHeaders)),
+    );
+    if (JSON.stringify(now ?? null) === built) continue;
+    threeDTilesResolvedHeaders.delete(id);
+    runWithThreeDTilesStoreSyncSuspended(() => {
+      control.removeTileset(id);
+      restoreThreeDTilesMapLayer(control, layer, url);
+    });
+  }
 }
 
 function updateThreeDTilesLoaded(
@@ -844,6 +894,7 @@ function addThreeDTilesRuntimeEnvListener(control: ThreeDTilesControl): void {
 
   const handleRuntimeEnvChange = () => {
     applyGooglePhotorealisticTilesPanelDefaults(control);
+    rebuildThreeDTilesWithChangedHeaders(control);
     // The resolved API key may have changed, but the persisted layer records
     // (which never carry the key) have not, so the render signature would be
     // unchanged. Force a rebuild so the new key reaches the deck.gl layer.
@@ -934,21 +985,34 @@ function installGooglePhotorealisticTilesPanelHandlers(
         control.collapse();
         return;
       }
+      const panelHeaders = parseThreeDTilesRequestHeaders(
+        panel.querySelector<HTMLTextAreaElement>('textarea[aria-label="Request headers"]')?.value ??
+          "",
+      );
+      const nativeTileset =
+        url && !isGooglePhotorealisticTilesetUrl(url) && !isArcgisI3sSceneLayerUrl(url);
+      // The library's own loader sends headers to the URL as given, plaintext
+      // included; keep credentials to HTTPS (or localhost).
+      if (
+        nativeTileset &&
+        panelHeaders &&
+        Object.keys(panelHeaders).length > 0 &&
+        !allowsCredentialHeaders(url)
+      ) {
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        setThreeDTilesPanelError(
+          panel,
+          "plugin.3d-tiles.insecureHeaders",
+          THREE_D_TILES_INSECURE_HEADERS,
+        );
+        return;
+      }
       // The library's own `loadTileset` would send `${NAME}` literally and
       // keep it in its state, so a templated header is loaded here instead:
       // the store record and control state hold the template, only the
       // ThreeDTilesLayer gets the resolved values.
-      if (
-        url &&
-        !isGooglePhotorealisticTilesetUrl(url) &&
-        !isArcgisI3sSceneLayerUrl(url) &&
-        hasHeaderReferences(
-          parseThreeDTilesRequestHeaders(
-            panel.querySelector<HTMLTextAreaElement>('textarea[aria-label="Request headers"]')
-              ?.value ?? "",
-          ),
-        )
-      ) {
+      if (nativeTileset && hasHeaderReferences(panelHeaders)) {
         event.preventDefault();
         event.stopImmediatePropagation();
         const tileset = threeDTilesItemStateFromPanel(control, panel, url, "loading");

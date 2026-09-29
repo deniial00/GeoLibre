@@ -825,6 +825,34 @@ describe("CesiumLayerSync", () => {
     assert.equal(resource.opts.headers["X-GOOG-API-KEY"], "test-key");
   });
 
+  it("refuses to send 3D Tiles request headers over plaintext, including child tiles", async () => {
+    const sync = newSync(f);
+    const tiles = (id: string, url: string) =>
+      mkLayer({
+        id,
+        type: "3d-tiles",
+        source: { url, requestHeaders: { Authorization: "Bearer t" } },
+      });
+    sync.sync([
+      tiles("plain", "http://tiles.example/tileset.json"),
+      tiles("secure", "https://tiles.example/tileset.json"),
+    ]);
+    await f.flush();
+    assert.equal(f.calls.tilesetUrls.length, 1);
+    const resource = f.calls.tilesetUrls[0] as {
+      opts: { url: string; proxy: { getURL(url: string): string } };
+    };
+    assert.equal(resource.opts.url, "https://tiles.example/tileset.json");
+    // Cesium applies the proxy to every derived request, child tiles included.
+    const { proxy } = resource.opts;
+    assert.equal(proxy.getURL("https://cdn.example/a.b3dm"), "https://cdn.example/a.b3dm");
+    assert.equal(
+      proxy.getURL("data:application/octet-stream;base64,AA=="),
+      "data:application/octet-stream;base64,AA==",
+    );
+    assert.throws(() => proxy.getURL("http://cdn.example/a.b3dm"));
+  });
+
   it("updates visibility in place without recreating the imagery layer", () => {
     const sync = newSync(f);
     const base = mkLayer({

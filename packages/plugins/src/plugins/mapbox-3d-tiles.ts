@@ -1,6 +1,7 @@
 import { onArcgisViewDestroy } from "@geolibre/map/arcgis-control-adapters";
 import { applyTilesetAltitudeOffset, type PositionedTileset } from "./tiles-altitude-offset";
 import {
+  allowsCredentialHeaders,
   useAppStore,
   type GeoLibreLayer,
   resolveThreeDTilesRequestHeaders,
@@ -46,6 +47,24 @@ const flyToRequests = new Set<string>();
 let signature = "";
 let revisionCounter = 0;
 const versions = new Map<string, { source: string; revision: number }>();
+
+/**
+ * The loaders.gl `fetch` option for a tileset. Headers only ever go over HTTPS
+ * (or loopback): every request, including child tiles the tileset JSON names
+ * by absolute URL, is refused rather than sent with credentials over plaintext.
+ */
+function credentialFetch(
+  headers: Record<string, string> | undefined,
+): RequestInit | ((url: string, init?: RequestInit) => Promise<Response>) {
+  if (!headers || Object.keys(headers).length === 0) return { headers };
+  return (url, init) =>
+    /^(?:data|blob):/i.test(url) || allowsCredentialHeaders(url)
+      ? fetch(url, {
+          ...init,
+          headers: { ...(init?.headers as Record<string, string>), ...headers },
+        })
+      : Promise.reject(new Error(`Request headers are not sent over ${url}`));
+}
 
 export function isMapboxTilesLayer(layer: GeoLibreLayer): boolean {
   return layer.type === "3d-tiles" && layer.metadata.sourceKind === "3d-tiles-url";
@@ -134,7 +153,7 @@ export async function restoreMapboxTiles(app: GeoLibreAppAPI, flyToId?: string):
           pickable: false,
           loadOptions: {
             ...THREE_D_TILES_DECK_LOAD_OPTIONS,
-            fetch: { headers: headers.get(layer.id) },
+            fetch: credentialFetch(headers.get(layer.id)),
           },
           onTilesetLoad: (tileset: PositionedTileset & { zoom?: number }) => {
             applyThreeDTilesTilesetMemoryLimit(tileset);

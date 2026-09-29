@@ -1330,8 +1330,17 @@ export function useProjectFileActions(mapControllerRef: MapControllerRef) {
     try {
       return await saveProjectWithCredentials(options, credentials);
     } finally {
-      if (credentials.rollback && !credentials.written) {
-        void rememberProjectCredentials(credentials.rollback);
+      // Awaited so saveProject's overlapping-save guard stays held until the
+      // shared values are back, and a later save starts from them.
+      if (
+        credentials.rollback &&
+        !credentials.written &&
+        !(await rememberProjectCredentials(credentials.rollback))
+      ) {
+        console.error("[GeoLibre] Could not restore stored project credentials", {
+          accounts: Object.keys(credentials.rollback),
+        });
+        setActionError(t("toolbar.error.credentialRollbackFailed"));
       }
     }
   };
