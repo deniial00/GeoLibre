@@ -99,4 +99,16 @@ describe("desktop project credentials", () => {
     assert.equal(index().includes("project.env.NEW"), false);
     assert.equal(lookupProjectCredential("project.env.SHARED"), "shared");
   });
+
+  it("undoes the writes that landed when a save's write is only partly stored", async () => {
+    const tooLong = `project.env.${"Y".repeat(600)}`;
+    const changes = { "project.env.PARTIAL": "p", [tooLong]: "long" };
+    const rollback = projectCredentialRollback(changes);
+    assert.equal(await rememberProjectCredentials(changes), false);
+    assert.equal(keychain.get("project.env.PARTIAL"), "p");
+
+    await rememberProjectCredentials(rollback);
+    assert.equal(keychain.has("project.env.PARTIAL"), false);
+    assert.equal(lookupProjectCredential(tooLong), undefined);
+  });
 });

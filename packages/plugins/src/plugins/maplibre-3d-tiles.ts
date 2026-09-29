@@ -398,6 +398,10 @@ function createThreeDTilesControl(): ThreeDTilesControl {
   addThreeDTilesRuntimeEnvListener(control);
   threeDTilesStoreUnsubscribe ??= useAppStore.subscribe((state, previous) => {
     if (state.layers !== previous.layers) {
+      // Forget the resolved headers of tilesets that left the project.
+      for (const id of threeDTilesResolvedHeaders.keys()) {
+        if (!state.layers.some((layer) => layer.id === id)) threeDTilesResolvedHeaders.delete(id);
+      }
       updateDeckTilesPanelList(control);
     }
 

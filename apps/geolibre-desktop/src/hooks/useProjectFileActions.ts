@@ -92,6 +92,10 @@ import {
 interface SaveCredentials {
   rollback: Record<string, string> | null;
   written: boolean;
+  /** Every credential reached the keychain and was left out of the file. */
+  stripped: boolean;
+  /** The user chose to keep the remaining credentials in the file. */
+  keptPlaintext: boolean;
 }
 
 /** A pending "strip credentials before saving?" prompt. */
@@ -1326,7 +1330,12 @@ export function useProjectFileActions(mapControllerRef: MapControllerRef) {
   // meanwhile) puts the previous values back, so it cannot replace the value
   // other projects on this device use.
   const runSaveProject = async (options?: { saveAs?: boolean }): Promise<boolean> => {
-    const credentials: SaveCredentials = { rollback: null, written: false };
+    const credentials: SaveCredentials = {
+      rollback: null,
+      written: false,
+      stripped: false,
+      keptPlaintext: false,
+    };
     try {
       return await saveProjectWithCredentials(options, credentials);
     } finally {
@@ -1334,7 +1343,7 @@ export function useProjectFileActions(mapControllerRef: MapControllerRef) {
       // shared values are back, and a later save starts from them.
       if (
         credentials.rollback &&
-        !credentials.written &&
+        (!credentials.written || (!credentials.stripped && credentials.keptPlaintext)) &&
         !(await rememberProjectCredentials(credentials.rollback))
       ) {
         console.error("[GeoLibre] Could not restore stored project credentials", {
@@ -1376,6 +1385,7 @@ export function useProjectFileActions(mapControllerRef: MapControllerRef) {
       if (await rememberProjectCredentials(split.secrets)) {
         projectForSave = split.project;
         credentialsStripped = true;
+        credentials.stripped = true;
       }
       if (useAppStore.getState().projectGeneration !== saveProjectGeneration) return false;
     }
@@ -1396,6 +1406,9 @@ export function useProjectFileActions(mapControllerRef: MapControllerRef) {
         rememberedCredentialChoice ??
         (await askStripCredentials(redacted.redactedCount, saveProjectGeneration));
       if (choice === "cancel") return false;
+      // Keep writes the plaintext into the file, so a partial keychain write
+      // is redundant and is undone. Strip leaves the keychain as the only copy.
+      credentials.keptPlaintext = choice === "keep";
       if (useAppStore.getState().projectGeneration !== saveProjectGeneration) return false;
       saveChoicesRef.current = rememberProjectSaveChoices(
         saveChoicesRef.current,
