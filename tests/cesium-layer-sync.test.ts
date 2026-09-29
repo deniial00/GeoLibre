@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { beforeEach, describe, it } from "node:test";
+import { useAppStore } from "@geolibre/core";
 import { DEFAULT_LAYER_STYLE, type GeoLibreLayer } from "../packages/core/src/types";
 import { CesiumLayerSync, isCesiumSupportedLayerType } from "../packages/map/src/cesium-layer-sync";
 
@@ -927,6 +928,46 @@ describe("CesiumLayerSync", () => {
     };
     assert.equal(res.opts.url, "https://secure.arcgis/MapServer");
     assert.equal(res.opts.headers["Authorization"], "Bearer token123");
+  });
+
+  it("rebuilds a layer when a variable its header references changes", async () => {
+    const initial = useAppStore.getState().preferences;
+    const setToken = (value: string) =>
+      useAppStore.setState({
+        preferences: {
+          ...initial,
+          environmentVariables: [{ key: "ARC_TOKEN", value, enabled: true, secret: false }],
+        },
+      });
+    setToken("first");
+    const sync = newSync(f);
+    try {
+      sync.sync([
+        mkLayer({
+          id: "arc",
+          type: "raster",
+          sourcePath: "https://secure.arcgis/MapServer",
+          source: {
+            tiles: ["https://secure.arcgis/MapServer/export"],
+            requestHeaders: { Authorization: "Bearer ${ARC_TOKEN}" },
+          },
+          metadata: { sourceKind: "arcgis-map-service" },
+        }),
+      ]);
+      await f.flush();
+      setToken("second");
+      await f.flush();
+      const headers = f.calls.arcgisProviders.map(
+        (provider) =>
+          (provider.url as { opts: { headers: Record<string, string> } }).opts.headers[
+            "Authorization"
+          ],
+      );
+      assert.deepEqual(headers, ["Bearer first", "Bearer second"]);
+    } finally {
+      sync.destroy();
+      useAppStore.setState({ preferences: initial });
+    }
   });
 
   it("reads the arcgis token off the pre-built export tile url", async () => {

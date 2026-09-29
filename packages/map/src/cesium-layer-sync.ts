@@ -16,6 +16,7 @@ import {
   ruleBasedVisibilityFilter,
   transformGeojsonElevation,
   resolveProjectHeaderReferences,
+  useAppStore,
   type GeoLibreLayer,
   type LayerStyle,
 } from "@geolibre/core";
@@ -295,6 +296,12 @@ interface LayerEntry {
   credit?: Credit;
   /** Set when the entry is removed mid-load so the resolved handle is discarded. */
   cancelled: boolean;
+  /**
+   * The request headers the entry was built with, resolved from `${NAME}`
+   * references (JSON). The layer keeps only the template, so a changed
+   * variable is detected by comparing this with a fresh resolution.
+   */
+  resolvedHeaders?: string;
   /**
    * Whether {@link handle} is actually in the scene. A geojson entry's handle is
    * assigned as soon as the data source loads, but the data source only joins
@@ -942,6 +949,15 @@ type ImageryResourceFactory = (url: string) => string | Resource;
 
 /** Refuses (throws) when `what` cannot be sent to `url` over plaintext. */
 type RequireSecure = (url: string, what: string) => void;
+
+/** A layer's request headers with `${NAME}` resolved, as JSON for comparison. */
+function resolvedRequestHeaders(layer: GeoLibreLayer): string {
+  return JSON.stringify(
+    resolveProjectHeaderReferences(
+      layer.source.requestHeaders as Record<string, string> | undefined,
+    ) ?? null,
+  );
+}
 
 /**
  * The credential guard and the URL → `Resource` wrapper every imagery branch
@@ -2093,6 +2109,28 @@ export class CesiumLayerSync {
     private readonly deps: CesiumLayerSyncDeps = {},
   ) {}
 
+  private unsubscribeEnvironment: (() => void) | null = null;
+
+  /**
+   * Rebuild the imagery and 3D Tiles entries whose `${NAME}` request headers
+   * now resolve differently. The layer records are unchanged when only a
+   * variable changes, so the regular store-driven sync never sees it.
+   */
+  private watchEnvironment(): void {
+    if (this.unsubscribeEnvironment) return;
+    this.unsubscribeEnvironment = useAppStore.subscribe((state, previous) => {
+      if (state.preferences.environmentVariables === previous.preferences.environmentVariables) {
+        return;
+      }
+      const stale = [...this.entries.values()].some(
+        (entry) =>
+          entry.resolvedHeaders !== undefined &&
+          entry.resolvedHeaders !== resolvedRequestHeaders(entry.layer),
+      );
+      if (stale) this.sync(this.currentLayers);
+    });
+  }
+
   /**
    * The Ion token an asset layer loads with. Read at load time rather than at
    * construction, so a token added in Settings reaches the next sync.
@@ -2143,6 +2181,7 @@ export class CesiumLayerSync {
   sync(layers: GeoLibreLayer[]): void {
     this.restoreHighlight();
     this.currentLayers = layers;
+    this.watchEnvironment();
     for (const layer of layers) {
       if (Array.isArray(layer.timeFilter) && layer.timeFilter.length > 0) {
         const d = extractTimeFilterDate(layer.timeFilter);
@@ -2189,7 +2228,11 @@ export class CesiumLayerSync {
       if (!existing) {
         this.createEntry(layer);
         if (entryKind(layer) === "imagery") imageryRebuilt = true;
-      } else if (needsRebuild(existing.layer, layer)) {
+      } else if (
+        needsRebuild(existing.layer, layer) ||
+        (existing.resolvedHeaders !== undefined &&
+          existing.resolvedHeaders !== resolvedRequestHeaders(layer))
+      ) {
         this.destroyEntry(existing);
         this.entries.delete(layer.id);
         // A COG whose source moved (a re-read blob URL, an authoring swap)
@@ -2269,6 +2312,8 @@ export class CesiumLayerSync {
     this.czmlClockOwner = undefined;
     for (const entry of this.entries.values()) this.destroyEntry(entry);
     this.entries.clear();
+    this.unsubscribeEnvironment?.();
+    this.unsubscribeEnvironment = null;
     this.removeDrapeLayer();
     this.drape?.destroy();
     this.drape = undefined;
@@ -2630,6 +2675,9 @@ export class CesiumLayerSync {
   private createEntry(layer: GeoLibreLayer): void {
     const kind = entryKind(layer);
     const entry: LayerEntry = { kind, layer, handle: null, cancelled: false };
+    if ((kind === "imagery" || kind === "3dtiles") && layer.source.requestHeaders) {
+      entry.resolvedHeaders = resolvedRequestHeaders(layer);
+    }
     this.entries.set(layer.id, entry);
     let created: Promise<void> | null = null;
     if (kind === "imagery") created = this.createImagery(entry);

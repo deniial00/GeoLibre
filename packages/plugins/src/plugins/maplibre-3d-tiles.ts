@@ -493,10 +493,15 @@ function hydrateThreeDTilesControlFromStore(
   }
 }
 
+/**
+ * @param flyToOnLoad Fly to the tileset once it loads, as the panel's "Fly to
+ *   tileset after load" does for the library's own submit path.
+ */
 function restoreThreeDTilesMapLayer(
   control: ThreeDTilesControl,
   layer: GeoLibreLayer,
   url: string,
+  flyToOnLoad = false,
 ): void {
   const map = control.getMap();
   const controlLayers = getThreeDTilesControlLayers(control);
@@ -566,7 +571,10 @@ function restoreThreeDTilesMapLayer(
     visible: layer.visible,
     requestHeaders: loadHeaders,
     ...getThreeDTilesDecoderOptions(control),
-    onLoad: (metadata) => updateThreeDTilesLoaded(control, id, metadata),
+    onLoad: (metadata) => {
+      updateThreeDTilesLoaded(control, id, metadata);
+      if (flyToOnLoad) control.flyToTileset(id);
+    },
     onError: (error) => updateThreeDTilesError(control, id, error),
   });
   // ThreeDTilesControl keys its internal `_layers` map by tileset id (see
@@ -945,9 +953,12 @@ function installGooglePhotorealisticTilesPanelHandlers(
         event.stopImmediatePropagation();
         const tileset = threeDTilesItemStateFromPanel(control, panel, url, "loading");
         const layer = createThreeDTilesStoreLayer(tileset, control.getState().opacity);
+        const flyToOnLoad =
+          panel.querySelector<HTMLInputElement>('input[aria-label="Fly to tileset after load"]')
+            ?.checked ?? true;
         runWithThreeDTilesStoreSyncSuspended(() => {
           useAppStore.getState().addLayer(layer);
-          restoreThreeDTilesMapLayer(control, layer, url);
+          restoreThreeDTilesMapLayer(control, layer, url, flyToOnLoad);
         });
         control.collapse();
         return;

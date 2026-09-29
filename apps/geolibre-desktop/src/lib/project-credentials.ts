@@ -99,8 +99,6 @@ export function hydrateProjectCredentials(
   });
   if (present.length !== index.length) {
     // An indexed write that never landed (crash, failed write). Its value was
-    // session-only at the time, so drop it from the index without a warning.
-    // An indexed write that never landed (crash, failed write). Its value was
     // session-only at the time, so drop it from the index.
     console.warn(
       "[GeoLibre] Dropping project credentials missing from the credential store",
@@ -169,4 +167,23 @@ export async function rememberProjectCredentials(
     storable.length === accounts.length &&
     storable.every((account) => !hasPendingCredential(account))
   );
+}
+
+/**
+ * The changes that undo `changes` against the session cache as it is now
+ * (`""` deletes an account that had no value). Take it before calling
+ * {@link rememberProjectCredentials}, and apply it if the operation the
+ * credentials were stored for is abandoned, so a save that never lands does
+ * not leave its values in the device-wide store.
+ */
+export function projectCredentialRollback(
+  changes: Readonly<Record<string, string>>,
+): Record<string, string> {
+  const current = useProjectCredentialStore.getState().values;
+  const rollback: Record<string, string> = {};
+  for (const [account, value] of Object.entries(changes)) {
+    const previous = current[account] ?? "";
+    if (previous !== value) rollback[account] = previous;
+  }
+  return rollback;
 }

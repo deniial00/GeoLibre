@@ -44,7 +44,7 @@ let failWrites = false;
 
 const { hydrateDesktopCredentials } =
   await import("../apps/geolibre-desktop/src/lib/credential-hydration");
-const { rememberProjectCredentials, useProjectCredentialStore } =
+const { projectCredentialRollback, rememberProjectCredentials, useProjectCredentialStore } =
   await import("../apps/geolibre-desktop/src/lib/project-credentials");
 const { lookupProjectCredential } = await import("@geolibre/core");
 
@@ -85,5 +85,18 @@ describe("desktop project credentials", () => {
     // The index stays readable, so later writes still reach the keychain.
     assert.equal(await rememberProjectCredentials({ "project.env.F": "f" }), true);
     assert.equal(keychain.get("project.env.F"), "f");
+  });
+
+  it("undoes an abandoned save's writes, restoring shared values and dropping new ones", async () => {
+    assert.equal(await rememberProjectCredentials({ "project.env.SHARED": "shared" }), true);
+    const changes = { "project.env.SHARED": "other-project", "project.env.NEW": "new" };
+    const rollback = projectCredentialRollback(changes);
+    assert.equal(await rememberProjectCredentials(changes), true);
+
+    assert.equal(await rememberProjectCredentials(rollback), true);
+    assert.equal(keychain.get("project.env.SHARED"), "shared");
+    assert.equal(keychain.has("project.env.NEW"), false);
+    assert.equal(index().includes("project.env.NEW"), false);
+    assert.equal(lookupProjectCredential("project.env.SHARED"), "shared");
   });
 });

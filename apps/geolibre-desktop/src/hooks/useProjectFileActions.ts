@@ -83,9 +83,16 @@ import type { MapControllerRef } from "../components/layout/toolbar/constants";
 import { IS_MAS_BUILD } from "../lib/build-flags";
 import { resolveDroppedProjectIfCurrent } from "../lib/dropped-project";
 import {
+  projectCredentialRollback,
   projectCredentialsInKeychain,
   rememberProjectCredentials,
 } from "../lib/project-credentials";
+
+/** Keychain changes a save made early, undone unless the project is written. */
+interface SaveCredentials {
+  rollback: Record<string, string> | null;
+  written: boolean;
+}
 
 /** A pending "strip credentials before saving?" prompt. */
 export interface CredentialStripPrompt {
@@ -1313,7 +1320,26 @@ export function useProjectFileActions(mapControllerRef: MapControllerRef) {
 
   const cancelSaveNamePrompt = () => settleSaveNamePrompt(saveNamePrompt, null);
 
+  // Saving moves credentials to the device-wide keychain before the file is
+  // written, so the prompt below has nothing to ask about. A save that never
+  // writes (cancelled prompt or picker, failed write, a project switched in
+  // meanwhile) puts the previous values back, so it cannot replace the value
+  // other projects on this device use.
   const runSaveProject = async (options?: { saveAs?: boolean }): Promise<boolean> => {
+    const credentials: SaveCredentials = { rollback: null, written: false };
+    try {
+      return await saveProjectWithCredentials(options, credentials);
+    } finally {
+      if (credentials.rollback && !credentials.written) {
+        void rememberProjectCredentials(credentials.rollback);
+      }
+    }
+  };
+
+  const saveProjectWithCredentials = async (
+    options: { saveAs?: boolean } | undefined,
+    credentials: SaveCredentials,
+  ): Promise<boolean> => {
     const saveProjectGeneration = useAppStore.getState().projectGeneration;
     // Offer to embed local vector data (or, on desktop, save file references)
     // first, so the serialized content below reflects the user's choice.
@@ -1328,14 +1354,16 @@ export function useProjectFileActions(mapControllerRef: MapControllerRef) {
       undefined,
       layersForSave.layers,
     );
-    // Desktop: geocoding keys, uniquely named secret environment variables,
-    // and layer request headers move to the OS keychain. Ambiguous rows and
+    // Desktop: geocoding keys and uniquely named secret environment variables
+    // move to the OS keychain. Ambiguous rows and
     // failed keychain writes fall through to the keep/strip prompt below, so
     // the user neither writes plaintext silently nor loses the value.
     let projectForSave = project;
     let credentialsStripped = false;
     if (projectCredentialsInKeychain()) {
       const split = splitProjectCredentials(project);
+      const rollback = projectCredentialRollback(split.secrets);
+      if (Object.keys(rollback).length > 0) credentials.rollback = rollback;
       if (await rememberProjectCredentials(split.secrets)) {
         projectForSave = split.project;
         credentialsStripped = true;
@@ -1401,6 +1429,7 @@ export function useProjectFileActions(mapControllerRef: MapControllerRef) {
           expectedVersion: remoteProject.versionCount,
           baseUrl: remoteProject.baseUrl,
         });
+        credentials.written = true;
         if (
           useAppStore.getState().projectGeneration !== saveProjectGeneration ||
           remoteProject !== remoteProjectRef.current ||
@@ -1486,6 +1515,7 @@ export function useProjectFileActions(mapControllerRef: MapControllerRef) {
       return false;
     }
     if (!path) return false;
+    credentials.written = true;
     // A native picker can remain open while another project arrives through an
     // external action. The old project may have been written successfully, but
     // never attach its path or saved state to the replacement project.
