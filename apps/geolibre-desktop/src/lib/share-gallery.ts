@@ -555,6 +555,15 @@ export function isPublicSharingBlocked(
   return visibility === "public" && publicSharingRestriction(organization) !== null;
 }
 
+/** Whether this membership may own (create) organization projects; viewers are read-only. */
+export function canOwnOrganizationProjects(organization: ShareOrganization): boolean {
+  return (
+    organization.role === "administrator" ||
+    organization.role === "publisher" ||
+    organization.role === "member"
+  );
+}
+
 /** Match a shared project to the organizations shown by /api/organizations/mine. */
 export function isProjectInMyOrganizations(
   project: Pick<SharedProject, "organization">,

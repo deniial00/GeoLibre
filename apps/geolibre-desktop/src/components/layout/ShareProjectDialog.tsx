@@ -67,6 +67,7 @@ import { openSettingsSection } from "./SettingsDialog";
 import {
   fetchMyOrganizations,
   fetchMyGroups,
+  canOwnOrganizationProjects,
   isPublicSharingBlocked,
   publicSharingRestriction,
   type ShareOrganization,
@@ -333,8 +334,11 @@ export function ShareProjectDialog({
   const remoteProblems = readiness?.problems.filter(isRemoteRow) ?? [];
   const remoteItemCount = readiness?.items.filter(isRemoteRow).length ?? 0;
 
+  // Viewers cannot own organization projects (the server answers 403), so the
+  // owner picker offers only memberships that can.
+  const ownerOrganizations = organizations.filter(canOwnOrganizationProjects);
   const selectedOrganization =
-    organizations.find((organization) => organization.id === selectedOrgId) ?? null;
+    ownerOrganizations.find((organization) => organization.id === selectedOrgId) ?? null;
   const publicRestriction = publicSharingRestriction(selectedOrganization);
   const publicBlocked = isPublicSharingBlocked(visibility, selectedOrganization);
   const organizationRequired = visibility === "organization" && !selectedOrganization;
@@ -885,7 +889,7 @@ export function ShareProjectDialog({
                         {t("share.visibilityPublic")}
                       </option>
                       <option value="private">{t("share.visibilityPrivate")}</option>
-                      <option value="organization" disabled={organizations.length === 0}>
+                      <option value="organization" disabled={ownerOrganizations.length === 0}>
                         {t("share.visibilityOrganization")}
                       </option>
                     </Select>
@@ -896,6 +900,11 @@ export function ShareProjectDialog({
                             ? "share.publicPublisherRequired"
                             : "share.publicDisabledByOrgPolicy",
                         )}
+                      </p>
+                    )}
+                    {!orgLoading && organizations.length > 0 && ownerOrganizations.length === 0 && (
+                      <p className="text-xs text-muted-foreground">
+                        {t("share.organizationViewerOnly")}
                       </p>
                     )}
                   </div>
@@ -946,7 +955,7 @@ export function ShareProjectDialog({
                   </div>
                 </div>
 
-                {organizations.length > 0 || orgLoading ? (
+                {ownerOrganizations.length > 0 || orgLoading ? (
                   <div className="space-y-1.5">
                     <Label htmlFor="share-organization">{t("share.owner")}</Label>
                     <Select
@@ -954,7 +963,7 @@ export function ShareProjectDialog({
                       value={selectedOrgId || ""}
                       onChange={(event) => {
                         const organization =
-                          organizations.find((item) => item.id === event.target.value) ?? null;
+                          ownerOrganizations.find((item) => item.id === event.target.value) ?? null;
                         setSelectedOrgId(organization?.id ?? null);
                         setVisibility(
                           organization
@@ -967,7 +976,7 @@ export function ShareProjectDialog({
                       disabled={status === "uploading" || orgLoading}
                     >
                       <option value="">{t("share.personalAccount")}</option>
-                      {organizations.map((org) => (
+                      {ownerOrganizations.map((org) => (
                         <option key={org.id} value={org.id}>
                           {org.name} ({org.slug})
                         </option>

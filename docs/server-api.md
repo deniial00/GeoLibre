@@ -18,8 +18,10 @@ implementation or storage engine. The reference implementation lives in
   lacks permission; `404` deliberately covers both a missing project and a
   project the caller may not discover; `409` is a uniqueness conflict; `422`
   is malformed input; and `429` is rate limiting.
-- Servers should send `Cache-Control: public, max-age=3600` on immutable raw
-  public/unlisted project versions and may use `ETag`/conditional requests.
+- Public and unlisted raw project bodies (latest and versioned) use
+  `Cache-Control: public, no-cache` with a strong `ETag`; `If-None-Match` with a
+  matching tag returns `304`. Caches may store the body but must revalidate it on
+  every use, so a visibility change takes effect at the next fetch.
   Responses containing private, organization, or group-protected content must
   use `Cache-Control: private, no-store`, including metadata listings.
 - Cross-origin web deployments must allow `Authorization` and `Content-Type`
@@ -260,8 +262,10 @@ private one, also requires `read:projects`.
 `POST /api/organizations` creates an organization and makes the caller its first
 `administrator`. The body contains `slug`, `name`, `publicSharingPolicy`
 (`yes`, `publishers`, or `no`), `defaultVisibility`, and optional `categories`.
-The slug is globally unique. `defaultVisibility` is returned as the safe client
-default; requests still state their visibility explicitly.
+The slug is globally unique. When a project is created in the organization
+without a `visibility`, the server applies `defaultVisibility`. A `public`
+default requires `publicSharingPolicy` `yes`; creating or patching an
+organization into any other combination returns `422`.
 
 Organization roles are:
 
@@ -288,12 +292,27 @@ Routes:
 - `GET /api/organizations/mine` lists memberships and each caller's `role`.
 - `GET /api/organizations/{id}` returns settings to a member.
 - `PATCH /api/organizations/{id}` changes `name`, `publicSharingPolicy`,
-  `defaultVisibility`, or `categories`; administrator only.
+  `defaultVisibility`, or `categories`; administrator only. Tightening
+  `publicSharingPolicy` to `publishers` or `no` changes every `public`
+  organization project whose creator could not publish it under the new policy
+  (by their current role; creators no longer in the organization included) to
+  `organization` visibility, and logs a `visibility_change` activity for each.
+- `DELETE /api/organizations/{id}` deletes the organization, its
+  organization-owned projects and their stored objects, its groups, members, and
+  invitations; administrator only. Members' personal projects are kept.
 - `GET /api/organizations/{id}/members` lists members.
 - `PUT /api/organizations/{id}/members` adds or updates
-  `{"username":"ada","role":"member"}`; administrator only.
-- `DELETE /api/organizations/{id}/members/{username}` removes a member. The
-  last administrator cannot be removed or demoted.
+  `{"username":"ada","role":"member"}`; administrator only. Lowering a role
+  re-applies the public sharing policy: `public` projects whose creator can no
+  longer publish them become `organization`.
+- `DELETE /api/organizations/{id}/members/{username}` removes a member
+  (administrator only), and `{username}=me` leaves. The last administrator
+  cannot be removed, leave, or be demoted. Projects the leaver created stay
+  owned by the organization, and their `public` ones become `organization`
+  unless the policy is `yes`. The leaver's memberships and pending invitations
+  in the organization's groups are removed. Groups they own pass to the
+  administrator who removed them; a member who owns one must transfer it before
+  leaving (`409`).
 - `POST /api/organizations/{id}/invitations` creates a pending invitation for
   exactly one `username` or `email`; `GET` on the same path lists pending,
   accepted, and revoked invitations. Issuance and listing are administrator
@@ -310,9 +329,11 @@ Routes:
 Supplying `organizationId` on project creation or patch transfers the project
 to organization ownership. Its `username` is then `null`, every organization
 administrator can manage it, and raw routes use
-`/org/{organizationSlug}/{projectSlug}[.geolibre.json]`. Clearing
-`organizationId` transfers it to the caller's individual account. The public
-sharing policy is enforced on create and patch, including direct API requests.
+`/org/{organizationSlug}/{projectSlug}[.geolibre.json]`. Only an administrator
+of the owning organization may change or clear `organizationId` on an
+organization-owned project (`403` otherwise); clearing it returns the project to
+its creator's individual account. The public sharing policy is enforced on
+create and patch, including direct API requests.
 Servers retain a nullable creator identity separately from ownership. New
 projects record their creating account whether ownership is individual or
 organizational; organization ownership remains authoritative, and the creator
@@ -322,10 +343,12 @@ identity does not populate `username` or create an individual project URL.
 
 `POST /api/groups` creates a standalone or organization-associated group. The
 body contains `name`, optional `description` and `organizationId`, `joinPolicy`
-(`invite`, `request`, or `open`), and `sharedUpdate`. `sharedUpdate` is fixed at
-creation and cannot be patched; `name`, `description`, and `joinPolicy` are
-settings. An optional PNG, JPEG, or WebP thumbnail uses
-`PUT`/`GET`/`DELETE /api/groups/{id}/thumbnail`.
+(`invite`, `request`, or `open`), and `sharedUpdate`. An organization-associated
+group admits only members of that organization: adding, inviting by username,
+joining, accepting an invitation, or approving a request for anyone else returns
+`403`. `sharedUpdate` is fixed at creation and cannot be patched; `name`,
+`description`, and `joinPolicy` are settings. An optional PNG, JPEG, or WebP
+thumbnail uses `PUT`/`GET`/`DELETE /api/groups/{id}/thumbnail`.
 
 Group roles are `owner`, `manager`, and `member`. Exactly one accepted member is
 the owner. An owner transfers ownership by assigning `owner` through
@@ -338,6 +361,9 @@ Routes:
 
 - `GET /api/groups/mine` lists accepted memberships; `GET /api/groups/{id}`
   returns group detail to a signed-in caller.
+- `DELETE /api/groups/{id}` deletes the group with its memberships,
+  invitations, and thumbnail; owner only. Projects shared with the group are
+  kept and lose only that group target.
 - `GET /api/groups/{id}/members` lists accepted members. Owners/managers also
   see pending join requests.
 - `PUT /api/groups/{id}/members` adds or changes a member using `username` and
@@ -358,11 +384,12 @@ Routes:
   deleting the project.
 
 Project create and patch requests accept `groupIds`. The caller must be an
-accepted member of every target. A member can read a private project targeted
-to their group and can update its content only if that group's immutable
-`sharedUpdate` value is true. Removing the membership or target revokes access
-on the next request; protected raw and thumbnail responses are never shared or
-persistently cached.
+accepted member of every target. For an organization-owned project, a
+non-administrator may target only that organization's groups. A member can read
+a private project targeted to their group and can update its content only if
+that group's immutable `sharedUpdate` value is true. Removing the membership or
+target revokes access on the next request; protected raw and thumbnail responses
+are never shared or persistently cached.
 
 Invitation tokens are bearer credentials. For both organization and group
 invitations, servers must store only a SHA-256 digest, return the raw token only
@@ -433,10 +460,13 @@ Requires auth. Creates a project and its first immutable version.
 
 `content` is a string containing a valid GeoLibre project JSON document.
 `filename` supplies a fallback title/slug; the project document's non-empty
-title is authoritative. `visibility` is required and is `public`, `unlisted`,
+title is authoritative. `visibility` is optional and is `public`, `unlisted`,
 `private`, or `organization`. `organizationId` is required when `visibility`
 is `organization`. `groupIds` is an optional array of group identifiers; the
-caller must be a member of every listed group.
+caller must be a member of every listed group, and for an organization project
+a non-administrator may list only that organization's groups. When `visibility`
+is omitted, the organization's `defaultVisibility` applies, or `private` for a
+personal project.
 
 ### `GET /api/projects`
 
@@ -506,8 +536,9 @@ Requires ownership, or organization administrator / active organization creator 
 
 ### `PUT /api/projects/{id}/content`
 
-Requires ownership or write access via a shared-update group. Creates a new
-immutable version.
+Requires ownership, organization administrator or active organization creator
+access for organization-owned projects, or membership in a targeted
+shared-update group. Creates a new immutable version.
 
 ```json
 {"content": "{\"version\":\"1.0\", ...}", "expectedVersion": 3}
@@ -559,7 +590,9 @@ source's latest content. The request body is **optional**: `{"visibility": ...}`
 selects the fork's visibility, and omitting the body entirely (the common "fork
 this project" call) must behave as `{"visibility":"private"}` rather than
 returning `422`. Responds `201` with `{"project": <project>}`. The source
-`forkCount` increases atomically.
+`forkCount` increases atomically. A fork of an organization project that is not
+`public` or `unlisted` stays owned by that organization, so the caller's role
+and the organization's public sharing policy apply to it exactly as on create.
 
 ### Raw project and website-compatible routes
 

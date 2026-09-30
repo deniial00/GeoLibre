@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import logging
 import os
@@ -27,6 +28,7 @@ from sqlalchemy import (
     String,
     Text,
     UniqueConstraint,
+    and_,
     create_engine,
     delete,
     event,
@@ -269,7 +271,7 @@ LISTING_EAGER_LOADS = (
 class ProjectCreate(BaseModel):
     filename: str = Field(max_length=255)
     content: str
-    visibility: Visibility
+    visibility: Visibility | None = None
     organization_id: str | None = Field(default=None, alias="organizationId")
     group_ids: list[str] = Field(default_factory=list, alias="groupIds", max_length=20)
 
@@ -1099,6 +1101,73 @@ def create_app(
             raise HTTPException(403, "group owner permission required")
         return group
 
+    def require_group_organization_member(session: Session, group: Group, account_id: str) -> None:
+        """An organization's group only admits members of that organization."""
+        if (
+            group.organization_id
+            and organization_role(session, group.organization_id, account_id) is None
+        ):
+            raise HTTPException(403, "organization membership required for this group")
+
+    def detach_from_organization_groups(
+        session: Session, organization_id: str, target: Account, actor: Account
+    ) -> None:
+        """Drop ``target``'s memberships and pending invitations in the organization's groups.
+
+        Called when ``target`` leaves or is removed, so group shares stop granting
+        them organization content. Groups ``target`` owns pass to ``actor`` (an
+        administrator removing them); leaving while owning one is a 409, matching
+        the group rule that ownership is transferred before the owner goes.
+        """
+        group_ids = list(
+            session.scalars(select(Group.id).where(Group.organization_id == organization_id))
+        )
+        if not group_ids:
+            return
+        owned_groups = session.scalars(
+            select(Group).where(Group.id.in_(group_ids), Group.owner_id == target.id)
+        ).all()
+        if owned_groups and actor.id == target.id:
+            raise HTTPException(
+                409, "transfer ownership of your organization groups before leaving"
+            )
+        session.execute(
+            delete(GroupMember).where(
+                GroupMember.group_id.in_(group_ids), GroupMember.account_id == target.id
+            )
+        )
+        for group in owned_groups:
+            group.owner_id = actor.id
+            member = session.get(GroupMember, (group.id, actor.id))
+            if member is None:
+                session.add(
+                    GroupMember(
+                        group_id=group.id,
+                        account_id=actor.id,
+                        role="owner",
+                        status="accepted",
+                        created_at=now(),
+                    )
+                )
+            else:
+                member.role = "owner"
+                member.status = "accepted"
+        invitation_target_predicate = GroupInvitation.username == target.username
+        if target.email:
+            invitation_target_predicate = or_(
+                invitation_target_predicate,
+                GroupInvitation.email == target.email.strip().lower(),
+            )
+        session.execute(
+            update(GroupInvitation)
+            .where(
+                GroupInvitation.group_id.in_(group_ids),
+                GroupInvitation.status == "pending",
+                invitation_target_predicate,
+            )
+            .values(status="revoked", revoked_at=now())
+        )
+
     def shared_group_ids(session: Session, project_id: str) -> list[str]:
         return list(
             session.scalars(
@@ -1117,6 +1186,66 @@ def create_app(
         return organization.public_sharing_policy == "yes" or (
             organization.public_sharing_policy == "publishers" and role == "publisher"
         )
+
+    def validate_default_visibility(policy: str, default: str) -> None:
+        """Reject a default visibility the organization's own policy forbids."""
+        if default == "public" and policy != "yes":
+            raise HTTPException(422, "defaultVisibility public requires publicSharingPolicy yes")
+
+    def delete_group_rows(session: Session, group_ids: list[str]) -> list[str]:
+        """Delete groups with their project shares, invitations, and members; no commit.
+
+        Explicit deletes rather than FK cascades: ``Group`` has no relationship to
+        shares or invitations, and SQLite cascades depend on the connect pragma.
+        Returns the ids of deleted groups that had a stored thumbnail.
+        """
+        if not group_ids:
+            return []
+        thumbnail_group_ids = list(
+            session.scalars(
+                select(Group.id).where(Group.id.in_(group_ids), Group.thumbnail_type.is_not(None))
+            )
+        )
+        session.execute(delete(ProjectGroup).where(ProjectGroup.group_id.in_(group_ids)))
+        session.execute(delete(GroupInvitation).where(GroupInvitation.group_id.in_(group_ids)))
+        session.execute(delete(GroupMember).where(GroupMember.group_id.in_(group_ids)))
+        session.execute(delete(Group).where(Group.id.in_(group_ids)))
+        return thumbnail_group_ids
+
+    def demote_disallowed_public_projects(
+        session: Session, organization: Organization, actor: Account
+    ) -> None:
+        """Make public org projects organization-only when their creator may no longer publish.
+
+        Mirrors ``can_publish_public``: a project stays public only while its
+        creator, in their current role, could publish it publicly now.
+        """
+        policy = organization.public_sharing_policy
+        if policy == "yes":
+            return
+        rows = session.execute(
+            select(Project, OrganizationMember.role)
+            .outerjoin(
+                OrganizationMember,
+                and_(
+                    OrganizationMember.organization_id == Project.organization_id,
+                    OrganizationMember.account_id == Project.created_by_id,
+                ),
+            )
+            .where(Project.organization_id == organization.id, Project.visibility == "public")
+        ).all()
+        for project, role in rows:
+            if role == "administrator" or (policy == "publishers" and role == "publisher"):
+                continue
+            project.visibility = "organization"
+            project.updated_at = now()
+            log_project_activity(
+                session,
+                project.id,
+                actor.id,
+                "visibility_change",
+                {"before": "public", "after": "organization"},
+            )
 
     def validate_access_targets(
         session: Session,
@@ -1142,10 +1271,21 @@ def create_app(
         if len(set(group_ids)) != len(group_ids):
             raise HTTPException(422, "groupIds must not contain duplicates")
         for group_id in group_ids:
-            if session.get(Group, group_id) is None:
+            group = session.get(Group, group_id)
+            if group is None:
                 raise HTTPException(404, "group not found")
             if group_membership(session, group_id, account.id) is None:
                 raise HTTPException(403, "group membership required")
+            # Only an administrator may widen organization content beyond the
+            # organization; everyone else shares within the organization's groups.
+            if (
+                organization is not None
+                and role != "administrator"
+                and group.organization_id != organization.id
+            ):
+                raise HTTPException(
+                    403, "organization projects can only be shared with the organization's groups"
+                )
         return organization
 
     def organization_json(organization: Organization, role: str | None = None) -> dict:
@@ -1468,6 +1608,7 @@ def create_app(
             )
         if session.scalar(select(Organization.id).where(Organization.slug == slug)):
             raise HTTPException(409, "organization slug already exists")
+        validate_default_visibility(body.public_sharing_policy, body.default_visibility)
         organization = Organization(
             id=str(uuid.uuid4()),
             slug=slug,
@@ -1536,6 +1677,10 @@ def create_app(
         account = principal.account
         organization = require_organization_admin(session, organization_id, account)
         updates = body.model_dump(exclude_unset=True)
+        validate_default_visibility(
+            updates.get("public_sharing_policy") or organization.public_sharing_policy,
+            updates.get("default_visibility") or organization.default_visibility,
+        )
         if updates.get("name") is not None:
             organization.name = updates["name"].strip()
         if updates.get("public_sharing_policy") is not None:
@@ -1544,8 +1689,42 @@ def create_app(
             organization.default_visibility = updates["default_visibility"]
         if updates.get("categories") is not None:
             organization.categories_json = json.dumps(updates["categories"])
+        if updates.get("public_sharing_policy") in {"no", "publishers"}:
+            demote_disallowed_public_projects(session, organization, account)
         session.commit()
         return {"organization": organization_json(organization, "administrator")}
+
+    @app.delete("/api/organizations/{organization_id}", status_code=204)
+    def delete_organization(
+        organization_id: str,
+        principal: AuthPrincipal = Depends(require_scope("write:projects")),
+        session: Session = Depends(get_session),
+    ):
+        """Delete an organization with its projects, groups, members, and invitations."""
+        organization = require_organization_admin(session, organization_id, principal.account)
+        project_ids = list(
+            session.scalars(select(Project.id).where(Project.organization_id == organization.id))
+        )
+        for project_id in project_ids:
+            session.delete(session.get(Project, project_id))
+        thumbnail_group_ids = delete_group_rows(
+            session,
+            list(session.scalars(select(Group.id).where(Group.organization_id == organization.id))),
+        )
+        session.execute(
+            delete(OrganizationInvitation).where(
+                OrganizationInvitation.organization_id == organization.id
+            )
+        )
+        session.execute(
+            delete(OrganizationMember).where(OrganizationMember.organization_id == organization.id)
+        )
+        session.delete(organization)
+        session.commit()
+        for project_id in project_ids:
+            object_storage.delete_project(project_id)
+        for group_id in thumbnail_group_ids:
+            object_storage.delete(f"groups/{group_id}/thumbnail")
 
     @app.get("/api/organizations/{organization_id}/members")
     def list_organization_members(
@@ -1617,6 +1796,10 @@ def create_app(
             )
             .values(status="revoked", revoked_at=now())
         )
+        organization = session.get(Organization, organization_id)
+        assert organization is not None
+        # A lowered role may no longer publish what the member made public.
+        demote_disallowed_public_projects(session, organization, account)
         session.commit()
         member.account = target
         return {"member": member_json(member)}
@@ -1629,8 +1812,13 @@ def create_app(
         session: Session = Depends(get_session),
     ):
         account = principal.account
-        require_organization_admin(session, organization_id, account)
-        target = session.scalar(select(Account).where(Account.username == username))
+        if username == "me":
+            if session.get(Organization, organization_id) is None:
+                raise HTTPException(404, "organization not found")
+            target = account
+        else:
+            require_organization_admin(session, organization_id, account)
+            target = session.scalar(select(Account).where(Account.username == username))
         member = session.get(OrganizationMember, (organization_id, target.id)) if target else None
         if member is None:
             raise HTTPException(404, "organization member not found")
@@ -1646,6 +1834,13 @@ def create_app(
             if admin_count == 1:
                 raise HTTPException(409, "organization must have an administrator")
         session.delete(member)
+        detach_from_organization_groups(session, organization_id, target, account)
+        organization = session.get(Organization, organization_id)
+        assert organization is not None
+        session.flush()
+        # A former member can no longer publish, so their public projects fall
+        # back to organization visibility under a restrictive policy.
+        demote_disallowed_public_projects(session, organization, account)
         session.commit()
 
     @app.post("/api/organizations/{organization_id}/invitations", status_code=201)
@@ -1893,6 +2088,19 @@ def create_app(
         session.commit()
         return {"group": group_json(group, group_membership(session, group_id, account.id))}
 
+    @app.delete("/api/groups/{group_id}", status_code=204)
+    def delete_group(
+        group_id: str,
+        principal: AuthPrincipal = Depends(require_scope("write:projects")),
+        session: Session = Depends(get_session),
+    ):
+        """Delete a group (owner only); shared projects survive without the group target."""
+        require_group_owner(session, group_id, principal.account)
+        thumbnail_group_ids = delete_group_rows(session, [group_id])
+        session.commit()
+        for thumbnail_group_id in thumbnail_group_ids:
+            object_storage.delete(f"groups/{thumbnail_group_id}/thumbnail")
+
     @app.get("/api/groups/{group_id}/members")
     def list_group_members(
         group_id: str,
@@ -1927,6 +2135,7 @@ def create_app(
         target = session.scalar(select(Account).where(Account.username == body.username))
         if target is None:
             raise HTTPException(404, "user not found")
+        require_group_organization_member(session, group, target.id)
         member = session.get(GroupMember, (group_id, target.id))
         if target.id == group.owner_id and body.role != "owner":
             raise HTTPException(409, "transfer group ownership before changing the owner role")
@@ -2029,6 +2238,8 @@ def create_app(
         target = invitation_account(session, username, email)
         if username and target is None:
             raise HTTPException(404, "user not found")
+        if target:
+            require_group_organization_member(session, group, target.id)
         if target and group_membership(session, group_id, target.id):
             raise HTTPException(409, "user is already a group member")
         target_predicate = (
@@ -2109,6 +2320,9 @@ def create_app(
             raise HTTPException(404, "invitation not found")
         if not invitation_belongs_to(invitation, account):
             raise HTTPException(403, "invitation belongs to another user")
+        require_group_organization_member(
+            session, require_group(session, invitation.group_id), account.id
+        )
         member = session.get(GroupMember, (invitation.group_id, account.id))
         if member is not None and member.status == "accepted":
             raise HTTPException(409, "user is already a group member")
@@ -2141,6 +2355,7 @@ def create_app(
     ):
         account = principal.account
         group = require_group(session, group_id)
+        require_group_organization_member(session, group, account.id)
         existing = session.get(GroupMember, (group_id, account.id))
         if existing and existing.status == "accepted":
             raise HTTPException(409, "already a group member")
@@ -2177,12 +2392,13 @@ def create_app(
         session: Session = Depends(get_session),
     ):
         account = principal.account
-        require_group_manager(session, group_id, account)
+        group = require_group_manager(session, group_id, account)
         target = session.scalar(select(Account).where(Account.username == username))
         member = session.get(GroupMember, (group_id, target.id)) if target else None
         if member is None or member.status != "pending":
             raise HTTPException(404, "join request not found")
         if body.decision == "accept":
+            require_group_organization_member(session, group, target.id)
             member.status = "accepted"
         else:
             session.delete(member)
@@ -2329,8 +2545,18 @@ def create_app(
         principal: AuthPrincipal = Depends(require_scope("write:projects")),
         session: Session = Depends(get_session),
     ):
-        """Create a project; publishing to public additionally needs share:public."""
-        if body.visibility == "public":
+        """Create a project; publishing to public additionally needs share:public.
+
+        Without ``visibility`` the organization's ``defaultVisibility`` applies,
+        or ``private`` for a personal project.
+        """
+        organization = (
+            session.get(Organization, body.organization_id) if body.organization_id else None
+        )
+        visibility = body.visibility or (
+            organization.default_visibility if organization is not None else "private"
+        )
+        if visibility == "public":
             ensure_scope(principal, "share:public")
         return {
             "project": project_json(
@@ -2339,7 +2565,7 @@ def create_app(
                     principal.account,
                     body.content,
                     body.filename,
-                    body.visibility,
+                    visibility,
                     body.organization_id,
                     body.group_ids,
                 ),
@@ -2536,14 +2762,29 @@ def create_app(
                 # Raising to public is a publication; reducing exposure is not.
                 ensure_scope(principal, "share:public")
             project.visibility = updates["visibility"]
-        if "organization_id" in updates:
-            if updates["organization_id"] != project.organization_id:
-                project.slug = unique_slug(
-                    session, account.id, project.slug, updates["organization_id"]
+        if "organization_id" in updates and updates["organization_id"] != project.organization_id:
+            # The organization owns its projects: only its administrator may move
+            # one out, so a creator cannot take team work (or dodge the public
+            # sharing policy) by re-parenting it.
+            if (
+                project.organization_id
+                and organization_role(session, project.organization_id, account.id)
+                != "administrator"
+            ):
+                raise HTTPException(
+                    403, "organization administrator permission required to move a project"
                 )
+            # A project leaving an organization returns to its creator, not to
+            # whichever administrator moved it.
+            new_owner_id = (
+                (project.created_by_id or account.id) if project.organization_id else account.id
+            )
+            project.slug = unique_slug(
+                session, new_owner_id, project.slug, updates["organization_id"]
+            )
             project.organization_id = updates["organization_id"]
             if not updates["organization_id"] or legacy_project_owner_required:
-                project.owner_id = account.id
+                project.owner_id = new_owner_id
             else:
                 project.owner_id = None
         if "group_ids" in updates:
@@ -2660,12 +2901,20 @@ def create_app(
         fork_visibility = (body or ForkRequest()).visibility
         if fork_visibility == "public":
             ensure_scope(principal, "share:public")
+        # A fork of protected organization content stays inside the organization,
+        # so the fork is held to the same roles and public-sharing policy.
+        fork_organization_id = (
+            source.organization_id
+            if source.organization_id and source.visibility not in {"public", "unlisted"}
+            else None
+        )
         fork = create_project(
             session,
             principal.account,
             content,
             source.title + ".geolibre.json",
             fork_visibility,
+            fork_organization_id,
             commit=False,
         )
         # Incremented in SQL rather than read-modify-write in Python, so
@@ -2681,19 +2930,33 @@ def create_app(
         session.refresh(fork)
         return {"project": project_json(fork, session, principal.account)}
 
-    def raw_response(project: Project, version: Version, immutable: bool) -> Response:
+    def raw_response(project: Project, version: Version, request: Request) -> Response:
+        """Serve a stored project body with cache headers matching its visibility.
+
+        Protected bodies are never stored by caches. Public and unlisted bodies
+        carry a strong ETag and ``no-cache``, so every cached copy is revalidated
+        against the origin: a project made private (or demoted by an organization
+        policy change) stops being served at once instead of after a max-age.
+        """
         try:
             content = object_storage.get(version.object_key)
         except KeyError:
             raise HTTPException(404, "project content not found")
-        cache = (
-            "public, max-age=3600"
-            if immutable and not protected(project)
-            else "private, no-store"
-            if protected(project)
-            else "public, max-age=60"
-        )
-        return Response(content, media_type="application/json", headers={"Cache-Control": cache})
+        if protected(project):
+            return Response(
+                content,
+                media_type="application/json",
+                headers={"Cache-Control": "private, no-store"},
+            )
+        etag = f'"{hashlib.sha256(content).hexdigest()}"'
+        headers = {"Cache-Control": "public, no-cache", "ETag": etag}
+        candidates = {
+            candidate.strip().removeprefix("W/")
+            for candidate in request.headers.get("if-none-match", "").split(",")
+        }
+        if etag in candidates or "*" in candidates:
+            return Response(status_code=304, headers=headers)
+        return Response(content, media_type="application/json", headers=headers)
 
     @app.get("/api/projects/{project_id}/versions")
     def list_versions(
@@ -2722,6 +2985,7 @@ def create_app(
     def get_version(
         project_id: str,
         number: int,
+        request: Request,
         principal: AuthPrincipal | None = Depends(optional_principal),
         session: Session = Depends(get_session),
     ):
@@ -2738,7 +3002,7 @@ def create_app(
             {"version": number},
         )
         session.commit()
-        return raw_response(project, version, True)
+        return raw_response(project, version, request)
 
     @app.put("/api/projects/{project_id}/thumbnail", status_code=204)
     async def put_thumbnail(
@@ -2803,6 +3067,7 @@ def create_app(
     def latest_organization_raw(
         organization_slug: str,
         slug: str,
+        request: Request,
         principal: AuthPrincipal | None = Depends(optional_principal),
         session: Session = Depends(get_session),
     ):
@@ -2813,7 +3078,7 @@ def create_app(
             .where(Organization.slug == organization_slug, Project.slug == slug)
         )
         project = visible_read(session, project, principal)
-        body = raw_response(project, project.versions[-1], False)
+        body = raw_response(project, project.versions[-1], request)
         session.execute(
             update(Project).where(Project.id == project.id).values(views=Project.views + 1)
         )
@@ -2852,6 +3117,7 @@ def create_app(
     def latest_raw(
         username: str,
         slug: str,
+        request: Request,
         principal: AuthPrincipal | None = Depends(optional_principal),
         session: Session = Depends(get_session),
     ):
@@ -2868,7 +3134,7 @@ def create_app(
         project = visible_read(session, project, principal)
         # Read the object first: a missing object is a 404 that should not count
         # as a view. Incremented in SQL so concurrent reads do not lose counts.
-        body = raw_response(project, project.versions[-1], False)
+        body = raw_response(project, project.versions[-1], request)
         session.execute(
             update(Project).where(Project.id == project.id).values(views=Project.views + 1)
         )

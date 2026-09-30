@@ -1512,6 +1512,7 @@
     "groups": "Groups",
     "publicDisabledByOrgPolicy": "Your organization does not allow public sharing",
     "publicPublisherRequired": "Only organization publishers and administrators can share publicly.",
+    "organizationViewerOnly": "Viewers can open organization projects but cannot share to an organization.",
     "owner": "Owner",
     "personalAccount": "Personal account",
     "organizationRequired": "Select an organization for organization visibility.",

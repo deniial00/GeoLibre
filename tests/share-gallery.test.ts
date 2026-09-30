@@ -3,6 +3,7 @@ import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import { describe, it } from "node:test";
 import {
+  canOwnOrganizationProjects,
   fetchMyGroups,
   fetchMyOrganizations,
   fetchMyProjects,
@@ -445,6 +446,14 @@ describe("shared project membership logic", () => {
     for (const visibility of ["organization", "private", "unlisted"]) {
       assert.equal(isPublicSharingBlocked(visibility, organization), false);
     }
+  });
+
+  it("offers only organizations whose role may own projects", () => {
+    for (const role of ["administrator", "publisher", "member"]) {
+      assert.equal(canOwnOrganizationProjects({ ...organization, role }), true);
+    }
+    assert.equal(canOwnOrganizationProjects({ ...organization, role: "viewer" }), false);
+    assert.equal(canOwnOrganizationProjects({ ...organization, role: null }), false);
   });
 });
 

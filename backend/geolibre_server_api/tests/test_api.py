@@ -228,7 +228,8 @@ def test_project_crud_visibility_listing_and_raw_views(client):
     )
     assert updated.status_code == 201 and updated.json()["version"] == 2
     historical = client.get(f"/api/projects/{project_id}/versions/1")
-    assert historical.headers["cache-control"] == "public, max-age=3600"
+    assert historical.headers["cache-control"] == "public, no-cache"
+    assert historical.headers["etag"]
     assert historical.json() == json.loads(content)
     assert client.delete(f"/api/projects/{project_id}", headers=auth(owner)).status_code == 204
     assert client.get(f"/api/projects/{project_id}").status_code == 404
@@ -535,8 +536,8 @@ def test_validation_and_errors_use_contract_shape(client):
 
 
 def test_organization_settings_patch_and_default_visibility(client):
-    """Org admin can PATCH settings; defaultVisibility is exposed but not enforced
-    by the server (client uses it to seed the share dialog)."""
+    """Org admin can PATCH settings; defaultVisibility is applied when a project
+    is created without an explicit visibility."""
     admin = account(client, "admin")
     org = client.post(
         "/api/organizations",
@@ -1361,7 +1362,7 @@ def test_private_organization_projects_follow_admin_creator_and_group_access(cli
     group = client.post(
         "/api/groups",
         headers=auth(creator),
-        json={"name": "Readers", "sharedUpdate": False},
+        json={"name": "Readers", "sharedUpdate": False, "organizationId": organization["id"]},
     ).json()["group"]
     client.put(
         f"/api/groups/{group['id']}/members",
@@ -1829,3 +1830,436 @@ def test_anonymous_bucket_insert_race_falls_back_to_increment(client):
         ).all()
     assert len(rows) == 1
     assert rows[0].count == 2
+
+
+def org_with_roles(client, policy="yes", **extra_members):
+    """Create an org owned by ``admin`` and add ``extra_members`` (username -> role)."""
+    admin = account(client, "admin")
+    organization = client.post(
+        "/api/organizations",
+        headers=auth(admin),
+        json={"slug": "policy-lab", "name": "Policy Lab", "publicSharingPolicy": policy},
+    ).json()["organization"]
+    tokens = {"admin": admin}
+    for username, role in extra_members.items():
+        tokens[username] = account(client, username)
+        assert (
+            client.put(
+                f"/api/organizations/{organization['id']}/members",
+                headers=auth(admin),
+                json={"username": username, "role": role},
+            ).status_code
+            == 200
+        )
+    return organization, tokens
+
+
+def post_org_project(client, token, organization_id, title, visibility="public"):
+    body = {
+        "filename": f"{title}.json",
+        "content": json.dumps({"version": "1.0", "title": title, "layers": []}),
+        "organizationId": organization_id,
+    }
+    if visibility is not None:
+        body["visibility"] = visibility
+    response = client.post("/api/projects", headers=auth(token), json=body)
+    assert response.status_code == 201, response.text
+    return response.json()["project"]
+
+
+def test_create_without_visibility_uses_organization_default(client):
+    organization, tokens = org_with_roles(client, member="member")
+    assert (
+        client.patch(
+            f"/api/organizations/{organization['id']}",
+            headers=auth(tokens["admin"]),
+            json={"defaultVisibility": "private"},
+        ).status_code
+        == 200
+    )
+    defaulted = post_org_project(client, tokens["member"], organization["id"], "d", None)
+    assert defaulted["visibility"] == "private"
+    explicit = post_org_project(client, tokens["member"], organization["id"], "e", "unlisted")
+    assert explicit["visibility"] == "unlisted"
+    personal = client.post(
+        "/api/projects",
+        headers=auth(tokens["member"]),
+        json={"filename": "p.json", "content": '{"title":"p"}'},
+    )
+    assert personal.status_code == 201
+    assert personal.json()["project"]["visibility"] == "private"
+
+
+def test_public_default_visibility_requires_open_policy(client):
+    admin = account(client, "admin")
+    rejected = client.post(
+        "/api/organizations",
+        headers=auth(admin),
+        json={
+            "slug": "closed-lab",
+            "name": "Closed",
+            "publicSharingPolicy": "no",
+            "defaultVisibility": "public",
+        },
+    )
+    assert rejected.status_code == 422
+    organization = client.post(
+        "/api/organizations",
+        headers=auth(admin),
+        json={"slug": "open-lab", "name": "Open", "defaultVisibility": "public"},
+    ).json()["organization"]
+    path = f"/api/organizations/{organization['id']}"
+    tightened = client.patch(path, headers=auth(admin), json={"publicSharingPolicy": "no"})
+    assert tightened.status_code == 422
+    assert client.get(path, headers=auth(admin)).json()["organization"]["publicSharingPolicy"] == (
+        "yes"
+    )
+
+
+def test_tightening_public_policy_demotes_disallowed_public_projects(client):
+    organization, tokens = org_with_roles(client, publisher="publisher", member="member")
+    projects = {
+        name: post_org_project(client, token, organization["id"], f"{name}-map")
+        for name, token in tokens.items()
+    }
+    path = f"/api/organizations/{organization['id']}"
+
+    def visibility(name):
+        return client.get(
+            f"/api/projects/{projects[name]['id']}", headers=auth(tokens["admin"])
+        ).json()["project"]["visibility"]
+
+    assert (
+        client.patch(
+            path, headers=auth(tokens["admin"]), json={"publicSharingPolicy": "publishers"}
+        ).status_code
+        == 200
+    )
+    assert [visibility(name) for name in ("admin", "publisher", "member")] == [
+        "public",
+        "public",
+        "organization",
+    ]
+    raw = f"/org/{organization['slug']}/{projects['member']['slug']}.geolibre.json"
+    assert client.get(raw).status_code == 404
+    activity = client.get(
+        f"/api/projects/{projects['member']['id']}/activity", headers=auth(tokens["admin"])
+    )
+    assert activity.status_code == 200, activity.text
+    changes = [e for e in activity.json()["activity"] if e["action"] == "visibility_change"]
+    assert changes[0]["details"] == {"before": "public", "after": "organization"}
+
+    assert (
+        client.patch(
+            path, headers=auth(tokens["admin"]), json={"publicSharingPolicy": "no"}
+        ).status_code
+        == 200
+    )
+    assert visibility("publisher") == "organization"
+    assert visibility("admin") == "public"
+
+
+def test_public_raw_revalidates_and_demotion_blocks_cached_etag(client):
+    organization, tokens = org_with_roles(client, member="member")
+    project = post_org_project(client, tokens["member"], organization["id"], "cached")
+    raw = f"/org/{organization['slug']}/{project['slug']}.geolibre.json"
+    version = f"/api/projects/{project['id']}/versions/1"
+
+    first = client.get(raw)
+    assert first.status_code == 200
+    assert first.headers["cache-control"] == "public, no-cache"
+    etag = first.headers["etag"]
+    revalidated = client.get(raw, headers={"If-None-Match": etag})
+    assert revalidated.status_code == 304
+    assert revalidated.content == b""
+    assert revalidated.headers["etag"] == etag
+    historical = client.get(version)
+    assert historical.headers["cache-control"] == "public, no-cache"
+    assert client.get(version, headers={"If-None-Match": etag}).status_code == 304
+
+    assert (
+        client.patch(
+            f"/api/organizations/{organization['id']}",
+            headers=auth(tokens["admin"]),
+            json={"publicSharingPolicy": "no"},
+        ).status_code
+        == 200
+    )
+    assert client.get(raw, headers={"If-None-Match": etag}).status_code == 404
+    assert client.get(version, headers={"If-None-Match": etag}).status_code == 404
+    member = client.get(raw, headers=auth(tokens["member"]))
+    assert member.status_code == 200
+    assert member.headers["cache-control"] == "private, no-store"
+    assert "etag" not in member.headers
+
+
+def test_member_can_leave_organization_but_last_admin_cannot(client):
+    admin, member, organization, project = create_member_organization_project(client)
+    outsider = account(client, "outsider")
+    leave = f"/api/organizations/{organization['id']}/members/me"
+    assert client.delete(leave, headers=auth(member)).status_code == 204
+    mine = client.get("/api/organizations/mine", headers=auth(member)).json()
+    assert mine["organizations"] == []
+    assert client.get(f"/api/projects/{project['id']}", headers=auth(admin)).status_code == 200
+    assert client.delete(leave, headers=auth(admin)).status_code == 409
+    assert client.delete(leave, headers=auth(outsider)).status_code == 404
+    missing = "/api/organizations/00000000-0000-0000-0000-000000000000/members/me"
+    assert client.delete(missing, headers=auth(member)).status_code == 404
+
+
+def test_group_owner_can_delete_group(client):
+    owner = account(client, "owner")
+    manager = account(client, "manager")
+    group = client.post(
+        "/api/groups", headers=auth(owner), json={"name": "Team", "joinPolicy": "invite"}
+    ).json()["group"]
+    invite = client.post(
+        f"/api/groups/{group['id']}/invitations",
+        headers=auth(owner),
+        json={"username": "manager", "role": "manager"},
+    ).json()["invitation"]
+    assert (
+        client.post(
+            f"/api/groups/invitations/{invite['token']}/accept", headers=auth(manager)
+        ).status_code
+        == 204
+    )
+    assert (
+        client.put(
+            f"/api/groups/{group['id']}/thumbnail",
+            headers={**auth(owner), "Content-Type": "image/png"},
+            content=b"\x89PNG\r\n\x1a\nteam",
+        ).status_code
+        == 204
+    )
+    shared = client.post(
+        "/api/projects",
+        headers=auth(owner),
+        json={
+            "filename": "team.json",
+            "content": '{"title":"team"}',
+            "visibility": "private",
+            "groupIds": [group["id"]],
+        },
+    ).json()["project"]
+    assert shared["groupIds"] == [group["id"]]
+
+    path = f"/api/groups/{group['id']}"
+    assert client.delete(path, headers=auth(manager)).status_code == 403
+    assert client.delete(path, headers=auth(owner)).status_code == 204
+    assert client.get(path, headers=auth(owner)).status_code == 404
+    survivor = client.get(f"/api/projects/{shared['id']}", headers=auth(owner))
+    assert survivor.status_code == 200
+    assert survivor.json()["project"]["groupIds"] == []
+    with pytest.raises(KeyError):
+        client.app.state.storage.get(f"groups/{group['id']}/thumbnail")
+
+
+def test_admin_can_delete_organization_and_its_content(client):
+    admin, member, organization, project = create_member_organization_project(client)
+    personal, _ = create_project(client, member, "private", "Personal")
+    group = client.post(
+        "/api/groups",
+        headers=auth(admin),
+        json={"name": "Org team", "organizationId": organization["id"]},
+    )
+    assert group.status_code == 201, group.text
+    group_id = group.json()["group"]["id"]
+    path = f"/api/organizations/{organization['id']}"
+
+    assert client.delete(path, headers=auth(member)).status_code == 403
+    assert client.delete(path, headers=auth(admin)).status_code == 204
+    assert client.get(path, headers=auth(admin)).status_code == 404
+    assert client.get(f"/api/projects/{project['id']}", headers=auth(admin)).status_code == 404
+    with pytest.raises(KeyError):
+        client.app.state.storage.get(f"projects/{project['id']}/versions/1.json")
+    assert client.get(f"/api/groups/{group_id}", headers=auth(admin)).status_code == 404
+    assert client.get(f"/api/projects/{personal['id']}", headers=auth(member)).status_code == 200
+
+
+def create_group(client, token, name, organization_id=None, join_policy="invite"):
+    body = {"name": name, "joinPolicy": join_policy}
+    if organization_id:
+        body["organizationId"] = organization_id
+    response = client.post("/api/groups", headers=auth(token), json=body)
+    assert response.status_code == 201, response.text
+    return response.json()["group"]
+
+
+def fork(client, token, project_id, visibility):
+    return client.post(
+        f"/api/projects/{project_id}/forks", headers=auth(token), json={"visibility": visibility}
+    )
+
+
+def test_fork_of_protected_organization_project_stays_in_organization(client):
+    organization, tokens = org_with_roles(client, "no", member="member", viewer="viewer")
+    source = post_org_project(client, tokens["admin"], organization["id"], "team", "organization")
+
+    assert fork(client, tokens["viewer"], source["id"], "public").status_code == 403
+    assert fork(client, tokens["viewer"], source["id"], "private").status_code == 403
+    assert fork(client, tokens["member"], source["id"], "public").status_code == 403
+    kept = fork(client, tokens["member"], source["id"], "private")
+    assert kept.status_code == 201
+    assert kept.json()["project"]["organization"]["id"] == organization["id"]
+
+    public = post_org_project(client, tokens["admin"], organization["id"], "open", "public")
+    outsider = account(client, "outsider")
+    copied = fork(client, outsider, public["id"], "public")
+    assert copied.status_code == 201
+    assert copied.json()["project"]["organization"] is None
+
+
+def test_only_organization_admin_moves_a_project_out_to_its_creator(client):
+    organization, tokens = org_with_roles(client, "no", member="member")
+    project = post_org_project(client, tokens["member"], organization["id"], "team", "organization")
+    path = f"/api/projects/{project['id']}"
+
+    escaped = client.patch(
+        path,
+        headers=auth(tokens["member"]),
+        json={"organizationId": None, "visibility": "public"},
+    )
+    assert escaped.status_code == 403
+    still = client.get(path, headers=auth(tokens["admin"])).json()["project"]
+    assert still["organization"]["id"] == organization["id"]
+    assert still["visibility"] == "organization"
+
+    moved = client.patch(
+        path,
+        headers=auth(tokens["admin"]),
+        json={"organizationId": None, "visibility": "private"},
+    )
+    assert moved.status_code == 200, moved.text
+    assert moved.json()["project"]["username"] == "member"
+    assert client.get(path, headers=auth(tokens["member"])).status_code == 200
+    assert client.get(path, headers=auth(tokens["admin"])).status_code == 404
+
+
+def test_non_admin_shares_organization_projects_only_with_its_groups(client):
+    organization, tokens = org_with_roles(client, member="member")
+    personal_group = create_group(client, tokens["member"], "Friends")
+    org_group = create_group(client, tokens["member"], "Lab team", organization["id"])
+    body = {
+        "filename": "m.json",
+        "content": '{"title":"m"}',
+        "visibility": "organization",
+        "organizationId": organization["id"],
+    }
+
+    outside = client.post(
+        "/api/projects",
+        headers=auth(tokens["member"]),
+        json={**body, "groupIds": [personal_group["id"]]},
+    )
+    assert outside.status_code == 403
+    inside = client.post(
+        "/api/projects",
+        headers=auth(tokens["member"]),
+        json={**body, "groupIds": [org_group["id"]]},
+    )
+    assert inside.status_code == 201, inside.text
+    admin_group = create_group(client, tokens["admin"], "Partners")
+    by_admin = client.post(
+        "/api/projects",
+        headers=auth(tokens["admin"]),
+        json={**body, "groupIds": [admin_group["id"]]},
+    )
+    assert by_admin.status_code == 201, by_admin.text
+
+
+def test_organization_groups_admit_only_members_and_leaving_revokes_them(client):
+    organization, tokens = org_with_roles(client, member="member")
+    outsider = account(client, "outsider")
+    group = create_group(client, tokens["admin"], "Lab team", organization["id"], "open")
+    members = f"/api/groups/{group['id']}/members"
+    assert (
+        client.put(
+            members, headers=auth(tokens["admin"]), json={"username": "outsider", "role": "member"}
+        ).status_code
+        == 403
+    )
+    assert client.post(f"/api/groups/{group['id']}/join", headers=auth(outsider)).status_code == 403
+    invite = client.post(
+        f"/api/groups/{group['id']}/invitations",
+        headers=auth(tokens["admin"]),
+        json={"username": "outsider", "role": "member"},
+    )
+    assert invite.status_code == 403
+    assert (
+        client.put(
+            members, headers=auth(tokens["admin"]), json={"username": "member", "role": "member"}
+        ).status_code
+        == 200
+    )
+    shared = client.post(
+        "/api/projects",
+        headers=auth(tokens["admin"]),
+        json={
+            "filename": "s.json",
+            "content": '{"title":"s"}',
+            "visibility": "private",
+            "organizationId": organization["id"],
+            "groupIds": [group["id"]],
+        },
+    ).json()["project"]
+    project_path = f"/api/projects/{shared['id']}"
+    assert client.get(project_path, headers=auth(tokens["member"])).status_code == 200
+
+    owned = create_group(client, tokens["member"], "Member's team", organization["id"])
+    leave = f"/api/organizations/{organization['id']}/members/me"
+    assert client.delete(leave, headers=auth(tokens["member"])).status_code == 409
+    removed = client.delete(
+        f"/api/organizations/{organization['id']}/members/member", headers=auth(tokens["admin"])
+    )
+    assert removed.status_code == 204
+    assert client.get(project_path, headers=auth(tokens["member"])).status_code == 404
+    listed = client.get(members, headers=auth(tokens["admin"])).json()["members"]
+    assert [item["username"] for item in listed] == ["admin"]
+    transferred = client.get(f"/api/groups/{owned['id']}", headers=auth(tokens["admin"]))
+    assert transferred.json()["group"]["ownerId"] == group["ownerId"]
+    assert transferred.json()["group"]["role"] == "owner"
+
+
+def test_role_downgrade_and_leaving_demote_public_projects_under_policy(client):
+    organization, tokens = org_with_roles(
+        client, "publishers", publisher="publisher", leaver="publisher"
+    )
+    kept = post_org_project(client, tokens["admin"], organization["id"], "admin-map")
+    downgraded = post_org_project(client, tokens["publisher"], organization["id"], "p-map")
+    departed = post_org_project(client, tokens["leaver"], organization["id"], "l-map")
+    members = f"/api/organizations/{organization['id']}/members"
+
+    def visibility(project):
+        return client.get(f"/api/projects/{project['id']}", headers=auth(tokens["admin"])).json()[
+            "project"
+        ]["visibility"]
+
+    assert (
+        client.put(
+            members,
+            headers=auth(tokens["admin"]),
+            json={"username": "publisher", "role": "member"},
+        ).status_code
+        == 200
+    )
+    assert visibility(downgraded) == "organization"
+    assert visibility(departed) == "public"
+    assert client.delete(f"{members}/me", headers=auth(tokens["leaver"])).status_code == 204
+    assert visibility(departed) == "organization"
+    assert visibility(kept) == "public"
+
+
+def test_role_change_under_open_policy_keeps_public_projects(client):
+    organization, tokens = org_with_roles(client, "yes", member="member")
+    project = post_org_project(client, tokens["member"], organization["id"], "m-map")
+    assert (
+        client.put(
+            f"/api/organizations/{organization['id']}/members",
+            headers=auth(tokens["admin"]),
+            json={"username": "member", "role": "viewer"},
+        ).status_code
+        == 200
+    )
+    response = client.get(f"/api/projects/{project['id']}", headers=auth(tokens["admin"]))
+    assert response.json()["project"]["visibility"] == "public"
