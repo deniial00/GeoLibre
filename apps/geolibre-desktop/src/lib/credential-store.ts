@@ -25,6 +25,22 @@ export function readSecureCredentials(
   return invoke<Record<string, string>>("secure_store_get_many", { accounts: [...accounts] });
 }
 
+const MAX_ACCOUNT_BYTES = 512;
+
+/**
+ * Whether the credential store accepts `account` (same rules as
+ * `validate_account` in `secure_store.rs`). Names come from user-typed
+ * variable names and project-file layer IDs, so they are checked before they
+ * reach an account index: one rejected name there would fail every later read.
+ */
+export function isStorableCredentialAccount(account: string): boolean {
+  return (
+    account.length > 0 &&
+    new TextEncoder().encode(account).length <= MAX_ACCOUNT_BYTES &&
+    !/\p{Cc}/u.test(account)
+  );
+}
+
 /** Stores `value` under `account`; an empty value deletes the entry. */
 export async function writeSecureCredential(account: string, value: string): Promise<void> {
   if (value === "") {

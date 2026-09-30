@@ -7,6 +7,7 @@ import type { MapRendererKind, ProjectPluginState } from "@geolibre/core";
 import type { IControl } from "maplibre-gl";
 import type {
   GeoLibreAppAPI,
+  GeoLibreCredentialLocation,
   GeoLibreMapControlPosition,
   GeoLibrePlugin,
   GeoLibreToolbarMenu,
@@ -755,7 +756,8 @@ function scopeAppToPlugin(
     !onControlAdded &&
     !onRightPanelOpened &&
     !activatePlugin &&
-    !deactivatePlugin
+    !deactivatePlugin &&
+    !app.credentials
   )
     return app;
 
@@ -783,6 +785,21 @@ function scopeAppToPlugin(
       scoped.registerAssistantGuidance = (text) =>
         toolScope.active ? registerGuidance(text, pluginId) : () => {};
     }
+  }
+
+  if (app.credentials) {
+    // The host's concrete impl takes the owner id as a trailing argument (see
+    // lib/plugin-credentials.ts); plugins only ever pass `name`.
+    const credentials = app.credentials as unknown as {
+      get(name: string, ownerPluginId: string): string;
+      set(name: string, value: string, ownerPluginId: string): boolean;
+      location(): GeoLibreCredentialLocation;
+    };
+    scoped.credentials = {
+      get: (name) => credentials.get(name, pluginId),
+      set: (name, value) => credentials.set(name, value, pluginId),
+      location: () => credentials.location(),
+    };
   }
 
   if (register) {

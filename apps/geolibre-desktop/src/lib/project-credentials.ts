@@ -15,6 +15,7 @@ import { setProjectCredentialLookup } from "@geolibre/core";
 import { create } from "zustand";
 import {
   credentialStorageLocation,
+  isStorableCredentialAccount,
   hasPendingCredential,
   queueCredentialChanges,
   reportCredentialStorageError,
@@ -22,8 +23,6 @@ import {
 
 /** Desktop: non-secret JSON array of accounts that have a stored value. */
 export const PROJECT_CREDENTIAL_ACCOUNTS_STORAGE_KEY = "geolibre.projectCredentials.accounts";
-
-const MAX_ACCOUNT_BYTES = 512;
 
 /** Account → stored value, for this session. */
 export const useProjectCredentialStore = create<{ values: Readonly<Record<string, string>> }>(
@@ -55,26 +54,14 @@ export function readProjectCredentialIndex(): string[] {
     new Set(parsed).size !== parsed.length ||
     !parsed.every(
       (account) =>
-        typeof account === "string" && account.startsWith("project.") && isStorableAccount(account),
+        typeof account === "string" &&
+        account.startsWith("project.") &&
+        isStorableCredentialAccount(account),
     )
   ) {
     throw new Error("The saved project credential index is malformed.");
   }
   return parsed as string[];
-}
-
-/**
- * Whether the credential store accepts `account` (same rules as
- * `validate_account` in `secure_store.rs`). Names come from user-typed
- * variable names and project-file layer IDs, so they are checked before they
- * reach the index: one rejected name there would fail every later read.
- */
-function isStorableAccount(account: string): boolean {
-  return (
-    account.length > 0 &&
-    new TextEncoder().encode(account).length <= MAX_ACCOUNT_BYTES &&
-    !/\p{Cc}/u.test(account)
-  );
 }
 
 /**
@@ -139,7 +126,7 @@ export async function rememberProjectCredentials(
 
   if (!projectCredentialsInKeychain()) return false;
 
-  const storable = accounts.filter(isStorableAccount);
+  const storable = accounts.filter(isStorableCredentialAccount);
   const previous: Record<string, string> = {};
   const storableChanges: Record<string, string> = {};
   for (const account of storable) {

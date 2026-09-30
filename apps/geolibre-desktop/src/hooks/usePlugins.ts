@@ -169,6 +169,7 @@ import {
 import { partitionProjectPluginManifestUrls } from "../lib/plugin-trust";
 import i18n from "../i18n";
 import { createPluginLocaleApi } from "../lib/plugin-locale";
+import { pluginCredentialHost } from "../lib/plugin-credentials";
 import { setTimeSliderOpenedByBinding, shouldCloseTimeSliderDock } from "../lib/time-slider-dock";
 import {
   createWmsTileUrl,
@@ -1567,6 +1568,7 @@ export function createAppAPI(mapControllerRef?: RefObject<MapEngine | null>) {
     setActiveRightPanelDock,
     getActiveRightPanelDock,
     ...createPluginLocaleApi(i18n),
+    credentials: pluginCredentialHost,
     registerAssistantTool,
     registerAssistantToolSpec,
     registerAssistantGuidance,

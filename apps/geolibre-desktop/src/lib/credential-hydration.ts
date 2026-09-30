@@ -1,7 +1,8 @@
 /**
  * Desktop startup: loads credentials from the OS credential store into memory
  * and migrates legacy plaintext localStorage values into it (issue #1667).
- * `main.tsx` awaits this before rendering, so every consumer can keep reading
+ * `main.tsx` awaits this before rendering, so every consumer, including the
+ * plugin `app.credentials` API (plugin-owned tokens), can keep reading
  * the settings store, the PostGIS list and the share sign-in synchronously.
  * Every account is read in one call: with a locked keyring each separate read
  * shows its own unlock prompt, so a cancelled prompt would reappear.
@@ -44,6 +45,10 @@ import {
   readProjectCredentialIndex,
   setProjectCredentialsWritable,
 } from "./project-credentials";
+import {
+  hydratePluginCredentials,
+  readPluginCredentialIndex,
+} from "./plugin-credentials";
 
 export async function hydrateDesktopCredentials(): Promise<void> {
   if (credentialStorageLocation() !== "keychain") return;
@@ -63,6 +68,13 @@ export async function hydrateDesktopCredentials(): Promise<void> {
     reportCredentialStorageError(error);
     projectAccounts = null;
   }
+  let pluginAccounts: string[] | null;
+  try {
+    pluginAccounts = readPluginCredentialIndex();
+  } catch (error) {
+    reportCredentialStorageError(error);
+    pluginAccounts = null;
+  }
   const settingsAccounts = shouldPersistDesktopSettings()
     ? desktopSettingsSecretAccounts(
         splitDesktopSettingsSecrets(useDesktopSettingsStore.getState().desktopSettings)
@@ -74,6 +86,7 @@ export async function hydrateDesktopCredentials(): Promise<void> {
     ...settingsAccounts,
     ...desktopShareSessionAccounts(),
     ...(projectAccounts ?? []),
+    ...(pluginAccounts ?? []),
   ];
   // `null` means the read failed and was reported; nothing else touches the
   // keychain during hydration, so a dismissed unlock prompt stays dismissed.
@@ -90,6 +103,7 @@ export async function hydrateDesktopCredentials(): Promise<void> {
     await hydratePostgresConnections(postgresIds, stored);
     await hydrateSettingsSecrets(stored);
     hydrateProjectCredentials(projectAccounts, stored);
+    hydratePluginCredentials(pluginAccounts, stored);
   } catch (error) {
     // Unforeseen failure: fall back to a session-only state that never writes
     // plaintext and never drops the legacy values.
@@ -97,6 +111,7 @@ export async function hydrateDesktopCredentials(): Promise<void> {
     setPostgresKeychainWritable(false);
     setSettingsKeychainWritable(false);
     setProjectCredentialsWritable(false);
+    hydratePluginCredentials(null, null);
     setKeychainPostgresConnections(withNewIds(readBrowserPostgresConnections()));
     const { secrets } = splitDesktopSettingsSecrets(
       useDesktopSettingsStore.getState().desktopSettings,

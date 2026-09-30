@@ -247,6 +247,8 @@ export interface GeoLibreAppAPI {
     defaultValue: string,
     params?: Record<string, string | number>,
   ) => string;
+  // Credential storage (see "Saving credentials" below).
+  credentials?: GeoLibrePluginCredentials;
   // Top toolbar menus (see "Toolbar menus" below).
   registerToolbarMenu?: (menu: GeoLibreToolbarMenu) => () => void;
   unregisterToolbarMenu?: (id: string) => void;
@@ -1025,6 +1027,23 @@ Conventions:
 - **Namespace your keys by plugin id** (`plugin.<your-id>.<something>`) so they cannot collide with the host's own keys.
 - These methods are typed optional like the rest of the API, so call them with optional chaining and keep a literal fallback.
 - Panel titles and toolbar labels take getters precisely so they can call `app.translate?.()` and stay current; use those rather than re-registering on every language change.
+
+## Saving credentials
+
+A plugin that needs to remember a token or API key should use `app.credentials` instead of writing its own `localStorage` key. On the desktop app the values live in the OS credential store (macOS Keychain, Windows Credential Manager, Linux Secret Service); on the web build, the Jupyter embed and mobile they live in `localStorage`.
+
+```typescript
+const apiKey = app.credentials?.get("api-key") ?? ""; // "" when nothing is saved
+const persisted = app.credentials?.set("api-key", value); // "" deletes
+const where = app.credentials?.location(); // "keychain" | "browser", for UI copy
+```
+
+- **Names** are 1-64 characters of letters, digits, `_` and `-`; anything else throws a `TypeError`.
+- **Scoping:** the host adds your plugin id, so the value is stored as `plugin.<your-id>.<name>`. You never pass the id.
+- **Reads are synchronous.** The desktop app loads every saved value at startup, before any plugin runs.
+- **`set` returns `true`** when the value is persisted and `false` when it lasts only for this session (a failed `localStorage` write, or an unavailable keychain on desktop). Desktop keychain write failures also raise the app's credential-storage warning, so you do not need your own.
+- **This is storage, not isolation.** Plugins run as trusted code in the app window, so a plugin can still read another plugin's values from memory or by wrapping `fetch`. The id prefix keeps well-behaved plugins apart; it is not a security boundary.
+- **Never put secrets in `getProjectState`.** Plugin settings are saved in project files and shared or exported with them.
 
 ## Floating panels
 

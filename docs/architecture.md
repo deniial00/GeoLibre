@@ -222,7 +222,14 @@ different places per build:
   header whose variable is unset is not sent. Redaction keeps a header value
   that is only an optional scheme word plus one reference, and removes any
   other header value as before.
-- **Web, Jupyter embed, mobile:** localStorage, as before. The web OAuth
+  Tokens that plugins save for themselves through `app.credentials` are
+  stored as `plugin.<pluginId>.<name>` (the host adds the plugin id); the
+  non-secret `geolibre.pluginCredentials.accounts` list indexes them with the
+  same index-first write order, and `lib/plugin-credentials.ts` holds them in
+  memory so plugins read synchronously. Built-in plugins still use their own
+  localStorage keys until they move to the API.
+- **Web, Jupyter embed, mobile:** localStorage, as before. Plugin credentials
+  are `geolibre.pluginCredential.<pluginId>.<name>`. The web OAuth
   refresh token stays in tab-scoped sessionStorage. Project-file credentials
   stay in the project file, behind the keep/strip save prompt.
 

@@ -428,6 +428,22 @@ export interface AssistantToolSpec {
   callback: (input: unknown) => unknown | Promise<unknown>;
 }
 
+/** Where `app.credentials` keeps values: the OS credential store on desktop, localStorage elsewhere. */
+export type GeoLibreCredentialLocation = "keychain" | "browser";
+
+export interface GeoLibrePluginCredentials {
+  /** The saved value for `name`, or "" when none. Synchronous. */
+  get(name: string): string;
+  /**
+   * Saves `value` under `name`; "" deletes. Returns true when the value is
+   * persisted (desktop: queued for the keychain; web: written to localStorage),
+   * false when it lasts only for this session. Throws TypeError for an invalid name.
+   */
+  set(name: string, value: string): boolean;
+  /** Where values are kept, for storage-accurate UI copy. */
+  location(): GeoLibreCredentialLocation;
+}
+
 export interface GeoLibreAppAPI {
   /** Register an SDK Tool. The host scopes ownership to the calling plugin.
    * Returns a disposer; the host also removes tools on plugin deactivation.
@@ -953,6 +969,18 @@ export interface GeoLibreAppAPI {
     defaultValue: string,
     params?: Record<string, string | number>,
   ) => string;
+  /**
+   * Save small secrets (access tokens, API keys) for this plugin. On the
+   * desktop app they live in the OS credential store; on the web build, the
+   * Jupyter embed and mobile they live in localStorage. Reads are synchronous
+   * because the host loads every value at startup.
+   *
+   * Names are 1-64 characters of `[A-Za-z0-9_-]`. The host scopes each name to
+   * the calling plugin (`plugin.<pluginId>.<name>`), so plugins never pass
+   * their own id. This is storage, not isolation: plugins are trusted code and
+   * can still read each other's values. Never put secrets in `getProjectState`.
+   */
+  credentials?: GeoLibrePluginCredentials;
   /**
    * Register a plugin-owned top-level toolbar menu shown in the GeoLibre banner
    * beside the built-in menus, with nested submenus and action items. Returns

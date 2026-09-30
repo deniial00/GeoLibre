@@ -747,6 +747,41 @@ describe("PluginManager toolbar menu scoping", () => {
     assert.deepEqual(seen, ["menu-plugin"]);
   });
 
+  it("tags app.credentials calls with the calling plugin's id", () => {
+    const manager = new PluginManager();
+    const seen: Array<[string, string | undefined]> = [];
+    // Only `credentials`: a scope must still be built when nothing else needs one.
+    const mockApp = {
+      credentials: {
+        get: (name: string, ownerPluginId?: string) => {
+          seen.push([`get:${name}`, ownerPluginId]);
+          return "";
+        },
+        set: (name: string, _value: string, ownerPluginId?: string) => {
+          seen.push([`set:${name}`, ownerPluginId]);
+          return true;
+        },
+        location: () => "browser",
+      },
+    } as unknown as GeoLibreAppAPI;
+
+    manager.register(
+      testPlugin({
+        id: "cred-plugin",
+        activate: (api) => {
+          api.credentials?.set("token", "x");
+          api.credentials?.get("token");
+        },
+      }),
+    );
+    manager.activate("cred-plugin", mockApp);
+
+    assert.deepEqual(seen, [
+      ["set:token", "cred-plugin"],
+      ["get:token", "cred-plugin"],
+    ]);
+  });
+
   it("records the owner on the real registry when wired through activate", () => {
     // Guards the TypeScript-invisible contract between scopeAppToPlugin's cast
     // and the real registry's optional second parameter: drive the genuine
