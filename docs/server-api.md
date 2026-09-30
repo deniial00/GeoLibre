@@ -332,8 +332,11 @@ administrator can manage it, and raw routes use
 `/org/{organizationSlug}/{projectSlug}[.geolibre.json]`. Only an administrator
 of the owning organization may change or clear `organizationId` on an
 organization-owned project (`403` otherwise); clearing it returns the project to
-its creator's individual account. The public sharing policy is enforced on
-create and patch, including direct API requests.
+its creator's individual account. A patch that changes `organizationId`
+re-checks the project's group targets as a create in the new organization
+would, whether they are sent in `groupIds` or kept from before; send `groupIds`
+to replace targets that no longer qualify. The public sharing policy is enforced
+on create and patch, including direct API requests.
 Servers retain a nullable creator identity separately from ownership. New
 projects record their creating account whether ownership is individual or
 organizational; organization ownership remains authoritative, and the creator

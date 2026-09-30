@@ -2736,8 +2736,13 @@ def create_app(
             raise HTTPException(422, "visibility must not be null")
         # Existing targets may outlive the creator's membership. They must still
         # be able to remove a stale target or edit unrelated metadata; only a
-        # submitted replacement target list requires current membership.
-        group_ids_to_validate = final_group_ids if "group_ids" in updates else []
+        # submitted replacement target list requires current membership. Moving
+        # the project to another organization re-checks every target, as creating
+        # it there would, so groups outside the organization cannot come along.
+        organization_changes = final_organization_id != project.organization_id
+        group_ids_to_validate = (
+            final_group_ids if "group_ids" in updates or organization_changes else []
+        )
         validate_access_targets(
             session,
             account,

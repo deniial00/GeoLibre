@@ -1321,6 +1321,7 @@ export function useProjectFileActions(mapControllerRef: MapControllerRef) {
     const startContent = serializeForSave(
       excludeHiddenFieldsFromProject(buildCurrentProject().project),
     );
+    if (startContent === null) return false;
     try {
       const { project } = await buildEmbeddedProject();
       if (useAppStore.getState().projectGeneration !== saveProjectGeneration) return false;
@@ -1357,10 +1358,17 @@ export function useProjectFileActions(mapControllerRef: MapControllerRef) {
       };
       remoteProjectRef.current = updatedRemoteProject;
 
-      const liveContent = serializeForSave(
-        excludeHiddenFieldsFromProject(buildCurrentProject().project),
-      );
-      if (startContent && liveContent && sharedProjectContentMatches(startContent, liveContent)) {
+      // The upload already succeeded, so a failure here must not report an
+      // error; it only leaves the project marked unsaved.
+      let liveContent: string | null = null;
+      try {
+        liveContent = serializeProject(
+          excludeHiddenFieldsFromProject(buildCurrentProject().project),
+        );
+      } catch (error) {
+        console.error("Failed to compare the saved shared project", error);
+      }
+      if (liveContent && sharedProjectContentMatches(startContent, liveContent)) {
         markSaved();
         recordExplicitProjectSave();
       }

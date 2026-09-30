@@ -2168,6 +2168,37 @@ def test_non_admin_shares_organization_projects_only_with_its_groups(client):
     assert by_admin.status_code == 201, by_admin.text
 
 
+def test_moving_into_organization_rechecks_existing_group_targets(client):
+    organization, tokens = org_with_roles(client, member="member")
+    personal_group = create_group(client, tokens["member"], "Friends")
+    project = client.post(
+        "/api/projects",
+        headers=auth(tokens["member"]),
+        json={
+            "filename": "p.json",
+            "content": '{"title":"p"}',
+            "visibility": "private",
+            "groupIds": [personal_group["id"]],
+        },
+    ).json()["project"]
+    path = f"/api/projects/{project['id']}"
+
+    moved_with_outsiders = client.patch(
+        path, headers=auth(tokens["member"]), json={"organizationId": organization["id"]}
+    )
+    assert moved_with_outsiders.status_code == 403
+    assert (
+        client.get(path, headers=auth(tokens["member"])).json()["project"]["organization"] is None
+    )
+    moved = client.patch(
+        path,
+        headers=auth(tokens["member"]),
+        json={"organizationId": organization["id"], "groupIds": []},
+    )
+    assert moved.status_code == 200, moved.text
+    assert moved.json()["project"]["groupIds"] == []
+
+
 def test_organization_groups_admit_only_members_and_leaving_revokes_them(client):
     organization, tokens = org_with_roles(client, member="member")
     outsider = account(client, "outsider")
