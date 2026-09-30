@@ -64,6 +64,9 @@ GroupRole = Literal["owner", "manager", "member"]
 PublicSharingPolicy = Literal["yes", "publishers", "no"]
 JoinPolicy = Literal["invite", "request", "open"]
 SLUG_RE = re.compile(r"[^a-z0-9]+")
+# One entity-tag (RFC 9110 §8.8.3): optional weak prefix, then a quoted opaque
+# value. Matching whole tags keeps a comma inside the quotes part of the tag.
+ENTITY_TAG_RE = re.compile(r'(?:W/)?"[^"]*"')
 IMAGE_TYPES = {"image/png", "image/jpeg", "image/webp"}
 
 OAUTH_CLEANUP_INTERVAL_SECONDS = 300
@@ -2950,11 +2953,11 @@ def create_app(
         if not protected(project):
             etag = f'"{project.id}-v{version.number}"'
             headers = {"Cache-Control": "public, no-cache", "ETag": etag}
-            candidates = {
-                candidate.strip().removeprefix("W/")
-                for candidate in request.headers.get("if-none-match", "").split(",")
-            }
-            if etag in candidates or "*" in candidates:
+            if_none_match = request.headers.get("if-none-match", "").strip()
+            # Either the bare wildcard or a list of entity-tags; a "*" inside a
+            # quoted tag is part of that tag, not a wildcard.
+            candidates = {tag.removeprefix("W/") for tag in ENTITY_TAG_RE.findall(if_none_match)}
+            if if_none_match == "*" or etag in candidates:
                 return Response(status_code=304, headers=headers)
         try:
             content = object_storage.get(version.object_key)

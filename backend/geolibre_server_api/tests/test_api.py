@@ -1978,6 +1978,9 @@ def test_public_raw_revalidates_and_demotion_blocks_cached_etag(client):
     assert client.get(version, headers={"If-None-Match": etag}).status_code == 304
     for header in (f"W/{etag}", f'"other", {etag}', "*"):
         assert client.get(raw, headers={"If-None-Match": header}).status_code == 304
+    # A comma or "*" inside one quoted tag belongs to that tag.
+    for header in ('"a,*,b"', '"*"', f'"x,{etag[1:-1]},y"'):
+        assert client.get(raw, headers={"If-None-Match": header}).status_code == 200
 
     saved = client.put(
         f"/api/projects/{project['id']}/content",
