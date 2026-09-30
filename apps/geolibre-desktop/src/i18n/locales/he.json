@@ -285,7 +285,7 @@
       },
       "wfs": {
         "label": "הוסף שכבת WFS",
-        "description": "הוסף ישויות WFS על ידי בקשת GeoJSON משירות GetFeature."
+        "description": "הוסף ישויות WFS על ידי בקשת GeoJSON או GML משירות GetFeature."
       },
       "wmts": {
         "label": "הוסף שכבת WMTS",
@@ -2478,7 +2478,6 @@
       "variablesTitle": "משתני סביבה",
       "variablesCount_one": "{{count}} משתנה זמן ריצה מופעל.",
       "variablesCount_other": "{{count}} משתני זמן ריצה מופעלים.",
-      "secretsWarning": "הערכים נשמרים כטקסט גלוי בקובץ הפרויקט ועלולים להיחשף כשהפרויקט משותף. מומלץ להימנע מהזנת סודות כאן אלא אם קובץ הפרויקט נשאר פרטי.",
       "empty": "לא הוגדרו משתני סביבה.",
       "variableFallback": "משתנה",
       "enableAria": "הפעל את {{name}}",
@@ -8619,7 +8618,14 @@
       "valuesInt8": "גולמי (int8)",
       "stretch": "מתיחה (±)",
       "downloadValues": "ערכי GeoTIFF",
-      "title": "הטמעות לוויין"
+      "title": "הטמעות לוויין",
+      "visualizeTesseraTitle": "הוסף את הערוצים שנבחרו באזור החיפוש למפה כשכבת RGB",
+      "readingChunks": "קורא מקטע {{done}} מתוך {{total}} (עד {{size}})…",
+      "tesseraTooLarge": "האזור דורש {{count}} מקטעים (כ-{{size}}); המגבלה היא {{limit}}. התקרב או שרטט תיבה קטנה יותר.",
+      "tesseraYearMissing": "Tessera {{year}} עדיין אינו שלם עבור אזור זה.",
+      "tesseraEmpty": "אין הטמעות באזור זה עבור {{year}}.",
+      "tesseraLayerName": "Tessera {{year}} ({{bands}})",
+      "tesseraRenderHint": "ההדמיה קוראת את ההטמעות של v1.1 (AWS Open Data) ברזולוציה מלאה של 10 מ' באזור החיפוש, כ-1 MB לקמ\"ר, ומותחת כל ערוץ לטווח 2–98% שלו."
     },
     "geolibre-fields-of-the-world": {
       "boundariesExists": "{{name}} כבר נמצא במפה.",

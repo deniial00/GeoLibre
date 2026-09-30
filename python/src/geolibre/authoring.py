@@ -1008,6 +1008,125 @@ def color_ramp_names() -> list[str]:
 # -- map controls -------------------------------------------------------------
 
 
+def set_point_cloud_classes(
+    project: dict[str, Any], classes: list[dict[str, Any]]
+) -> list[dict[str, Any]]:
+    """Set the point cloud annotator's custom classes (its label schema).
+
+    Replaces the custom classes and keeps the saved point labels, instance ids
+    and 3D boxes. The annotator applies them when the project opens, so the
+    LiDAR layer draws those codes in their colour and names them in its
+    legend, and the classes can be assigned from the annotator's panel.
+
+    Args:
+        project: The project dict (mutated in place).
+        classes: ``{"code", "name", "color"}`` dicts; see
+            :func:`geolibre.project.point_cloud_class_schema`. An empty list
+            clears them.
+
+    Returns:
+        The validated classes as saved.
+
+    Raises:
+        ValueError: For an invalid class.
+    """
+    schema = _project.point_cloud_class_schema(classes)
+    plugins = _project.ensure_plugins_block(project)
+    current = plugins["settings"].get(_project.POINT_CLOUD_ANNOTATION_PLUGIN_ID)
+    state = dict(current) if isinstance(current, dict) else {}
+    state.setdefault("version", 1)
+    state.setdefault("sources", [])
+    state.setdefault("cuboids", [])
+    state["customClasses"] = schema
+    # The annotator restores its state whether or not its panel is open, so
+    # the classes apply without opening the panel.
+    _project.set_plugin_state(
+        project, _project.POINT_CLOUD_ANNOTATION_PLUGIN_ID, state, activate=False
+    )
+    return schema
+
+
+def lidar_source_urls(project: dict[str, Any]) -> list[str]:
+    """The URLs of the project's LiDAR point cloud layers.
+
+    Args:
+        project: The project dict.
+
+    Returns:
+        Each LiDAR layer's source URL, in layer order.
+    """
+    urls: list[str] = []
+    for layer in layers_of(project):
+        source = layer.get("source")
+        if (
+            isinstance(source, dict)
+            and source.get("type") == "lidar"
+            and isinstance(source.get("url"), str)
+        ):
+            urls.append(source["url"])
+    return urls
+
+
+def merge_point_labels(
+    project: dict[str, Any],
+    url: str,
+    labels: dict[str, dict[int, int]],
+    instances: dict[str, dict[int, int]] | None = None,
+) -> int:
+    """Merge point labels into the annotator's saved state for one source.
+
+    New edits override any saved edit for the same point; other saved labels,
+    boxes, vectors and custom classes are kept.
+
+    Args:
+        project: The project dict (mutated in place).
+        url: The point cloud's source URL (its LiDAR layer's URL).
+        labels: Node key -> {index within node: class}.
+        instances: Node key -> {index within node: instance id}, optional.
+
+    Returns:
+        How many point edits were merged.
+    """
+    from . import pointcloud as _pointcloud
+
+    plugins = _project.ensure_plugins_block(project)
+    current = plugins["settings"].get(_project.POINT_CLOUD_ANNOTATION_PLUGIN_ID)
+    state = dict(current) if isinstance(current, dict) else {}
+    state.setdefault("version", 1)
+    state.setdefault("cuboids", [])
+
+    def merge(key: str, edits_by_node: dict[str, dict[int, int]], wide: bool) -> None:
+        entries = [entry for entry in state.get(key) or [] if isinstance(entry, dict)]
+        entry = next((item for item in entries if item.get("url") == url), None)
+        if entry is None:
+            entry = {"url": url, "nodes": {}}
+            entries.append(entry)
+        nodes = dict(entry.get("nodes") or {})
+        for node_key, edits in edits_by_node.items():
+            existing: dict[int, int] = {}
+            if isinstance(nodes.get(node_key), str):
+                try:
+                    existing = _project._decode_point_label_node_sized(
+                        nodes[node_key], _project.MAX_POINT_LABEL_NODE_BYTES, wide
+                    )[0]
+                except ValueError:
+                    existing = {}
+            existing.update(edits)
+            nodes[node_key] = _pointcloud.encode_point_label_node(existing, wide=wide)
+        entry["nodes"] = nodes
+        state[key] = entries
+
+    merge("sources", labels, wide=False)
+    if instances:
+        merge("instances", instances, wide=True)
+    _project.set_plugin_state(
+        project, _project.POINT_CLOUD_ANNOTATION_PLUGIN_ID, state, activate=False
+    )
+    return sum(len(edits) for edits in labels.values()) + sum(
+        len(edits) for edits in (instances or {}).values()
+    )
+
+
 def merge_components_state(
     project: dict[str, Any],
     key: str,

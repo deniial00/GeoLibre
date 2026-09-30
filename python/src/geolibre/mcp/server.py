@@ -60,6 +60,7 @@ Pick the layer tool by what the data *is*, not by file extension alone:
 - `add_tile_layer`     - a raster XYZ tile template with {z}/{x}/{y}.
 - `add_tiles_layer`    - PMTiles or a vector tile service.
 - `add_ogc_layer`      - a WMS or WMTS endpoint.
+- `add_lidar_layer`    - a LAS/LAZ/COPC/EPT point cloud by URL.
 - `add_3d_tiles_layer` - an OGC 3D Tiles tileset (URL or Cesium Ion asset id).
 - `add_cesium_ion_layer` - a Cesium Ion asset (tileset or imagery) by id, 3D globe only.
 - `add_czml_layer`     - a CZML dynamic 3D scene (orbits, vehicle tracks) by URL or
@@ -673,6 +674,207 @@ def build_server(workspace: Workspace) -> MCPServer:
         else:
             raise ValueError(f"kind must be 'pmtiles' or 'vector-tiles', got {kind!r}")
         return add(path, layer, index)
+
+    @tool()
+    def add_lidar_layer(
+        path: str,
+        name: str,
+        url: str,
+        index: int | None = None,
+    ) -> dict[str, Any]:
+        """Add a LiDAR point cloud from a LAS, LAZ, COPC or EPT URL.
+
+        COPC and EPT stream by level of detail; LAS/LAZ download whole. The app
+        re-streams it when the project opens, and its Point Cloud Annotation
+        plugin can label its points.
+
+        Args:
+            path: Path to the `.geolibre.json` file.
+            name: Layer display name.
+            url: HTTP(S) URL of a `.las`, `.laz`, `.copc.laz` file or an EPT
+                `ept.json`.
+            index: Draw-order position; omit to add on top.
+
+        Returns:
+            A summary of the added layer.
+        """
+        return add(path, _project.lidar_layer(name, url), index)
+
+    @tool()
+    def get_point_cloud_annotations(path: str) -> dict[str, Any]:
+        """Read the point labels and 3D boxes saved by the point cloud annotator.
+
+        Args:
+            path: Path to the `.geolibre.json` file.
+
+        Returns:
+            Per source URL, how many points were relabelled per class and how
+            many points each instance (object) id holds; the project's custom
+            classes; the 3D vectors (`kind` polyline/polygon/keypoint with
+            `points` [lng, lat, elevation m]); and every saved 3D box
+            (`class_code`, `center` [lng, lat, elevation m], `size` [length,
+            width, height] m, `yaw` radians from east, `status`
+            new/reviewed/flagged, and free-form `attributes`).
+        """
+        file = workspace.resolve(path, must_exist=True)
+        project = authoring.load_project(file)
+        annotations = _project.point_cloud_annotations(project)
+        # Source URLs can be signed (e.g. a presigned S3 link); report them the
+        # way the rest of the project is shared, with credentials stripped.
+        labels: dict[str, dict[str, int]] = {}
+        for url, nodes in annotations["labels"].items():
+            url = _project.redact_url(url)
+            # Two signed links to one cloud redact to the same URL: merge them.
+            counts = labels.setdefault(url, {})
+            for edits in nodes.values():
+                for code in edits.values():
+                    counts[str(code)] = counts.get(str(code), 0) + 1
+        boxes = [{**box, "url": _project.redact_url(box["url"])} for box in annotations["boxes"]]
+        # Instances as point counts per id, like the labels, not every point.
+        instances: dict[str, dict[str, int]] = {}
+        for url, nodes in annotations["instances"].items():
+            counts = instances.setdefault(_project.redact_url(url), {})
+            for edits in nodes.values():
+                for instance in edits.values():
+                    counts[str(instance)] = counts.get(str(instance), 0) + 1
+        return {
+            "labels": labels,
+            "instances": instances,
+            "boxes": boxes,
+            "vectors": [
+                {**vector, "url": _project.redact_url(vector["url"])}
+                for vector in annotations["vectors"]
+            ],
+            "classes": annotations["classes"],
+        }
+
+    @tool()
+    def set_point_cloud_classes(path: str, classes: list[dict[str, Any]]) -> dict[str, Any]:
+        """Define the point cloud annotator's custom classes (its label schema).
+
+        Custom classes extend the ASPRS standard classes (0-18) with codes the
+        annotator can assign; the LiDAR layer draws them in their colour and
+        names them in its legend. Existing labels, instances and boxes are kept.
+
+        Args:
+            path: Path to the `.geolibre.json` file.
+            classes: `{"code", "name", "color"}` objects: `code` an integer
+                19-255 (64-255 are the ASPRS user range), `name` text, `color`
+                `"#rrggbb"`. An empty list clears them.
+
+        Returns:
+            The project summary with the classes as saved.
+        """
+        with edit(path) as (file, project):
+            saved = authoring.set_point_cloud_classes(project, classes)
+        return _summarize(file, project, classes=saved)
+
+    def lidar_source(project: dict[str, Any], url: str) -> str:
+        """Check `url` is one of the project's LiDAR layers and return it."""
+        urls = authoring.lidar_source_urls(project)
+        if url not in urls:
+            listed = ", ".join(_project.redact_url(item) for item in urls) or "none"
+            raise ValueError(
+                f"No LiDAR layer in the project uses that URL (LiDAR layers: {listed})."
+            )
+        return url
+
+    def point_cloud_file(path: str) -> Path:
+        """Resolve an existing LAS/LAZ/COPC file inside the workspace."""
+        file = workspace.resolve(path, must_exist=True)
+        if file.suffix.lower() not in (".las", ".laz"):
+            raise ValueError("The point cloud file must be a .las or .laz (COPC) file.")
+        return file
+
+    @tool()
+    def prelabel_point_cloud(
+        path: str,
+        url: str,
+        input_file: str,
+        tool: str = "ground",
+        only_unclassified: bool = True,
+    ) -> dict[str, Any]:
+        """Pre-label a LiDAR layer's points with a Whitebox classifier, headlessly.
+
+        Runs the same classifiers as the app's Pre-label on a local copy of the
+        layer's LAS/LAZ/COPC file and saves the changed classes as annotator
+        labels for that layer (keyed by COPC node and index, so they apply when
+        the app streams the layer). Needs `geolibre[pointcloud]`.
+
+        Args:
+            path: Path to the `.geolibre.json` file.
+            url: The LiDAR layer's source URL the labels belong to.
+            input_file: A local copy of that point cloud (same file as `url`).
+            tool: `ground` (ground vs. other) or `ground-vegetation` (also marks
+                vegetation).
+            only_unclassified: Only relabel points still 0 or 1, keeping every
+                class the survey or a user already set.
+
+        Returns:
+            How many points were relabelled into each class.
+        """
+        from geolibre import pointcloud as _pointcloud
+
+        file = point_cloud_file(input_file)
+        with edit(path) as (project_file, project):
+            source = lidar_source(project, url)
+            current, _ = _pointcloud.labels_for_source(project, source)
+            labels = _pointcloud.prelabel_point_cloud(
+                file, tool, current=current, only_unclassified=only_unclassified
+            )
+            authoring.merge_point_labels(project, source, labels)
+        counts: dict[str, int] = {}
+        for edits in labels.values():
+            for code in edits.values():
+                counts[str(code)] = counts.get(str(code), 0) + 1
+        return _summarize(
+            project_file,
+            project,
+            url=_project.redact_url(source),
+            tool=tool,
+            relabelled=sum(counts.values()),
+            classes=counts,
+        )
+
+    @tool()
+    def write_labeled_point_cloud(
+        path: str,
+        url: str,
+        input_file: str,
+        output_file: str,
+        overwrite: bool = False,
+    ) -> dict[str, Any]:
+        """Write a LiDAR layer's file with the project's point labels applied.
+
+        Streams a local copy of the layer's LAS/LAZ/COPC file chunk by chunk and
+        writes every point with the annotator's saved classes (and instance ids,
+        as a uint32 `instance` dimension) applied, so labels made on the
+        streamed view cover the full-resolution file. COPC input is written as
+        plain LAS/LAZ. Needs `geolibre[pointcloud]`.
+
+        Args:
+            path: Path to the `.geolibre.json` file.
+            url: The LiDAR layer's source URL whose labels to apply.
+            input_file: A local copy of that point cloud.
+            output_file: The `.las` or `.laz` file to write.
+            overwrite: Replace an existing output file.
+
+        Returns:
+            How many points were written, relabelled and given an instance.
+        """
+        from geolibre import pointcloud as _pointcloud
+
+        file = point_cloud_file(input_file)
+        output = workspace.resolve_output(
+            output_file, suffixes=(".las", ".laz"), overwrite=overwrite
+        )
+        if output == file:
+            raise ValueError("The output must be a different file from the input.")
+        project = authoring.load_project(workspace.resolve(path, must_exist=True))
+        source = lidar_source(project, url)
+        labels, instances = _pointcloud.labels_for_source(project, source)
+        result = _pointcloud.write_labeled_point_cloud(file, output, labels, instances)
+        return {"output": str(output), "url": _project.redact_url(source), **result}
 
     @tool()
     def add_3d_tiles_layer(

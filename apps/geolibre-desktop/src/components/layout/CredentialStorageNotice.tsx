@@ -1,5 +1,6 @@
 import { useTranslation } from "react-i18next";
 import { credentialStorageLocation, useCredentialStorageStatus } from "../../lib/credential-store";
+import { projectCredentialsInKeychain } from "../../lib/project-credentials";
 
 /** Says where saved tokens and API keys live, and whether that store failed this session. */
 export function CredentialStorageNotice() {
@@ -9,9 +10,11 @@ export function CredentialStorageNotice() {
     <div className="space-y-1">
       <p className="text-xs text-muted-foreground">
         {t(
-          credentialStorageLocation() === "keychain"
-            ? "settings.credentials.keychain"
-            : "settings.credentials.browser",
+          credentialStorageLocation() !== "keychain"
+            ? "settings.credentials.browser"
+            : projectCredentialsInKeychain()
+              ? "settings.credentials.keychain"
+              : "settings.credentials.projectKeychainUnavailable",
         )}
       </p>
       {error ? (

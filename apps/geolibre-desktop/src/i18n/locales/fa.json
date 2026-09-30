@@ -283,7 +283,7 @@
       },
       "wfs": {
         "label": "افزودن لایهٔ WFS",
-        "description": "عوارض WFS را با درخواست GeoJSON از یک سرویس GetFeature بیفزایید."
+        "description": "عوارض WFS را با درخواست GeoJSON یا GML از یک سرویس GetFeature بیفزایید."
       },
       "wmts": {
         "label": "افزودن لایهٔ WMTS",
@@ -2432,7 +2432,6 @@
       "variablesTitle": "متغیرهای محیطی",
       "variablesCount_one": "{{count}} متغیر زمان اجرای فعال.",
       "variablesCount_other": "{{count}} متغیر زمان اجرای فعال.",
-      "secretsWarning": "مقادیر به‌صورت متن ساده در فایل پروژه نگهداری می‌شوند و هنگام هم‌رسانی پروژه ممکن است فاش شوند. جز در حالتی که فایل پروژه خصوصی می‌ماند، از گذاشتن رازها اینجا بپرهیزید.",
       "empty": "هیچ متغیر محیطی‌ای پیکربندی نشده است.",
       "variableFallback": "متغیر",
       "enableAria": "فعال کردن {{name}}",
@@ -8532,7 +8531,14 @@
       "valuesInt8": "خام (int8)",
       "stretch": "کشش (±)",
       "downloadValues": "مقادیر GeoTIFF",
-      "title": "جاسازی‌های ماهواره‌ای"
+      "title": "جاسازی‌های ماهواره‌ای",
+      "visualizeTesseraTitle": "باندهای انتخاب‌شده در محدودهٔ جستجو را به‌صورت لایهٔ RGB به نقشه بیفزایید",
+      "readingChunks": "در حال خواندن قطعهٔ {{done}} از {{total}} (تا {{size}})…",
+      "tesseraTooLarge": "این محدوده به {{count}} قطعه (حدود {{size}}) نیاز دارد؛ حد مجاز {{limit}} است. بزرگ‌نمایی کنید یا کادر کوچک‌تری بکشید.",
+      "tesseraYearMissing": "Tessera {{year}} هنوز برای این محدوده کامل نشده است.",
+      "tesseraEmpty": "در این محدوده برای {{year}} هیچ بردار نهانی وجود ندارد.",
+      "tesseraLayerName": "Tessera {{year}} ({{bands}})",
+      "tesseraRenderHint": "نمایش، بردارهای نهان نسخهٔ v1.1 (داده‌های باز AWS) را با تفکیک کامل ۱۰ متر در محدودهٔ جستجو می‌خواند (حدود ۱ مگابایت برای هر کیلومتر مربع) و هر باند را به بازهٔ ۲ تا ۹۸ درصد آن می‌کشد."
     },
     "geolibre-fields-of-the-world": {
       "boundariesExists": "{{name}} از پیش روی نقشه است.",

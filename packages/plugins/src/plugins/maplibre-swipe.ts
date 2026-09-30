@@ -1,5 +1,6 @@
 import { useAppStore } from "@geolibre/core";
-import type { Map as MapLibreMap } from "maplibre-gl";
+import * as maplibregl from "maplibre-gl";
+import type { Map as MapLibreMap, TransformConstrainFunction } from "maplibre-gl";
 import {
   SwipeControl,
   type CreateSwipeComparisonMap,
@@ -391,23 +392,37 @@ export const maplibreSwipePlugin: GeoLibrePlugin = {
 };
 
 /**
+ * Apply the camera the comparison map is handed unchanged.
+ *
+ * The comparison pane is non-interactive: its only camera input is the
+ * control's `jumpTo` from the main map, which GeoLibre has already constrained
+ * (`createMapTransformConstraint` in `@geolibre/map`). MapLibre's default
+ * Mercator constraint would re-constrain it, raising the zoom until the world
+ * fills the viewport height, so below that zoom the pane drifts off the main
+ * map (#2736).
+ */
+const followHostCamera: TransformConstrainFunction = (center, zoom) => ({ center, zoom });
+
+/**
  * Build the swipe's comparison map with the host's own engine.
  *
- * `maplibre-gl-swipe` constructs a second map for the clipped comparison pane,
- * and until 0.12.0 that was always a MapLibre one — which cannot be layered
- * over a mapbox-gl map's canvas or fed a `mapbox://` style. The control drives
- * that map only through the Style Spec surface both engines share, so on a
- * Mapbox host the pane is a mapbox-gl map instead. `undefined` on MapLibre
- * leaves the upstream default.
+ * `maplibre-gl-swipe` constructs a second map for the clipped comparison pane.
+ * On a Mapbox host that must be a mapbox-gl map — a MapLibre one cannot be
+ * layered over a mapbox-gl canvas or fed a `mapbox://` style — and the control
+ * drives it only through the Style Spec surface both engines share. On a
+ * MapLibre host it is a MapLibre map that takes the main map's camera
+ * verbatim ({@link followHostCamera}).
  *
  * @param app - The plugin host API, read for the mapbox-gl namespace.
- * @returns A comparison-map factory on a Mapbox host, else `undefined`.
+ * @returns The comparison-map factory for the host's engine.
  */
 export function swipeComparisonMapFactory(
   app: Pick<GeoLibreAppAPI, "getMapboxGl" | "getMapboxAccessToken"> | null,
-): CreateSwipeComparisonMap | undefined {
+): CreateSwipeComparisonMap {
   const mapboxgl = app?.getMapboxGl?.();
-  if (!mapboxgl) return undefined;
+  if (!mapboxgl) {
+    return (options) => new maplibregl.Map({ ...options, transformConstrain: followHostCamera });
+  }
   // mapbox-gl reads its token from the global `mapboxgl.accessToken` unless the
   // constructor is handed one, and GeoLibre passes it per map rather than
   // setting that global. Without it this second map renders nothing and logs
@@ -502,7 +517,8 @@ export function getSwipeControlOptions(
     // on the main map. See #1240 and swipe-cog-mirror.ts. MapLibre only — see
     // supportsRasterProvider.
     layerProvider: supportsRasterProvider(app) ? cogSwipeProvider : undefined,
-    // On Mapbox the clipped comparison pane is a mapbox-gl map.
+    // The clipped comparison pane: a mapbox-gl map on Mapbox, and on MapLibre
+    // one that mirrors the main map's camera without re-constraining it.
     createMap: swipeComparisonMapFactory(app),
   };
 }

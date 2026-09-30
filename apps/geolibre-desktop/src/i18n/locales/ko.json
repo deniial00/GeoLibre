@@ -281,7 +281,7 @@
       },
       "wfs": {
         "label": "WFS 레이어 추가",
-        "description": "GetFeature 서비스에서 GeoJSON을 요청하여 WFS 피처를 추가합니다."
+        "description": "GetFeature 서비스에서 GeoJSON 또는 GML을 요청하여 WFS 피처를 추가합니다."
       },
       "wmts": {
         "label": "WMTS 레이어 추가",
@@ -2385,7 +2385,6 @@
       "arcgisKeyStorageNote": "이 기기에 로컬로 저장되며(프로젝트 파일에는 저장되지 않으므로 공유되지 않음) Esri에만 전송됩니다. 웹 빌드에서는 다른 사이트 데이터와 동일한 브라우저 저장소를 공유합니다.",
       "variablesTitle": "환경 변수",
       "variablesCount_other": "활성화된 런타임 변수 {{count}}개.",
-      "secretsWarning": "값은 프로젝트 파일에 평문으로 저장되며 프로젝트를 공유할 때 노출될 수 있습니다. 프로젝트 파일이 비공개로 유지되지 않는 한 여기에 비밀 정보를 입력하지 마세요.",
       "empty": "구성된 환경 변수가 없습니다.",
       "variableFallback": "변수",
       "enableAria": "{{name}} 활성화",
@@ -8445,7 +8444,14 @@
       "valuesInt8": "원시 값(int8)",
       "stretch": "스트레치(±)",
       "downloadValues": "GeoTIFF 값",
-      "title": "위성 임베딩"
+      "title": "위성 임베딩",
+      "visualizeTesseraTitle": "검색 영역의 선택한 밴드를 RGB 레이어로 지도에 추가",
+      "readingChunks": "청크 {{done}}/{{total}} 읽는 중(최대 {{size}})…",
+      "tesseraTooLarge": "이 영역에는 청크 {{count}}개(약 {{size}})가 필요하며 한도는 {{limit}}개입니다. 확대하거나 더 작은 상자를 그리세요.",
+      "tesseraYearMissing": "이 영역의 Tessera {{year}} 데이터는 아직 완성되지 않았습니다.",
+      "tesseraEmpty": "이 영역에는 {{year}}년 임베딩이 없습니다.",
+      "tesseraLayerName": "Tessera {{year}} ({{bands}})",
+      "tesseraRenderHint": "시각화는 검색 영역의 v1.1 임베딩(AWS Open Data)을 10m 전체 해상도로 읽고(1km²당 약 1MB), 각 밴드를 2–98% 범위로 스트레치합니다."
     },
     "geolibre-fields-of-the-world": {
       "boundariesExists": "{{name}}이(가) 이미 지도에 있습니다.",

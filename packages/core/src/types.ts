@@ -1657,6 +1657,12 @@ export interface RuntimeEnvironmentVariable {
   key: string;
   value: string;
   enabled: boolean;
+  /**
+   * Absent or `true`: the value is a secret (desktop keeps it in the OS
+   * keychain; every egress removes it). `false`: an ordinary value saved in the
+   * project and kept on share/export.
+   */
+  secret?: boolean;
 }
 
 declare global {

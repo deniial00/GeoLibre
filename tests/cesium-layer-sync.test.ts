@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { beforeEach, describe, it } from "node:test";
+import { useAppStore } from "@geolibre/core";
 import { DEFAULT_LAYER_STYLE, type GeoLibreLayer } from "../packages/core/src/types";
 import { CesiumLayerSync, isCesiumSupportedLayerType } from "../packages/map/src/cesium-layer-sync";
 
@@ -824,6 +825,34 @@ describe("CesiumLayerSync", () => {
     assert.equal(resource.opts.headers["X-GOOG-API-KEY"], "test-key");
   });
 
+  it("refuses to send 3D Tiles request headers over plaintext, including child tiles", async () => {
+    const sync = newSync(f);
+    const tiles = (id: string, url: string) =>
+      mkLayer({
+        id,
+        type: "3d-tiles",
+        source: { url, requestHeaders: { Authorization: "Bearer t" } },
+      });
+    sync.sync([
+      tiles("plain", "http://tiles.example/tileset.json"),
+      tiles("secure", "https://tiles.example/tileset.json"),
+    ]);
+    await f.flush();
+    assert.equal(f.calls.tilesetUrls.length, 1);
+    const resource = f.calls.tilesetUrls[0] as {
+      opts: { url: string; proxy: { getURL(url: string): string } };
+    };
+    assert.equal(resource.opts.url, "https://tiles.example/tileset.json");
+    // Cesium applies the proxy to every derived request, child tiles included.
+    const { proxy } = resource.opts;
+    assert.equal(proxy.getURL("https://cdn.example/a.b3dm"), "https://cdn.example/a.b3dm");
+    assert.equal(
+      proxy.getURL("data:application/octet-stream;base64,AA=="),
+      "data:application/octet-stream;base64,AA==",
+    );
+    assert.throws(() => proxy.getURL("http://cdn.example/a.b3dm"));
+  });
+
   it("updates visibility in place without recreating the imagery layer", () => {
     const sync = newSync(f);
     const base = mkLayer({
@@ -927,6 +956,46 @@ describe("CesiumLayerSync", () => {
     };
     assert.equal(res.opts.url, "https://secure.arcgis/MapServer");
     assert.equal(res.opts.headers["Authorization"], "Bearer token123");
+  });
+
+  it("rebuilds a layer when a variable its header references changes", async () => {
+    const initial = useAppStore.getState().preferences;
+    const setToken = (value: string) =>
+      useAppStore.setState({
+        preferences: {
+          ...initial,
+          environmentVariables: [{ key: "ARC_TOKEN", value, enabled: true, secret: false }],
+        },
+      });
+    setToken("first");
+    const sync = newSync(f);
+    try {
+      sync.sync([
+        mkLayer({
+          id: "arc",
+          type: "raster",
+          sourcePath: "https://secure.arcgis/MapServer",
+          source: {
+            tiles: ["https://secure.arcgis/MapServer/export"],
+            requestHeaders: { Authorization: "Bearer ${ARC_TOKEN}" },
+          },
+          metadata: { sourceKind: "arcgis-map-service" },
+        }),
+      ]);
+      await f.flush();
+      setToken("second");
+      await f.flush();
+      const headers = f.calls.arcgisProviders.map(
+        (provider) =>
+          (provider.url as { opts: { headers: Record<string, string> } }).opts.headers[
+            "Authorization"
+          ],
+      );
+      assert.deepEqual(headers, ["Bearer first", "Bearer second"]);
+    } finally {
+      sync.destroy();
+      useAppStore.setState({ preferences: initial });
+    }
   });
 
   it("reads the arcgis token off the pre-built export tile url", async () => {

@@ -283,7 +283,7 @@
       },
       "wfs": {
         "label": "WFS-laag toevoegen",
-        "description": "Voeg WFS-features toe door GeoJSON op te vragen bij een GetFeature-service."
+        "description": "Voeg WFS-features toe door GeoJSON of GML op te vragen bij een GetFeature-service."
       },
       "wmts": {
         "label": "WMTS-laag toevoegen",
@@ -2432,7 +2432,6 @@
       "variablesTitle": "Omgevingsvariabelen",
       "variablesCount_one": "{{count}} ingeschakelde runtimevariabele.",
       "variablesCount_other": "{{count}} ingeschakelde runtimevariabelen.",
-      "secretsWarning": "Waarden worden als platte tekst opgeslagen in het projectbestand en kunnen zichtbaar worden wanneer het project wordt gedeeld. Vermijd het plaatsen van geheimen hier, tenzij het projectbestand privé blijft.",
       "empty": "Geen omgevingsvariabelen geconfigureerd.",
       "variableFallback": "variabele",
       "enableAria": "{{name}} inschakelen",
@@ -8532,7 +8531,14 @@
       "valuesInt8": "Ruw (int8)",
       "stretch": "Rek (±)",
       "downloadValues": "GeoTIFF-waarden",
-      "title": "Satellietembeddings"
+      "title": "Satellietembeddings",
+      "visualizeTesseraTitle": "De geselecteerde banden binnen het zoekgebied als RGB-laag aan de kaart toevoegen",
+      "readingChunks": "Chunk {{done}} van {{total}} lezen (tot {{size}})…",
+      "tesseraTooLarge": "Het gebied vereist {{count}} chunks (ongeveer {{size}}); de limiet is {{limit}}. Zoom in of teken een kleiner vak.",
+      "tesseraYearMissing": "Tessera {{year}} is voor dit gebied nog niet compleet.",
+      "tesseraEmpty": "Geen embeddings in dit gebied voor {{year}}.",
+      "tesseraLayerName": "Tessera {{year}} ({{bands}})",
+      "tesseraRenderHint": "Visualiseren leest de v1.1-embeddings (AWS Open Data) op volledige 10 m-resolutie binnen het zoekgebied, ongeveer 1 MB per km², en rekt elke band op tot zijn 2–98%-bereik."
     },
     "geolibre-fields-of-the-world": {
       "boundariesExists": "{{name}} staat al op de kaart.",

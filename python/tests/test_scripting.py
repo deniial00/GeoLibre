@@ -422,6 +422,24 @@ def test_python_project_egress_redacts_credentials(m, tmp_path):
     assert m.to_project(keep_credentials=True)["plugins"]["settings"]
 
 
+def test_redact_credentials_keeps_only_non_secret_environment_variables():
+    """Same rule as the app: rows travel only when marked ``secret: false``."""
+    safe = redact_credentials(
+        {
+            "preferences": {
+                "environmentVariables": [
+                    {"key": "SERVICE_TOKEN", "value": "env-secret", "enabled": True},
+                    {"key": "MARKED", "value": "marked-secret", "enabled": True, "secret": True},
+                    {"key": "ENDPOINT", "value": "https://x", "enabled": True, "secret": False},
+                ]
+            }
+        }
+    )
+    assert safe["preferences"]["environmentVariables"] == [
+        {"key": "ENDPOINT", "value": "https://x", "enabled": True, "secret": False}
+    ]
+
+
 def test_redact_credentials_keeps_the_first_party_map_controls():
     """Wiping these stripped the legend/colorbar/swipe from every export."""
     safe = redact_credentials(
@@ -533,6 +551,26 @@ def test_python_credential_field_registry_matches_js():
     assert safe["layers"][0]["source"] == {"sr": 4326, "key": "layer-identifier"}
 
 
+def test_redact_credentials_keeps_header_values_that_only_reference_a_variable():
+    """Same rule as the app's isHeaderReferenceOnly: `Bearer ${T}` holds no secret."""
+    safe = redact_credentials(
+        {
+            "layers": [
+                {
+                    "source": {
+                        "requestHeaders": {
+                            "Authorization": "Bearer ${T}",
+                            "X-Key": "literal",
+                            "X-Mixed": "abc${T}",
+                        }
+                    }
+                }
+            ]
+        }
+    )
+    assert safe["layers"][0]["source"] == {"requestHeaders": {"Authorization": "Bearer ${T}"}}
+
+
 def test_python_redaction_sweeps_layer_connection():
     """`connection.lastError` is free-form error text and must be swept too."""
     safe = redact_credentials(
@@ -583,7 +621,42 @@ def test_to_html_inserts_embed_before_fragment(m):
     # embed=1 must land in the query string, before any "#fragment", or the
     # browser folds it into the fragment and the iframe never sees the flag.
     html = m.to_html(app_url="https://example.com/app#section")
-    assert "https://example.com/app?embed=1#section" in html
+    assert "https://example.com/app?embed=1&amp;layout=embed&amp;theme=light#section" in html
+
+
+@pytest.mark.parametrize(
+    ("layout", "theme", "flags"),
+    [
+        ("maponly", "dark", "embed=1&amp;maponly=1&amp;theme=dark"),
+        ("embed", "light", "embed=1&amp;layout=embed&amp;theme=light"),
+        ("full", "dark", "embed=1&amp;theme=dark"),
+    ],
+)
+def test_to_html_carries_the_layout_and_theme(monkeypatch, layout, theme, flags):
+    # The export frames the app with the same chrome flags the widget uses, so a
+    # map-only notebook map exports as map-only (#2764).
+    monkeypatch.setattr(gmod, "serve_app", lambda *_a, **_k: "http://127.0.0.1:0/")
+    monkeypatch.setattr(gmod, "app_port", lambda: 0)
+    html = Map(layout=layout, theme=theme).to_html(app_url="https://example.com/app")
+    assert f'src="https://example.com/app?{flags}"' in html
+
+
+def test_to_html_keeps_flags_the_app_url_already_sets(m):
+    html = m.to_html(app_url="https://example.com/app?theme=dark&embed=1")
+    assert 'src="https://example.com/app?theme=dark&amp;embed=1&amp;layout=embed"' in html
+
+
+def test_to_html_still_forces_embed_over_a_disabling_app_url(m):
+    # The app reads only the first "embed", so a disabling one is replaced.
+    html = m.to_html(app_url="https://example.com/app?embed=0&foo=1")
+    assert 'src="https://example.com/app?foo=1&amp;embed=1&amp;layout=embed' in html
+
+
+def test_render_project_html_rejects_an_unknown_layout():
+    with pytest.raises(ValueError, match="layout must be one of"):
+        gmod.render_project_html({}, layout="sidebar")
+    with pytest.raises(ValueError, match="theme must be one of"):
+        gmod.render_project_html({}, theme="sepia")
 
 
 def test_to_html_posts_the_project_to_the_app_origin_only(m):

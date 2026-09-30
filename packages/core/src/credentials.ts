@@ -1,3 +1,4 @@
+import { isHeaderReferenceOnly } from "./header-references";
 import type { GeoLibreProject, LayerConnection } from "./types";
 
 /**
@@ -63,6 +64,10 @@ export const PUBLISHABLE_PLUGIN_SETTINGS: Readonly<Record<string, readonly strin
   // silently start counting each new toggle as a credential, which is the bug
   // this entry fixes. Still swept by redactConfigurationValue below.
   "gods-eye-view": null,
+  // Point class edits keyed by (node key, index): compressed numbers, no
+  // user text. Source URLs are values, so the sweep below still scrubs a
+  // credentialed one.
+  "geolibre-point-cloud-annotation": null,
 };
 
 export interface CredentialRedactionResult {
@@ -292,6 +297,27 @@ function redactConfigurationValue(
   const result: Record<string, unknown> = {};
   for (const [key, nested] of Object.entries(value)) {
     const nestedPath = path ? `${path}.${key}` : key;
+    const normalizedKey = normalizeCredentialName(key);
+    if (
+      (normalizedKey === "requestheaders" || normalizedKey === "headers") &&
+      isPlainObject(nested)
+    ) {
+      // `Bearer ${TOKEN}` names a variable instead of carrying a secret, so it
+      // survives; any other header value is dropped. Mirrors `_redact_config`
+      // in python/src/geolibre/project.py.
+      const kept: Record<string, string> = {};
+      const removed: Record<string, unknown> = {};
+      for (const [name, headerValue] of Object.entries(nested)) {
+        if (typeof headerValue === "string" && isHeaderReferenceOnly(headerValue)) {
+          kept[name] = headerValue;
+        } else {
+          removed[name] = headerValue;
+        }
+      }
+      if (Object.keys(removed).length > 0) recordRedaction(accumulator, nestedPath, removed);
+      if (Object.keys(kept).length > 0) result[key] = kept;
+      continue;
+    }
     if (isCredentialFieldName(key)) {
       recordRedaction(accumulator, nestedPath, nested);
       continue;
@@ -366,15 +392,24 @@ export function redactProjectCredentials(project: GeoLibreProject): CredentialRe
   const preferences = project.preferences
     ? {
         ...project.preferences,
-        environmentVariables: [],
+        // Only rows explicitly marked non-secret travel; everything else is
+        // treated as a credential.
+        environmentVariables: (project.preferences.environmentVariables ?? []).filter(
+          (variable) => variable.secret === false,
+        ),
         geocoding,
         ...(redactedMapboxStyleUrl !== mapboxStyleUrl
           ? { map: { ...project.preferences.map, mapboxStyleUrl: redactedMapboxStyleUrl } }
           : {}),
       }
     : project.preferences;
+  // A secret row with an empty value carries nothing (desktop keeps the value
+  // in the keychain), so it must not count toward the save prompt. A populated
+  // row with no name still needs an explicit keep/strip choice.
   const populatedEnvironmentVariables =
-    project.preferences?.environmentVariables?.filter((variable) => variable.key.trim()) ?? [];
+    project.preferences?.environmentVariables?.filter(
+      (variable) => variable.secret !== false && variable.value !== "",
+    ) ?? [];
   if (populatedEnvironmentVariables.length > 0) {
     recordRedaction(
       accumulator,

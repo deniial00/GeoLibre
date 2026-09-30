@@ -20,6 +20,7 @@ Pick by what the data **is**:
 | An XYZ raster tile template (`{z}/{x}/{y}.png`) | `add_tile_layer` | Basemaps like OSM go here, not `set_basemap`. |
 | A PMTiles archive, or a vector tile service | `add_tiles_layer` | `kind="pmtiles"` (with `tile_type`) or `kind="vector-tiles"`. |
 | A WMS or WMTS endpoint | `add_ogc_layer` | `service="wms"` or `"wmts"`. |
+| A LAS/LAZ/COPC/EPT point cloud | `add_lidar_layer` | COPC and EPT stream by level of detail; the app's Point Cloud Annotation plugin can label it. |
 | An OGC 3D Tiles tileset | `add_3d_tiles_layer` | `altitude_offset` to sit it on the ground; `ion_asset_id` instead of `url` for a Cesium Ion tileset. |
 | A Cesium Ion asset (tileset or imagery) | `add_cesium_ion_layer` | 3D globe only: pair it with `set_renderer` / `primaryRenderer: "cesium"`. `kind="imagery"` for imagery. |
 | A CZML (Cesium Language) dynamic scene: orbits, tracks, moving models | `add_czml_layer` | 3D globe only: `url` for a `.czml` document, or `data` for its packet array inline. The globe follows the document's `clock`. |
@@ -37,6 +38,10 @@ position); omitted, the layer goes on top.
 create_project(path, name="Untitled Project", center=None, zoom=None,
                basemap=None, overwrite=False)
 describe_project(path)
+get_point_cloud_annotations(path)
+set_point_cloud_classes(path, classes)
+prelabel_point_cloud(path, url, input_file, tool="ground", only_unclassified=True)
+write_labeled_point_cloud(path, url, input_file, output_file, overwrite=False)
 list_catalog()
 ```
 
@@ -45,6 +50,22 @@ project even with `overwrite=True`, so a retry cannot destroy an unrelated
 `package.json` sitting in a root.
 
 `describe_project` reports inlined feature data as a count, never echoed back.
+
+`get_point_cloud_annotations` reports, per point cloud URL, how many points the
+app's annotator relabelled into each class and how many points each instance id
+holds, the custom classes, the 3D vectors (polylines, polygons, keypoints),
+plus every saved 3D box (with its status and attributes).
+
+`set_point_cloud_classes` defines the annotator's custom classes (its label
+schema): `[{"code": 64, "name": "Car", "color": "#e11d48"}]`, codes 19-255.
+Existing labels, instances and boxes are kept; an empty list clears them.
+
+`prelabel_point_cloud` runs the app's Pre-label classifiers (`ground`,
+`ground-vegetation`) on a local copy of a LiDAR layer's file and saves the
+changed classes as labels for the layer `url`. `write_labeled_point_cloud`
+writes that local file with the project's labels (and instance ids) applied, as
+full-resolution LAS/LAZ. Both need the `geolibre[pointcloud]` extra, and `url`
+must be a LiDAR layer in the project.
 
 `list_catalog` returns the basemaps, color ramp names, legend presets, and the
 active workspace roots. Call it before guessing any of those names.
@@ -63,6 +84,7 @@ add_ogc_layer(path, name, service, endpoint, layers=None, styles="",
               version="1.1.1", crs=None, bounds=None, index=None)
 add_tiles_layer(path, name, url, kind="pmtiles", tile_type="vector",
                 source_layers=None, style=None, index=None)
+add_lidar_layer(path, name, url, index=None)
 add_3d_tiles_layer(path, name, url=None, ion_asset_id=None, altitude_offset=0, index=None)
 add_cesium_ion_layer(path, name, asset_id, kind="3d-tiles", altitude_offset=0, index=None)
 add_czml_layer(path, name, url=None, data=None, index=None)

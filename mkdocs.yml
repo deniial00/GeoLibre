@@ -43,6 +43,7 @@ nav:
   - Features: features.md
   - Comparison: comparison.md
   - Demos: demos.md
+  - Gallery: gallery.md
   - Downloads: downloads.md
   - Sponsor: sponsor.md
   # Keep this deployment-relative: production serves at /, while PR previews
@@ -61,6 +62,7 @@ nav:
       - Map Controls & Tools: user-guide/map-controls.md
       - Processing Tools: user-guide/processing.md
       - AI Segmentation: user-guide/segmentation.md
+      - Point Cloud Annotation: user-guide/point-cloud-annotation.md
       - SQL Workspace: user-guide/sql-workspace.md
       - Python Console: user-guide/python-console.md
       - AI Assistant: user-guide/ai-assistant.md

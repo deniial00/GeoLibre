@@ -79,6 +79,7 @@ import {
   sharedSettingsLanguage,
 } from "./lib/desktop-settings-url";
 import { parseDeploymentCapabilities, useAppStore } from "@geolibre/core";
+import { readConfiguredAppName } from "./lib/app-name";
 import { readDeploymentEnvValue } from "./lib/deployment-env";
 import { initializeNativeProjectOpen } from "./lib/native-project-open";
 
@@ -96,6 +97,7 @@ const nativeProjectOpenReady = initializeNativeProjectOpen();
 let nativeShareFetchReady: Promise<void> = Promise.resolve();
 let nativeArcGISFetchReady: Promise<void> = Promise.resolve();
 let nativeSidecarFetchReady: Promise<void> = Promise.resolve();
+let nativeWmsIdentifyFetchReady: Promise<void> = Promise.resolve();
 // Install desktop-only transports before requests can be issued. ArcGIS uses
 // a dedicated guarded Rust command; the other adapters use scoped HTTP hosts.
 if (isTauri()) {
@@ -118,6 +120,13 @@ if (isTauri()) {
         console.error("[GeoLibre] Failed to install native sidecar fetch", error);
       });
   }
+  nativeWmsIdentifyFetchReady = import("./lib/wms-identify-fetch")
+    .then(({ installNativeWmsIdentifyFetch }) => installNativeWmsIdentifyFetch())
+    .catch((error: unknown) => {
+      // Identify would stay on the webview fetch, which fails on WMS servers
+      // without CORS headers (#2712), so surface the install failure.
+      console.error("[GeoLibre] Failed to install native WMS identify fetch", error);
+    });
   void import("./lib/geocoding-fetch")
     .then(({ installNativeGeocodingFetch }) => installNativeGeocodingFetch())
     .catch((error: unknown) => {
@@ -153,6 +162,11 @@ if (isDesktopRuntime()) {
 // Recover from chunks orphaned by a web redeploy (stale lazy import → 404). A
 // no-op in the desktop build, whose chunks are bundled locally.
 installStaleChunkReload();
+
+// A deployment-configured app name also titles the browser tab; index.html's
+// static <title> stays the fallback when none is set.
+const configuredAppName = readConfiguredAppName();
+if (configuredAppName) document.title = configuredAppName;
 
 // What this deployment is allowed to do (issue #1673). Read once, before the
 // app renders, so no surface ever paints with the full grant and then retracts
@@ -334,6 +348,8 @@ void Promise.all([
   nativeSidecarFetchReady,
   // Restored ArcGIS layers can query immediately when App mounts.
   nativeArcGISFetchReady,
+  // An Identify click on a restored WMS layer must not beat the native fetcher.
+  nativeWmsIdentifyFetchReady,
   // Capture a file-association or command-line project path before App decides
   // whether to restore a configured startup project or the default workspace.
   nativeProjectOpenReady,

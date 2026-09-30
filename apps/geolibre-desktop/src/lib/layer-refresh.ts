@@ -1,6 +1,20 @@
 import type { FeatureCollection } from "geojson";
 import type { GeoLibreLayer } from "@geolibre/core";
 import { parseGeoRssLayer } from "./georss";
+import { looksLikeGmlFeatureCollection } from "./gml";
+import { parseGmlWithReprojection } from "./gml-projection";
+import { classifyFetchFailure } from "./fetch-error";
+import { isTauri } from "./is-tauri";
+import {
+  arcGisAxisCheckRequest,
+  axisOrderIsAmbiguous,
+  coordinateExtent,
+  shouldSwapAxes,
+  swapAxes,
+  wgs84BoundingBox,
+  type ArcGisWfsRequest,
+} from "./wfs-axis-order";
+import { charsetFromContentType, decodeXmlBytes } from "./xml-decode";
 // Light import (types and metadata checks only); the DuckDB engine behind a
 // query-layer refresh is loaded dynamically inside sql-query-layer.ts, so this
 // module stays importable under the node test runner.
@@ -22,6 +36,11 @@ const CSW_PROXY_PATH = "/__geolibre_csw_proxy";
 // reason as the WFS/GPX proxy paths above.
 const CSW_SOURCE_KIND = "csw";
 const FETCH_TIMEOUT_MS = 30_000;
+// Largest WFS response the desktop's native client reads. GML runs several
+// times larger than GeoJSON (8.5 MB for 16 Polish voivodeships), but the body
+// also crosses the Tauri IPC boundary as a JSON number array, so an unbounded
+// one could exhaust the app's memory. Same ceiling as a WCS coverage.
+const WFS_MAX_RESPONSE_BYTES = 128 * 1024 * 1024;
 // Feature cap for refreshing an OGC API - Features layer whose stored request
 // carries no `maxFeatures` (added before it was persisted, or hand-edited).
 // Mirrors DEFAULT_OGC_FEATURES_MAX_FEATURES in lib/ogc-api-features.ts.
@@ -62,14 +81,16 @@ export interface LayerRefreshConfig {
   intervalMs: number;
 }
 
-// Raised when a GetFeature response is XML rather than the requested GeoJSON.
+// Raised when a GetFeature response is XML but neither GeoJSON nor a GML feature
+// collection (typically an OWS ExceptionReport rejecting the outputFormat).
 // Exported so the output-format fallback (fetchWfsGeoJson) can recognize this
 // specific failure and retry with a different outputFormat token.
 export const WFS_XML_RESPONSE_ERROR =
-  "The service returned XML instead of GeoJSON. Check the layer name and output format.";
+  "The service returned an XML error instead of features. Check the layer name and output format.";
 
 /**
- * Error thrown when a GetFeature response body is XML instead of GeoJSON.
+ * Error thrown when a GetFeature response body is XML that is not a GML feature
+ * collection.
  * Carries `isHtml` so the output-format fallback can tell a genuine WFS/OWS/GML
  * response (a real format rejection worth retrying with another outputFormat)
  * apart from an HTML error page — a corporate proxy block, a WAF challenge, an
@@ -114,6 +135,23 @@ const WFS_GEOJSON_OUTPUT_FORMATS = [
   "application/geo+json",
 ];
 
+// The GML format each WFS version names as its GetFeature default, tried after
+// every GeoJSON alias so a GML-only server (MapServer without OGR output, most
+// INSPIRE services) still loads (issue #2746). Naming it, rather than only
+// omitting outputFormat, gives the caller a token to persist and reuse.
+const WFS_DEFAULT_GML_OUTPUT_FORMATS: Record<string, string> = {
+  "2": "application/gml+xml; version=3.2",
+  "1.1": "text/xml; subtype=gml/3.1.1",
+  "1.0": "GML2",
+};
+
+function defaultGmlOutputFormat(version: string): string {
+  const key = Object.keys(WFS_DEFAULT_GML_OUTPUT_FORMATS).find((prefix) =>
+    version.startsWith(prefix),
+  );
+  return key ? WFS_DEFAULT_GML_OUTPUT_FORMATS[key] : "";
+}
+
 export function createWfsGetFeatureUrl(options: {
   endpoint: string;
   typeName: string;
@@ -128,8 +166,10 @@ export function createWfsGetFeatureUrl(options: {
     ["request", "GetFeature"],
     ["version", options.version],
     [isWfs2 ? "typeNames" : "typeName", options.typeName],
-    ["outputFormat", options.outputFormat],
   ];
+
+  // An empty format is omitted, which asks the server for its default (GML).
+  if (options.outputFormat) params.push(["outputFormat", options.outputFormat]);
 
   if (options.srsName) params.push(["srsName", options.srsName]);
   if (options.maxFeatures) {
@@ -139,53 +179,202 @@ export function createWfsGetFeatureUrl(options: {
   return appendQuery(options.endpoint, params);
 }
 
+/** A fetched body plus the parts of the response the parsers need. */
+interface FetchedText {
+  ok: boolean;
+  status: number;
+  contentType: string | null;
+  text: string;
+}
+
+/**
+ * @param url - The GeoJSON (or WFS GetFeature) URL.
+ * @param options - `useWfsProxy` marks a WFS request that must get past CORS:
+ *   under the Vite dev server it goes through the dev proxy, and in the
+ *   desktop app through the native HTTP client (WFS servers, MapServer and
+ *   INSPIRE services especially, often send no CORS headers).
+ *   `useCswProxy` routes a CSW resource through its dev proxy.
+ * @returns The features, from GeoJSON or a GML feature collection.
+ */
 export async function fetchGeoJsonFeatureCollection(
   url: string,
   options: { useWfsProxy?: boolean; useCswProxy?: boolean; signal?: AbortSignal } = {},
 ): Promise<FeatureCollection> {
-  let response: Response;
-  const requestUrl = options.useWfsProxy
-    ? proxyWfsRequestUrl(url)
-    : options.useCswProxy
-      ? proxyCswRequestUrl(url)
-      : url;
+  // Combine signals so a caller-supplied signal does not drop the timeout.
+  const signal = options.signal
+    ? AbortSignal.any([options.signal, AbortSignal.timeout(FETCH_TIMEOUT_MS)])
+    : AbortSignal.timeout(FETCH_TIMEOUT_MS);
+  let response: FetchedText;
   try {
-    response = await fetch(requestUrl, {
-      // Combine signals so a caller-supplied signal does not drop the timeout.
-      signal: options.signal
-        ? AbortSignal.any([options.signal, AbortSignal.timeout(FETCH_TIMEOUT_MS)])
-        : AbortSignal.timeout(FETCH_TIMEOUT_MS),
-    });
+    response = await fetchText(url, options, signal);
   } catch (error) {
     if (error instanceof DOMException && error.name === "TimeoutError") {
       throw new Error("The request timed out.");
     }
     throw error;
   }
-  const text = await response.text();
+  const { text } = response;
   if (!response.ok && !/^\s*</.test(text)) {
     throw new Error(`Request failed with status ${response.status}`);
   }
-  try {
-    return parseGeoJsonFeatureCollection(JSON.parse(text));
-  } catch (error) {
-    if (/^\s*</.test(text)) {
-      throw new WfsXmlResponseError(
-        looksLikeHtmlResponse(text, response.headers.get("content-type")),
-      );
+  if (/^\s*</.test(text)) {
+    const isHtml = looksLikeHtmlResponse(text, response.contentType);
+    // A GML feature collection is features, whatever outputFormat was asked
+    // for (some servers ignore it). Its CRS comes from the document, falling
+    // back to the srsName the request asked for, and any EPSG CRS is
+    // reprojected (MapServer's WFS 1.0.0 ignores srsName and answers in its
+    // native grid).
+    if (!isHtml && looksLikeGmlFeatureCollection(text)) {
+      // Attribute-only features keep a null geometry, exactly as they arrive
+      // from a GeoJSON response (parseGeoJsonFeatureCollection passes those
+      // through too), so both formats reach the layer the same way.
+      return (await parseGmlWithReprojection(text, {
+        defaultSrsName: requestSrsName(url),
+      })) as FeatureCollection;
     }
-    throw error;
+    throw new WfsXmlResponseError(isHtml);
   }
+  const collection = parseGeoJsonFeatureCollection(JSON.parse(text));
+  const arcGis = options.useWfsProxy ? arcGisAxisCheckRequest(url) : null;
+  return arcGis ? repairArcGisAxisOrder(collection, arcGis, options, signal) : collection;
+}
+
+type FetchRouting = { useWfsProxy?: boolean; useCswProxy?: boolean };
+
+// The transport for a request: the native client for a WFS request on desktop,
+// otherwise the browser fetch (through the dev proxy under Vite).
+function fetchText(url: string, options: FetchRouting, signal: AbortSignal): Promise<FetchedText> {
+  if (options.useWfsProxy && isTauri() && isHttpUrl(url)) return fetchNativeText(url, signal);
+  return fetchBrowserText(
+    options.useWfsProxy
+      ? proxyWfsRequestUrl(url)
+      : options.useCswProxy
+        ? proxyCswRequestUrl(url)
+        : url,
+    signal,
+  );
+}
+
+// Capabilities documents fetched for the ArcGIS axis check, per URL, so a
+// refresh interval does not re-download them every tick. A failure is dropped
+// from the cache (the next load retries) and leaves the data as written.
+const capabilitiesCache = new Map<string, Promise<string | null>>();
+
+// An ArcGIS WFSServer may answer GeoJSON in lat/lon (see wfs-axis-order.ts).
+// Coordinates valid only one way round decide it on their own; otherwise the
+// feature type's WGS84BoundingBox from GetCapabilities does.
+async function repairArcGisAxisOrder(
+  collection: FeatureCollection,
+  request: ArcGisWfsRequest,
+  options: FetchRouting,
+  signal: AbortSignal,
+): Promise<FeatureCollection> {
+  const extent = coordinateExtent(collection);
+  if (!extent) return collection;
+  let bbox = null;
+  if (axisOrderIsAmbiguous(extent)) {
+    let capabilities = capabilitiesCache.get(request.capabilitiesUrl);
+    if (!capabilities) {
+      const url = request.capabilitiesUrl;
+      capabilities = fetchText(url, options, signal).then(
+        (response) => {
+          if (response.ok) return response.text;
+          capabilitiesCache.delete(url);
+          return null;
+        },
+        () => {
+          capabilitiesCache.delete(url);
+          return null;
+        },
+      );
+      capabilitiesCache.set(request.capabilitiesUrl, capabilities);
+    }
+    const text = await capabilities;
+    bbox = text ? wgs84BoundingBox(text, request.typeName) : null;
+  }
+  return shouldSwapAxes(extent, bbox) ? swapAxes(collection) : collection;
+}
+
+async function fetchBrowserText(requestUrl: string, signal: AbortSignal): Promise<FetchedText> {
+  const response = await fetch(requestUrl, { signal });
+  const contentType = response.headers.get("content-type");
+  return {
+    ok: response.ok,
+    status: response.status,
+    contentType,
+    text: decodeBody(new Uint8Array(await response.arrayBuffer()), contentType),
+  };
+}
+
+// The native client ignores CORS and, unlike fetch_url_bytes, keeps the body of
+// a non-2xx answer: a WFS rejects an unsupported outputFormat with an
+// ExceptionReport on a 400, and the format fallback has to read it. The Rust
+// call cannot be cancelled mid-flight, so it is raced against the signal.
+async function fetchNativeText(url: string, signal: AbortSignal): Promise<FetchedText> {
+  const { fetchUrlResponse } = await import("./native-http");
+  const pending = fetchUrlResponse(url, {
+    context: "WFS GetFeature",
+    timeoutSecs: Math.ceil(FETCH_TIMEOUT_MS / 1000),
+    maxBytes: WFS_MAX_RESPONSE_BYTES,
+  });
+  // If the abort wins the race, the native call is left unobserved; swallow
+  // its later rejection (the wrapper still logs it to diagnostics).
+  pending.catch(() => {});
+  const response = await Promise.race([pending, rejectOnAbort(signal)]);
+  return {
+    ok: response.status >= 200 && response.status < 300,
+    status: response.status,
+    contentType: response.contentType,
+    text: decodeBody(response.body, response.contentType),
+  };
+}
+
+// XML honors a charset declared only in its prolog (legacy Latin-2 GML, say);
+// anything else is decoded with the header charset, defaulting to UTF-8.
+function decodeBody(bytes: Uint8Array, contentType: string | null): string {
+  const charset = charsetFromContentType(contentType);
+  const head = new TextDecoder("ascii").decode(bytes.subarray(0, 64));
+  if (/^\s*</.test(head)) return decodeXmlBytes(bytes, charset);
+  try {
+    return new TextDecoder(charset || "utf-8").decode(bytes);
+  } catch {
+    return new TextDecoder("utf-8").decode(bytes);
+  }
+}
+
+function rejectOnAbort(signal: AbortSignal): Promise<never> {
+  return new Promise((_, reject) => {
+    if (signal.aborted) {
+      reject(signal.reason);
+      return;
+    }
+    signal.addEventListener("abort", () => reject(signal.reason), { once: true });
+  });
+}
+
+// The srsName query parameter of a GetFeature URL, matched case-insensitively.
+function requestSrsName(url: string): string | undefined {
+  try {
+    for (const [key, value] of new URL(url, "http://localhost").searchParams) {
+      if (key.toLowerCase() === "srsname" && value) return value;
+    }
+  } catch {
+    // Not a parseable URL; the document's own srsName still applies.
+  }
+  return undefined;
 }
 
 /**
  * Fetches a WFS GetFeature response as GeoJSON, retrying with alternate
- * GeoJSON output-format tokens when the server answers the requested format
- * with XML (a GML `ExceptionReport` or a GML feature dump). ArcGIS Server, for
- * example, does not honor the usual `application/json` and instead advertises
- * its GeoJSON output as `GEOJSON`; a plain fetch of `application/json` returns
- * XML and the layer fails to load. Retrying the known GeoJSON aliases makes
- * such services load transparently.
+ * output-format tokens when the server answers the requested format with an
+ * XML exception. ArcGIS Server, for example, does not honor the usual
+ * `application/json` and instead advertises its GeoJSON output as `GEOJSON`;
+ * a plain fetch of `application/json` returns XML and the layer fails to load.
+ * Retrying the known GeoJSON aliases makes such services load transparently.
+ * When no GeoJSON alias works, the version's default GML format is requested
+ * and then no outputFormat at all, and the GML is converted in the browser, so
+ * a GML-only server loads too. A GML feature collection returned for any
+ * request is accepted as-is.
  *
  * Only a genuine WFS/OWS/GML XML response triggers a retry. A network error,
  * timeout, or malformed JSON body is re-thrown immediately (a different
@@ -202,8 +391,9 @@ export async function fetchGeoJsonFeatureCollection(
  * GeoJSON download is not penalized relative to today.
  *
  * @param params - The GetFeature parameters. The requested outputFormat is
- *   tried first, then the remaining GeoJSON aliases; an empty requested format
- *   is skipped so no `outputFormat=` request is issued.
+ *   tried first, then the remaining GeoJSON aliases, then GML; an empty
+ *   requested format is skipped so no `outputFormat=` request is issued ahead
+ *   of the aliases.
  * @param options - WFS proxy routing and an optional abort signal.
  * @returns The parsed FeatureCollection plus the URL and outputFormat that worked.
  */
@@ -223,27 +413,50 @@ export async function fetchWfsGeoJson(
   // GeoJSON aliases (case-insensitively deduped so a token is not requested
   // twice). An empty requested format is dropped rather than sent as
   // `outputFormat=`.
-  const candidates = [
+  const geoJsonPhase = [
     ...(requested ? [requested] : []),
     ...WFS_GEOJSON_OUTPUT_FORMATS.filter(
       (format) => format.toLowerCase() !== requested.toLowerCase(),
     ),
   ];
+  // The GML fallbacks come last: the version's default GML token, then no
+  // outputFormat at all (the server's default, which is GML).
+  const gmlFormat = defaultGmlOutputFormat(params.version);
+  const gmlPhase = [
+    ...(gmlFormat && gmlFormat.toLowerCase() !== requested.toLowerCase() ? [gmlFormat] : []),
+    "",
+  ];
 
-  // One deadline shared across every attempt, so N slow rejections cannot stack
-  // N separate timeouts. Combined with the caller's signal (if any) and passed
-  // down; fetchGeoJsonFeatureCollection ANDs its own per-call timeout on top,
-  // but this budget is what bounds the total wall time.
-  const budget = AbortSignal.timeout(FETCH_TIMEOUT_MS);
-  const signal = options.signal ? AbortSignal.any([options.signal, budget]) : budget;
+  // One deadline shared across every attempt of a phase, so N slow rejections
+  // cannot stack N separate timeouts. The GML phase gets a fresh one: GML is
+  // several times larger than GeoJSON (the Polish PRG voivodeships are 8.5 MB
+  // and take ~27 s), so it must not inherit a budget the rejected GeoJSON
+  // attempts already spent. Combined with the caller's signal (if any) and
+  // passed down; fetchGeoJsonFeatureCollection ANDs its own per-call timeout on
+  // top, but these budgets are what bound the total wall time.
+  const phaseSignal = () => {
+    const budget = AbortSignal.timeout(FETCH_TIMEOUT_MS);
+    return options.signal ? AbortSignal.any([options.signal, budget]) : budget;
+  };
+  const geoJsonSignal = phaseSignal();
+  let gmlSignal: AbortSignal | undefined;
+  const candidates = [
+    ...geoJsonPhase.map((outputFormat) => ({ outputFormat, gml: false })),
+    ...gmlPhase.map((outputFormat) => ({ outputFormat, gml: true })),
+  ];
 
   let lastError: unknown;
-  for (const outputFormat of candidates) {
+  for (const { outputFormat, gml } of candidates) {
+    const signal = gml ? (gmlSignal ??= phaseSignal()) : geoJsonSignal;
     const url = createWfsGetFeatureUrl({ ...params, outputFormat });
+    const attempt = () => fetchGeoJsonFeatureCollection(url, { ...options, signal });
     try {
-      const data = await fetchGeoJsonFeatureCollection(url, {
-        ...options,
-        signal,
+      // One retry for a dropped connection: some WFS servers (the Polish PRG
+      // service among them) reset a share of connections outright, and the
+      // fallback sends up to eight requests in a row.
+      const data = await attempt().catch((error: unknown) => {
+        if (!isTransientTransportError(error) || signal.aborted) throw error;
+        return attempt();
       });
       return { data, url, outputFormat };
     } catch (error) {
@@ -258,6 +471,26 @@ export async function fetchWfsGeoJson(
     }
   }
   throw lastError instanceof Error ? lastError : new WfsXmlResponseError(false);
+}
+
+/**
+ * Whether a request failed at the connection level, where the same request may
+ * well succeed a moment later: a network failure as `classifyFetchFailure`
+ * defines it (the browser's opaque fetch rejection, a native connection reset),
+ * reqwest's generic "error sending request" (its message hides the reset
+ * behind it), or a gateway (the dev proxy included) answering 502 / 503 / 504.
+ * Timeouts are excluded, since they have already spent the budget, and so is
+ * any other TypeError, which is a bug rather than a flaky network.
+ *
+ * @param error - The failure from one GetFeature attempt.
+ * @returns True when one retry is worthwhile.
+ */
+export function isTransientTransportError(error: unknown): boolean {
+  if (classifyFetchFailure(error).kind === "network") return true;
+  const message = error instanceof Error ? error.message : String(error);
+  return (
+    /error sending request/i.test(message) || /^Request failed with status 50[234]\b/.test(message)
+  );
 }
 
 /** The reloaded features, plus any layer metadata the refresh itself updates. */

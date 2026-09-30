@@ -18,12 +18,18 @@ suite.
 ### Patched packages (`patches/`)
 
 `postinstall` applies the `patch-package` patches in `patches/`, and each patch
-file names the exact version it was made against. `@carbonplan/zarr-layer` is
-declared with an exact version (no `^`) in both `apps/geolibre-desktop` and
-`packages/plugins` so a routine install can never move it past the patched
-version. To bump it, regenerate the patch against the new version (or drop it if
-upstream fixed the bug), rename the patch file, and update both declarations and
-`package-lock.json` in the same PR.
+file names the exact version it was made against. A bump that moves a patched
+package past that version fails `npm install` in CI. Regenerate the patch
+against the new version (or drop it if upstream fixed the bug), rename the patch
+file, and update `package-lock.json` in the same PR.
+
+`@carbonplan/zarr-layer` is declared with an exact version (no `^`) in both
+`apps/geolibre-desktop` and `packages/plugins`. It carried a patch until 0.10.0,
+which shipped the same non-throwing uniform lookups upstream (the layer vanished
+at zoom >= 12 on Mesa GPUs without them). Before bumping it, confirm
+`createShaderProgram` in its `dist/index.js` still looks up `shift_x`,
+`shift_y` and `u_worldXOffset` with `gl.getUniformLocation`, not
+`mustGetUniformLocation`.
 
 ### `geolibre-wasm` (`packages/processing/package.json`)
 
@@ -285,14 +291,14 @@ wrapper goes back to covering the Measure/Colorbar/Legend/HTML/Bookmark panels
 
 `lidar-measure-mirror.ts` draws the Measure tool's line/polygon into that same
 overlay (`LidarControl.getDeckOverlay()`) with `depthTest: false`, the trick the
-plugin's own cross-section line uses to sit above the points. Two things there
-are not compiler checked: deck paints its layers in insertion order, so the
-mirror re-appends itself on any frame where it is no longer the overlay's last
-layer (streaming adds a chunk layer whenever the viewport pulls in new nodes),
-and the geometry is read from the MapLibre/Mapbox `geojson` source's `_data`
-field, since neither library exposes a public reader. Losing either costs only
-the mirror — the measured line goes back to being hidden inside the cloud, which
-is what #2533 was.
+plugin's own cross-section line uses to sit above the points. It is added with
+`addLayer(id, layer, { overlay: true })` (0.21+), which draws it after every
+point cloud chunk, including chunks that stream in later; the point cloud
+annotator's highlight, box and vector layers use the same flag. One thing is not
+compiler checked: the geometry is read from the MapLibre/Mapbox `geojson`
+source's `_data` field, since neither library exposes a public reader. Losing it
+costs only the mirror — the measured line goes back to being hidden inside the
+cloud, which is what #2533 was.
 
 The **class** is a hand-kept copy of the package's `DECK_CANVAS_CLASS`, not an
 import: `maplibre-gl-lidar` builds into its own lazy chunk, and importing even
@@ -304,6 +310,27 @@ is not visible to the compiler, so
 resulting DOM order and z-indices — run it on a bump
 (`npx playwright test e2e/lidar-canvas-stacking.spec.ts --project=features`).
 
+The point cloud annotator's **Full detail in view** calls `loadRegion` /
+`clearPinnedRegion` (0.20+) and decides whether a cloud qualifies without an
+upstream flag: a streamed COPC is one whose source contains `.copc.` and whose
+`nodeRanges` carry octree keys rather than `"file"`
+(`canLoadFullDetail` in `point-cloud-annotation/index.ts`). Its saved labels
+also assume a pinned region's nodes keep their octree keys, so a bump that
+changes node keys or pinning semantics must rerun
+`e2e/point-cloud-annotation.spec.ts` ("loads the view at full detail").
+
+The annotator's label encoding (delta-varint point index, then a class byte or a
+varint instance id, raw DEFLATE, base64; `label-store.ts`) is decoded in three
+places the compiler cannot link: `geolibre.project` (Python reader),
+`geolibre.pointcloud` (pre-labels and labelled-file rewrites) and the embedded
+job script in `backend/geolibre_server/geolibre_server/app/pointcloud.py`
+(`/pointcloud/apply-labels`, which runs on the conversion runtime and cannot
+import the Python package). Their tests share app-encoded fixtures
+(`Y2BkWcP0ahHLfyDgBwA=` for instance ids), so a change to the format must update
+all three and the fixtures together. The COPC node order they rebuild from the
+hierarchy (data nodes sorted by chunk offset) must match the order
+maplibre-gl-lidar's `nodeRanges` index points within a node.
+
 The `?data=` LiDAR deep link leans on two more things the compiler cannot see.
 `isStreamedLidarUrl` (`apps/geolibre-desktop/src/lib/data-url.ts`) copies the
 routing at the top of `LidarControl.loadPointCloud` (an `/ept.json` suffix or a
@@ -314,6 +341,22 @@ it. `addLidarLayerFromUrl` also relies on `load` firing, and adding the store
 layer, before `loadPointCloud` resolves; it throws if not.
 `tests/lidar-url-layer.test.ts` pins the GeoLibre side of both. Re-read
 `loadPointCloud` on a bump.
+
+The point cloud annotator (`packages/plugins/src/plugins/point-cloud-annotation/`)
+edits the control's loaded points through the point-editing API the package
+added in 0.18 (`getPointCloudData`, `refreshPointColors`, `getRenderSettings`,
+`pauseStreaming`/`resumeStreaming`, `isStreamingLoading`,
+`DeckOverlay.getViewport`), all called from `lidar-access.ts`. Two things are not
+compiler checked. Edits write into the arrays `getPointCloudData` returns, which
+relies on them being the buffers the layers render from (for a streamed cloud,
+views of the loader's buffers). Saved labels are keyed by `nodeRanges`
+(`(node key, index - start)`), so a change in how the loaders order a node's
+points would silently re-apply labels to the wrong points. `ASPRS_CLASSES` in
+`classes.ts` hand-mirrors the package's unexported `CLASSIFICATION_COLORS`;
+`tests/point-cloud-annotation.test.ts` reads the real colours back through
+`ColorSchemeProcessor` and fails on drift. Run
+`npx playwright test e2e/point-cloud-annotation.spec.ts --project=features` on
+a bump.
 
 ### `maplibre-gl-splat` (`packages/plugins/package.json`) — private internals
 
@@ -337,6 +380,24 @@ and placement restore stop working without an error.
 not catch that either: re-read `loadSplat` / `loadModel` in the package on a bump.
 Better still, upstream an id option and a per-asset placement getter and delete
 the patching.
+
+### `@geoman-io/maplibre-geoman-free` (`packages/plugins/package.json`) — change-mode internals
+
+Geoman's change mode removes a vertex on right-click, but only for LineString,
+Polygon and MultiPolygon. `installMultiLineVertexRemoval` in
+`packages/plugins/src/plugins/maplibre-geo-editor.ts` adds MultiLineString
+(discussion #2750). It hooks `geoman.actionInstances` and wraps the
+`edit__change` action's `cutVertex`, reading the `featureData` / `markerData`
+payload and calling `fireFeatureUpdatedEvent`. None of that is checked by the
+compiler. `patch-package` is no help here: the app loads the nested copies
+under `packages/plugins` and `apps/geolibre-desktop`, not the root one.
+
+If a bump renames the action key or those members, the wrapper silently stops
+applying and MultiLineString vertices go back to logging
+`EditChange.cutVertex: feature not updated`. On a bump, re-read `cutVertex` in
+the package's `dist/maplibre-geoman.es.js`, then right-click a MultiLineString
+vertex in Edit mode. If upstream adds MultiLineString support, delete the
+wrapper.
 
 ### `zarr-cesium` (`packages/map/package.json`) — private internals
 
@@ -890,6 +951,15 @@ output when a build actually runs. Rebuild, or delete the stale directory.
 
 ## Generated files and cross-file sync
 
+- **The open data gallery.** [`gallery.md`](gallery.md) and the "Open data
+  showcase" teaser on [`demos.md`](demos.md) (between the
+  `<!-- demo-gallery-teaser -->` markers) are generated from
+  `scripts/demo-gallery.json`: the themes, the featured demos, and one entry per
+  demo (slug, title, theme tag, caption, data credit). Edit the JSON, run
+  `npm run gallery`, and commit both files; `npm run gallery:check` (part of
+  `npm run ci`) fails on drift. Each entry's screenshot must already be at
+  `https://assets.geolibre.app/images/<slug>.webp` (opengeos/geolibre-assets),
+  and its `theme` should match the tag on its share.geolibre.app project.
 - **Processing tool metadata.** Names, descriptions, group labels, parameter
   labels/help and select options live in registries with no i18n access, so the
   dialogs resolve them through

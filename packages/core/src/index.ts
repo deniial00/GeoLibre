@@ -197,6 +197,26 @@ export {
   stripGoogleMapsApiKeyHeader,
 } from "./three-d-tiles";
 export {
+  changedPreferenceCredentials,
+  environmentVariableAccount,
+  geocodingApiKeyAccount,
+  isSecretEnvironmentVariable,
+  lookupProjectCredential,
+  overlayStoredEnvironmentVariables,
+  overlayStoredGeocodingApiKeys,
+  overlayStoredPreferenceCredentials,
+  resolveProjectHeaderReferences,
+  setProjectCredentialLookup,
+  splitProjectCredentials,
+  type ProjectCredentialLookup,
+} from "./project-credential-refs";
+export {
+  allowsCredentialHeaders,
+  hasHeaderReferences,
+  isHeaderReferenceOnly,
+  resolveHeaderReferences,
+} from "./header-references";
+export {
   isCredentialFieldName,
   MAX_REDACT_DEPTH,
   PROJECT_CREDENTIAL_FIELDS,

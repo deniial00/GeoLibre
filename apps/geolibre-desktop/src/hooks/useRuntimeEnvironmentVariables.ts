@@ -1,4 +1,9 @@
-import { normalizeGeocodingProviderId, useAppStore } from "@geolibre/core";
+import {
+  normalizeGeocodingProviderId,
+  overlayStoredEnvironmentVariables,
+  overlayStoredGeocodingApiKeys,
+  useAppStore,
+} from "@geolibre/core";
 import { useEffect, useRef, useState } from "react";
 import { useShallow } from "zustand/react/shallow";
 import {
@@ -9,10 +14,14 @@ import {
 } from "../lib/assistant/provider";
 import { loadOsEnvVars, readOsEnv } from "../lib/assistant/os-env";
 import { useDesktopSettingsStore } from "./useDesktopSettings";
+import { useProjectCredentialStore } from "../lib/project-credentials";
 
 export function useRuntimeEnvironmentVariables() {
   const environmentVariables = useAppStore((s) => s.preferences.environmentVariables);
   const geocoding = useAppStore((s) => s.preferences.geocoding);
+  // Desktop: keychain values for project credentials the project file keeps
+  // empty. Subscribed so a Settings edit re-projects the runtime env.
+  const storedCredentials = useProjectCredentialStore((s) => s.values);
   // Device-local Cesium Ion token (Settings → Environment). Projected below so
   // getCesiumIonToken() picks it up as a runtime override without a rebuild.
   const mapboxAccessToken = useDesktopSettingsStore((s) => s.desktopSettings.mapboxAccessToken);
@@ -54,7 +63,7 @@ export function useRuntimeEnvironmentVariables() {
     const geocoderEnv: Record<string, string> = {
       VITE_GEOCODER_PROVIDER: providerId,
     };
-    const apiKey = geocoding.apiKeys?.[providerId]?.trim();
+    const apiKey = overlayStoredGeocodingApiKeys(geocoding).apiKeys[providerId]?.trim();
     if (apiKey) geocoderEnv.VITE_GEOCODER_API_KEY = apiKey;
     if (geocoding.forwardEndpoint?.trim())
       geocoderEnv.VITE_GEOCODER_ENDPOINT = geocoding.forwardEndpoint.trim();
@@ -63,7 +72,7 @@ export function useRuntimeEnvironmentVariables() {
     if (geocoding.email?.trim()) geocoderEnv.VITE_GEOCODER_EMAIL = geocoding.email.trim();
 
     const projectEnv = Object.fromEntries(
-      environmentVariables
+      overlayStoredEnvironmentVariables(environmentVariables)
         .filter((variable) => variable.enabled && variable.key.trim())
         .map((variable) => [variable.key.trim(), variable.value]),
     );
@@ -137,5 +146,6 @@ export function useRuntimeEnvironmentVariables() {
     arcgisApiKey,
     aiProfiles,
     osEnv,
+    storedCredentials,
   ]);
 }

@@ -283,7 +283,7 @@
       },
       "wfs": {
         "label": "WFS შრის დამატება",
-        "description": "დაამატეთ WFS ობიექტები GetFeature სერვისიდან GeoJSON-ის მოთხოვნით."
+        "description": "დაამატეთ WFS ობიექტები GetFeature სერვისიდან GeoJSON-ის ან GML-ის მოთხოვნით."
       },
       "wmts": {
         "label": "WMTS შრის დამატება",
@@ -2432,7 +2432,6 @@
       "variablesTitle": "გარემოს ცვლადები",
       "variablesCount_one": "{{count}} ჩართული გაშვების ცვლადი.",
       "variablesCount_other": "{{count}} ჩართული გაშვების ცვლადი.",
-      "secretsWarning": "მნიშვნელობები ინახება ღია ტექსტად პროექტის ფაილში და შეიძლება გამჟღავნდეს პროექტის გაზიარებისას. ნუ განათავსებთ აქ საიდუმლოებებს, თუ პროექტის ფაილი კერძო არ რჩება.",
       "empty": "გარემოს ცვლადები არ არის კონფიგურირებული.",
       "variableFallback": "ცვლადი",
       "enableAria": "{{name}}-ის ჩართვა",
@@ -8532,7 +8531,14 @@
       "valuesInt8": "ნედლი (int8)",
       "stretch": "გაჭიმვა (±)",
       "downloadValues": "GeoTIFF მნიშვნელობები",
-      "title": "სატელიტური ემბედინგები"
+      "title": "სატელიტური ემბედინგები",
+      "visualizeTesseraTitle": "საძიებო არეალში არჩეული არხების რუკაზე დამატება RGB შრედ",
+      "readingChunks": "იკითხება ნაწილი {{done}} / {{total}} ({{size}}-მდე)…",
+      "tesseraTooLarge": "არეალს სჭირდება {{count}} ნაწილი (დაახლ. {{size}}); ლიმიტია {{limit}}. გაადიდეთ ან დახაზეთ უფრო პატარა ჩარჩო.",
+      "tesseraYearMissing": "Tessera {{year}} ამ არეალისთვის ჯერ არ არის სრული.",
+      "tesseraEmpty": "ამ არეალში {{year}} წლისთვის ჩაშენებები არ არის.",
+      "tesseraLayerName": "Tessera {{year}} ({{bands}})",
+      "tesseraRenderHint": "ვიზუალიზაცია კითხულობს v1.1 ჩაშენებებს (AWS Open Data) სრული 10 მ გარჩევადობით საძიებო არეალში, დაახლ. 1 MB კმ²-ზე, და თითოეულ არხს 2–98% დიაპაზონზე ჭიმავს."
     },
     "geolibre-fields-of-the-world": {
       "boundariesExists": "{{name}} უკვე რუკაზეა.",

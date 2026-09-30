@@ -283,7 +283,7 @@
       },
       "wfs": {
         "label": "Adicionar camada WFS",
-        "description": "Adicione feições WFS solicitando GeoJSON de um serviço GetFeature."
+        "description": "Adicione feições WFS solicitando GeoJSON ou GML de um serviço GetFeature."
       },
       "wmts": {
         "label": "Adicionar camada WMTS",
@@ -2432,7 +2432,6 @@
       "variablesTitle": "Variáveis de ambiente",
       "variablesCount_one": "{{count}} variável de execução ativada.",
       "variablesCount_other": "{{count}} variáveis de execução ativadas.",
-      "secretsWarning": "Os valores são armazenados em texto simples no arquivo do projeto e podem ser expostos quando o projeto é compartilhado. Evite colocar segredos aqui, a menos que o arquivo do projeto permaneça privado.",
       "empty": "Nenhuma variável de ambiente configurada.",
       "variableFallback": "variável",
       "enableAria": "Ativar {{name}}",
@@ -8532,7 +8531,14 @@
       "valuesInt8": "Bruto (int8)",
       "stretch": "Estiramento (±)",
       "downloadValues": "Valores GeoTIFF",
-      "title": "Embeddings de satélite"
+      "title": "Embeddings de satélite",
+      "visualizeTesseraTitle": "Adicionar as bandas selecionadas na área de pesquisa ao mapa como uma camada RGB",
+      "readingChunks": "Lendo bloco {{done}} de {{total}} (até {{size}})…",
+      "tesseraTooLarge": "A área precisa de {{count}} blocos (cerca de {{size}}); o limite é {{limit}}. Aproxime o mapa ou desenhe uma caixa menor.",
+      "tesseraYearMissing": "O Tessera {{year}} ainda não está completo para esta área.",
+      "tesseraEmpty": "Nenhum embedding nesta área para {{year}}.",
+      "tesseraLayerName": "Tessera {{year}} ({{bands}})",
+      "tesseraRenderHint": "Visualizar lê os embeddings v1.1 (AWS Open Data) na resolução total de 10 m sobre a área de pesquisa, cerca de 1 MB por km², e estica cada banda para seu intervalo de 2–98%."
     },
     "geolibre-fields-of-the-world": {
       "boundariesExists": "{{name}} já está no mapa.",

@@ -94,7 +94,11 @@ import {
   maplibreTimelapsePlugin,
   maplibreTimeSliderPlugin,
   setTimelapseVideoSaver,
+  setPointCloudAnnotationFileSaver,
+  setPointCloudPrelabelRunner,
+  setPointCloudLabelWriter,
   maplibreUsgsLidarPlugin,
+  pointCloudAnnotationPlugin,
   maplibreUsgsNldiPlugin,
   PluginManager,
   registerRightPanel,
@@ -284,9 +288,10 @@ const BUILT_IN_PLUGINS: GeoLibrePlugin[] = [
   maplibreRouteAnimationPlugin,
   flightSimulatorPlugin,
   godsEyeViewPlugin,
-  // Last visible entry of the Plugins menu; the ids below are skipped by
-  // PluginsMenu and surface elsewhere.
   maplibreSamGeoPlugin,
+  pointCloudAnnotationPlugin,
+  // Last visible entry of the Plugins menu is above; the ids below are
+  // skipped by PluginsMenu and surface elsewhere.
   maplibreDirectionsPlugin,
   maplibreReverseGeocodePlugin,
   maplibreDeckGlVizPlugin,
@@ -325,6 +330,90 @@ setTimelapseVideoSaver((blob, { defaultName, extension, mimeType }) =>
     mimeType,
   }),
 );
+
+// The point cloud annotator exports LAS files but cannot depend on the app's
+// Tauri I/O helpers, so the binary save is injected here like the timelapse's.
+setPointCloudAnnotationFileSaver((bytes, { defaultName, extension, mimeType, description }) =>
+  saveBinaryFileWithFallback(bytes, {
+    defaultName,
+    filters: [{ name: description, extensions: [extension] }],
+    browserTypes: [{ description, accept: { [mimeType]: [`.${extension}`] } }],
+    mimeType,
+  }),
+);
+
+// The point cloud annotator pre-labels with Whitebox LiDAR classifiers run by
+// the in-browser WASM runner, which lives in the processing package the
+// plugins package cannot import; loaded on first use to stay off startup.
+setPointCloudPrelabelRunner(async (toolId, parameters, las) => {
+  const { runWhiteboxToolWasm } = await import("@geolibre/processing");
+  const job = await runWhiteboxToolWasm({
+    tool_id: toolId,
+    parameters,
+    layer_inputs: { input: { name: "input.las", kind: "lidar_in", bytes: las } },
+    tool: {
+      id: toolId,
+      params: [
+        { name: "input", kind: "lidar_in", required: true },
+        { name: "output", kind: "lidar_out", required: true },
+        ...Object.keys(parameters).map((name) => ({ name, kind: "string" })),
+      ],
+    },
+  });
+  const output = job.outputs.output;
+  if (job.status !== "succeeded" || !(output instanceof Uint8Array)) {
+    throw new Error(job.error || job.messages.slice(-1)[0] || `${toolId} failed`);
+  }
+  return output;
+});
+
+// The point cloud annotator writes a whole local file with its saved labels
+// through the sidecar's /pointcloud job; the client lives in the processing
+// package, loaded on first use.
+setPointCloudLabelWriter({
+  available: async () => {
+    const { fetchPointCloudStatus } = await import("@geolibre/processing");
+    try {
+      return (await fetchPointCloudStatus()).available;
+    } catch {
+      return false;
+    }
+  },
+  write: async ({ inputPath, outputPath, labels, instances }) => {
+    const { fetchConversionJob, runPointCloudApplyLabels } = await import("@geolibre/processing");
+    let job = await runPointCloudApplyLabels({
+      input_path: inputPath,
+      output_path: outputPath,
+      labels,
+      instances,
+    });
+    // A long rewrite outlives a brief sidecar hiccup: retry a failed poll a
+    // few times before giving up (the job keeps running on the server).
+    let failures = 0;
+    while (job.status === "pending" || job.status === "running") {
+      await new Promise((resolve) => setTimeout(resolve, 1000));
+      try {
+        job = await fetchConversionJob(job.id);
+        failures = 0;
+      } catch (error) {
+        if (++failures >= 5) throw error;
+      }
+    }
+    if (job.status !== "succeeded") {
+      throw new Error(job.error || job.messages.slice(-1)[0] || "The point cloud job failed");
+    }
+    const result = (job.result ?? {}) as {
+      points?: number;
+      relabelled?: number;
+      instanced?: number;
+    };
+    return {
+      points: result.points ?? 0,
+      relabelled: result.relabelled ?? 0,
+      instanced: result.instanced ?? 0,
+    };
+  },
+});
 
 // The Earthdata GIS plugin exports an ArcGIS service as a plain GeoTIFF but
 // cannot re-encode it: ArcGIS has no COG output (`format=cog` falls back to

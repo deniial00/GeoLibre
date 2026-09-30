@@ -440,6 +440,7 @@ def test_add_raster_layer_records_its_source(server, project_path):
             "vector-tiles",
         ),
         ("add_tile_layer", {"url": "https://example.com/{z}/{x}/{y}.png"}, "xyz"),
+        ("add_lidar_layer", {"url": "https://example.com/autzen.copc.laz"}, "lidar"),
         ("add_3d_tiles_layer", {"url": "https://example.com/tileset.json"}, "3d-tiles"),
         ("add_3d_tiles_layer", {"ion_asset_id": 96188}, "3d-tiles"),
         ("add_cesium_ion_layer", {"asset_id": 96188}, "3d-tiles"),
@@ -480,6 +481,152 @@ def test_each_layer_tool_adds_a_layer_of_its_type(
     described = call(server, "describe_project", path=project_path)
     assert described["layers"][0]["name"] == "Added"
     assert described["layers"][0]["type"] == expected_type
+
+
+def test_get_point_cloud_annotations_counts_labels_and_lists_boxes(server, project_path, tmp_path):
+    """Summarizes what the app's annotator saved, without echoing every point."""
+    import base64
+    import zlib
+
+    call(server, "add_lidar_layer", path=project_path, name="Autzen", url="https://x/a.laz")
+    saved = json.loads((tmp_path / project_path).read_text())
+    assert saved["layers"][0]["metadata"]["sourceKind"] == "lidar-url"
+    # Edits {0: 6, 1: 6, 2: 2} as the app encodes them (varint delta + class).
+    compressor = zlib.compressobj(9, zlib.DEFLATED, -15)
+    node = compressor.compress(bytes([0, 6, 0, 6, 0, 2])) + compressor.flush()
+    saved.setdefault("plugins", {}).setdefault("settings", {})[
+        "geolibre-point-cloud-annotation"
+    ] = {
+        "version": 1,
+        "sources": [{"url": "https://x/a.laz", "nodes": {"file": base64.b64encode(node).decode()}}],
+        "cuboids": [
+            {
+                "url": "https://x/a.laz",
+                "boxes": [
+                    {"id": 1, "classCode": 6, "center": [0, 0, 1], "size": [2, 2, 2], "yaw": 0}
+                ],
+            }
+        ],
+    }
+    (tmp_path / project_path).write_text(json.dumps(saved))
+    result = call(server, "get_point_cloud_annotations", path=project_path)
+    assert result["labels"] == {"https://x/a.laz": {"6": 2, "2": 1}}
+    assert result["boxes"][0]["class_code"] == 6
+
+    # A signed source URL is reported without its credentials.
+    signed = "https://bucket.example.com/a.laz?X-Amz-Signature=abc&sig=zzz"
+    settings = saved["plugins"]["settings"]["geolibre-point-cloud-annotation"]
+    settings["sources"][0]["url"] = signed
+    settings["cuboids"][0]["url"] = signed
+    settings["vectors"] = [
+        {"url": signed, "items": [{"kind": "keypoint", "classCode": 15, "points": [[0, 0, 0]]}]}
+    ]
+    (tmp_path / project_path).write_text(json.dumps(saved))
+    result = call(server, "get_point_cloud_annotations", path=project_path)
+    assert all("zzz" not in url for url in result["labels"])
+    assert "zzz" not in result["boxes"][0]["url"]
+    assert "zzz" not in result["vectors"][0]["url"]
+
+    # Two signed links to the same cloud merge their counts.
+    settings["sources"].append(
+        {"url": signed.replace("abc", "def"), "nodes": {"file": base64.b64encode(node).decode()}}
+    )
+    (tmp_path / project_path).write_text(json.dumps(saved))
+    result = call(server, "get_point_cloud_annotations", path=project_path)
+    assert list(result["labels"].values()) == [{"6": 4, "2": 2}]
+
+
+def test_set_point_cloud_classes_tool_saves_the_schema(server, project_path, tmp_path):
+    """Custom classes land in the annotator's state and read back with the annotations."""
+    import base64
+    import zlib
+
+    call(server, "add_lidar_layer", path=project_path, name="Autzen", url="https://x/a.laz")
+    result = call(
+        server,
+        "set_point_cloud_classes",
+        path=project_path,
+        classes=[{"code": 64, "name": "Car", "color": "#E11D48"}],
+    )
+    assert result["classes"] == [{"code": 64, "name": "Car", "color": "#e11d48"}]
+    saved = json.loads((tmp_path / project_path).read_text())
+    state = saved["plugins"]["settings"]["geolibre-point-cloud-annotation"]
+    assert state["customClasses"] == result["classes"]
+    # Instance ids (app encoding: varint values) are summarized as point counts.
+    compressor = zlib.compressobj(9, zlib.DEFLATED, -15)
+    node = compressor.compress(bytes([0, 7, 0, 7, 0, 9])) + compressor.flush()
+    state["instances"] = [
+        {"url": "https://x/a.laz", "nodes": {"file": base64.b64encode(node).decode()}}
+    ]
+    (tmp_path / project_path).write_text(json.dumps(saved))
+    read = call(server, "get_point_cloud_annotations", path=project_path)
+    assert read["instances"] == {"https://x/a.laz": {"7": 2, "9": 1}}
+    assert read["vectors"] == []
+    assert read["classes"] == result["classes"]
+    error = call_error(
+        server,
+        "set_point_cloud_classes",
+        path=project_path,
+        classes=[{"code": 3, "name": "Low", "color": "#000000"}],
+    )
+    assert "19-255" in error
+    # A rejected schema leaves the file as it was.
+    assert json.loads((tmp_path / project_path).read_text()) == saved
+
+
+def test_point_cloud_file_tools_prelabel_and_write(server, project_path, tmp_path):
+    """Pre-label a LiDAR layer from a local file, then write the labelled file."""
+    laspy = pytest.importorskip("laspy")
+    np = pytest.importorskip("numpy")
+    pytest.importorskip("whitebox_workflows")
+    xs, ys = np.meshgrid(np.arange(-30.0, 30.0), np.arange(-30.0, 30.0))
+    header = laspy.LasHeader(point_format=6, version="1.4")
+    header.scales = [0.01, 0.01, 0.01]
+    las = laspy.LasData(header)
+    las.x, las.y = xs.ravel() + 500000, ys.ravel() + 4800000
+    las.z = 100 + 0.02 * xs.ravel()
+    las.classification = np.ones(xs.size, dtype=np.uint8)
+    las.write(str(tmp_path / "field.las"))
+    url = "https://x/field.las"
+    call(server, "add_lidar_layer", path=project_path, name="Field", url=url)
+
+    result = call(
+        server, "prelabel_point_cloud", path=project_path, url=url, input_file="field.las"
+    )
+    assert result["relabelled"] > 3000
+    assert set(result["classes"]) == {"2"}
+    saved = call(server, "get_point_cloud_annotations", path=project_path)
+    assert saved["labels"][url] == result["classes"]
+
+    written = call(
+        server,
+        "write_labeled_point_cloud",
+        path=project_path,
+        url=url,
+        input_file="field.las",
+        output_file="labeled.laz",
+    )
+    assert written["points"] == xs.size
+    out = laspy.read(str(tmp_path / "labeled.laz"))
+    assert int((np.asarray(out.classification) == 2).sum()) == result["relabelled"]
+
+    # The URL must be one of the project's LiDAR layers, and the output a new file.
+    assert "No LiDAR layer" in call_error(
+        server,
+        "prelabel_point_cloud",
+        path=project_path,
+        url="https://x/other.las",
+        input_file="field.las",
+    )
+    assert "different file" in call_error(
+        server,
+        "write_labeled_point_cloud",
+        path=project_path,
+        url=url,
+        input_file="field.las",
+        output_file="field.las",
+        overwrite=True,
+    )
 
 
 def test_cesium_ion_tools_persist_the_asset_id(server, project_path, tmp_path):

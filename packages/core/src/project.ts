@@ -1470,6 +1470,7 @@ function normalizeEnvironmentVariable(variable: unknown): RuntimeEnvironmentVari
     key,
     value: typeof candidate.value === "string" ? candidate.value : "",
     enabled: normalizeBoolean(candidate.enabled, true),
+    ...(candidate.secret === false ? { secret: false } : {}),
   };
 }
 

@@ -44,7 +44,7 @@ capabilities, credentials, and current compatibility.
 - **[Get started](https://geolibre.app/getting-started/)** — install, run from source, and configure
 - **[Features](https://geolibre.app/features/)** — the complete feature list
 - **[Rendering engines](https://geolibre.app/user-guide/rendering-engines/)** — compare MapLibre, Mapbox, Cesium, and ArcGIS and learn how to switch or combine them.
-- **[Open data demos](https://geolibre.app/demos/#open-data-showcase)** — live projects built from public open data on environmental health, human mobility, and environmental change.
+- **[Open data gallery](https://geolibre.app/gallery/)** — 100 live projects built from public open data, grouped by theme: health, natural hazards, climate, oceans and water, nature, transport, cities, energy, space, history and culture, society and economy, and food.
 
 ## Demos
 
@@ -118,6 +118,7 @@ Switch bodies from the planet switcher in the Layers panel. See [Demos](https://
 - [Mapping the 2026 Nepal Floods with Free High-Resolution Satellite Imagery](https://youtu.be/UDO1BCwOAAc)
 - [Building Cloud-Native GIS Workflows with GeoLibre](https://youtu.be/RgNoKsvZ5Hk)
 - [Image Georeferencing Using GeoLibre in the Browser](https://youtu.be/lbioujkDSG0)
+- [100 Interactive Maps from Open Data: Explore, Fork, and Build Your Own with GeoLibre](https://youtu.be/2r5OhvEa3AA)
 
 All of them, with chapters and summaries, are on the [Video Tutorials](https://geolibre.app/tutorials/videos/) page.
 

@@ -281,7 +281,7 @@
       },
       "wfs": {
         "label": "添加 WFS 图层",
-        "description": "通过向 GetFeature 服务请求 GeoJSON 来添加 WFS 要素。"
+        "description": "通过向 GetFeature 服务请求 GeoJSON 或 GML 来添加 WFS 要素。"
       },
       "wmts": {
         "label": "添加 WMTS 图层",
@@ -2385,7 +2385,6 @@
       "arcgisKeyStorageNote": "仅存储在本设备上（不存储在项目文件中，因此永远不会被共享），并且仅发送到 Esri。在 Web 版本中，它与其他站点数据共用同一浏览器存储。",
       "variablesTitle": "环境变量",
       "variablesCount_other": "已启用 {{count}} 个运行时变量。",
-      "secretsWarning": "变量值以纯文本形式存储在项目文件中，在共享项目时可能会暴露。除非项目文件保持私有，否则请勿在此放置机密信息。",
       "empty": "尚未配置任何环境变量。",
       "variableFallback": "变量",
       "enableAria": "启用 {{name}}",
@@ -8445,7 +8444,14 @@
       "valuesInt8": "原始值（int8）",
       "stretch": "拉伸（±）",
       "downloadValues": "GeoTIFF 数值",
-      "title": "卫星嵌入"
+      "title": "卫星嵌入",
+      "visualizeTesseraTitle": "将搜索区域内所选波段作为 RGB 图层添加到地图",
+      "readingChunks": "正在读取第 {{done}}/{{total}} 个数据块（最多 {{size}}）…",
+      "tesseraTooLarge": "该区域需要 {{count}} 个数据块（约 {{size}}），上限为 {{limit}}。请放大或绘制更小的范围框。",
+      "tesseraYearMissing": "该区域的 Tessera {{year}} 数据尚未完成。",
+      "tesseraEmpty": "该区域没有 {{year}} 年的嵌入数据。",
+      "tesseraLayerName": "Tessera {{year}}（{{bands}}）",
+      "tesseraRenderHint": "可视化会以 10 米全分辨率读取搜索区域内的 v1.1 嵌入（AWS 开放数据），每平方公里约 1 MB，并将每个波段拉伸到其 2–98% 范围。"
     },
     "geolibre-fields-of-the-world": {
       "boundariesExists": "{{name}} 已在地图上。",

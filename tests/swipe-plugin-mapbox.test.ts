@@ -37,14 +37,6 @@ describe("maplibreSwipePlugin engines", () => {
 });
 
 describe("swipeComparisonMapFactory", () => {
-  it("leaves the upstream default (a MapLibre pane) on a MapLibre host", () => {
-    // `undefined` is meaningful: maplibre-gl-swipe then builds its own
-    // `new maplibregl.Map(...)`, which is right on MapLibre.
-    assert.equal(swipeComparisonMapFactory(null), undefined);
-    assert.equal(swipeComparisonMapFactory(host()), undefined);
-    assert.equal(swipeComparisonMapFactory(host({ getMapboxGl: () => null })), undefined);
-  });
-
   it("builds the comparison pane with mapbox-gl on a Mapbox host", () => {
     const { gl, built, FakeMapboxMap } = mapboxGl();
     const create = swipeComparisonMapFactory(host({ getMapboxGl: () => gl }));
@@ -73,7 +65,6 @@ describe("swipe control options per engine", () => {
     // COG and maplibre-gl-raster layers are custom layers getStyle() omits, so
     // the panel only sees them through this provider.
     assert.ok(options.layerProvider, "MapLibre must keep the raster provider");
-    assert.equal(options.createMap, undefined);
   });
 
   it("drops it on Mapbox, where neither raster control runs", () => {

@@ -12,7 +12,7 @@ import {
   mapboxLineLayerId,
   mapboxSourceId,
 } from "@geolibre/map/style-layer-ids";
-import type { Feature, FeatureCollection } from "geojson";
+import type { Feature, FeatureCollection, MultiLineString, Position } from "geojson";
 import type * as maplibregl from "maplibre-gl";
 import type { GeoEditor, GeoEditorOptions } from "maplibre-gl-geo-editor";
 import {
@@ -24,6 +24,7 @@ import {
   geometryEditMetadata,
   captureEditedGeometries,
   captureEditedProperties,
+  removeMultiLineStringVertex,
   planGeoEditorOverlayOrder,
   reconcileEditedFeatures,
   tagFeatureKeys,
@@ -351,6 +352,7 @@ function activateGeoEditor(app: GeoLibreAppAPI): false | undefined {
         mapbox.adaptGeomanToMapbox(geomanInstance, mapboxGl, mapboxMap);
       }
       geoEditorControl.setGeoman(geomanInstance);
+      installMultiLineVertexRemoval(geomanInstance);
       bindGeomanEditSync(map);
     }
   }
@@ -442,6 +444,84 @@ function unbindGeomanEditSync(): void {
   geomanEditSyncMap = null;
 }
 
+/** The parts of Geoman's change-mode `cutVertex` payload this module reads. */
+interface GeomanCutVertexEvent {
+  featureData: {
+    getGeoJson(): Feature;
+    updateGeometry(geometry: MultiLineString): Promise<void>;
+  };
+  markerData: {
+    type: string;
+    position?: { coordinate: Position; path: (string | number)[] };
+  };
+}
+
+/** Geoman's change-mode action instance, as far as vertex removal goes. */
+interface GeomanChangeAction {
+  gm: { features: { delete(feature: unknown): Promise<void> } };
+  cutVertex(event: GeomanCutVertexEvent): Promise<void>;
+  fireFeatureUpdatedEvent(event: {
+    sourceFeatures: unknown[];
+    targetFeatures: unknown[];
+    markerData: unknown;
+  }): Promise<void>;
+}
+
+const MULTILINE_CUT_PATCHED = Symbol("geolibre.multiLineCut");
+
+/**
+ * Lets right-click remove a vertex from a MultiLineString. Geoman's change mode
+ * only implements removal for LineString, Polygon and MultiPolygon, so on a
+ * MultiLineString it logs "EditChange.cutVertex: feature not updated" and
+ * leaves the vertex (discussion #2750). The change-mode action is created each
+ * time Edit is turned on, so this hooks `actionInstances` and wraps that
+ * instance's `cutVertex`; every other geometry still goes to Geoman.
+ *
+ * @param geoman - The Geoman instance the editor drives.
+ */
+function installMultiLineVertexRemoval(geoman: Geoman): void {
+  const instances = geoman.actionInstances as Record<string, unknown>;
+  geoman.actionInstances = new Proxy(instances, {
+    set(target, key, value) {
+      if (key === "edit__change") patchChangeAction(value);
+      return Reflect.set(target, key, value);
+    },
+  }) as Geoman["actionInstances"];
+}
+
+function patchChangeAction(value: unknown): void {
+  const action = value as (GeomanChangeAction & { [MULTILINE_CUT_PATCHED]?: true }) | null;
+  if (!action || typeof action.cutVertex !== "function" || action[MULTILINE_CUT_PATCHED]) return;
+  action[MULTILINE_CUT_PATCHED] = true;
+  const original = action.cutVertex.bind(action);
+  action.cutVertex = async (event) => {
+    const feature = event.featureData?.getGeoJson();
+    const position = event.markerData?.position;
+    if (
+      event.markerData?.type !== "vertex" ||
+      feature?.geometry?.type !== "MultiLineString" ||
+      !position
+    ) {
+      return original(event);
+    }
+    const next = removeMultiLineStringVertex(feature.geometry, position.coordinate, position.path);
+    if (next === undefined) return original(event);
+    if (next === null) {
+      // Same call Geoman makes when a cut leaves too few vertices: it also
+      // drops the feature from the store and selection, which delete() alone
+      // doesn't.
+      await action.gm.features.delete(event.featureData);
+      return;
+    }
+    await event.featureData.updateGeometry(next);
+    await action.fireFeatureUpdatedEvent({
+      sourceFeatures: [event.featureData],
+      targetFeatures: [event.featureData],
+      markerData: event.markerData,
+    });
+  };
+}
+
 function geomanLayerStylesForMap(map: maplibregl.Map, mapbox: boolean) {
   const layerStyles = structuredClone(geoEditorModules!.geoman.defaultLayerStyles);
   const textFont = textFontForMapStyle(map, mapbox ? MAPBOX_TEXT_FONT : MAPLIBRE_TEXT_FONT);
@@ -456,8 +536,26 @@ function geomanLayerStylesForMap(map: maplibregl.Map, mapbox: boolean) {
     }
   }
 
+  // Geoman draws the midpoint "add a vertex here" handles almost exactly like
+  // real vertices (radius 6 vs 7), so editing a line looks like it multiplies
+  // nodes (discussion #2750). Make the handles smaller and fainter.
+  for (const sourceLayers of Object.values(layerStyles.edge_marker ?? {})) {
+    for (const layer of sourceLayers) {
+      if (layer.type !== "circle") continue;
+      layer.paint = { ...layer.paint, ...EDGE_MARKER_PAINT };
+    }
+  }
+
   return layerStyles;
 }
+
+/** Paint for Geoman's midpoint handles, distinct from its vertex markers. */
+const EDGE_MARKER_PAINT = {
+  "circle-radius": 4,
+  "circle-opacity": 0.5,
+  "circle-stroke-width": 1.5,
+  "circle-stroke-opacity": 0.6,
+};
 
 /** The font stack the default MapLibre basemaps serve glyphs for. */
 const MAPLIBRE_TEXT_FONT = ["Noto Sans Regular"];
@@ -878,6 +976,17 @@ export function buildEditorSaveCollection(options: {
 /** Id of the layer being geometry-edited, or null when no session is active. */
 export function getGeometryEditTargetLayerId(): string | null {
   return editTargetLayerId;
+}
+
+/**
+ * Whether the geo editor is in a draw or edit mode that acts on right-click
+ * (vertex removal, finishing a draw, the rotate popup). The map's right-click
+ * menu checks this so it doesn't open over the editor's own gesture.
+ *
+ * @returns True while a GeoEditor draw or edit mode is enabled.
+ */
+export function isGeoEditorUsingRightClick(): boolean {
+  return isGeoEditorInteractionMode();
 }
 
 /** Subscribe to geometry-edit session changes (for `useSyncExternalStore`). */

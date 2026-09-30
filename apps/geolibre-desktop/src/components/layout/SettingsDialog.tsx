@@ -5,8 +5,11 @@ import {
   DEFAULT_PROJECT_PREFERENCES,
   ELLIPSOIDS,
   GEOCODING_PROVIDERS,
+  changedPreferenceCredentials,
   getGeocodingProvider,
+  isSecretEnvironmentVariable,
   normalizeGeocodingProviderId,
+  overlayStoredPreferenceCredentials,
   useAppStore,
   type MapPreferences,
   type MapProjection,
@@ -53,6 +56,7 @@ import {
   FolderTree,
   Languages,
   Locate,
+  Lock,
   MapPinned,
   LayoutPanelTop,
   MessageSquare,
@@ -69,6 +73,7 @@ import {
   Terminal,
   Type,
   Trash2,
+  Unlock,
   TriangleAlert,
   Upload,
   Puzzle,
@@ -155,6 +160,10 @@ import {
 } from "../../lib/assistant/provider-fields";
 import { AiSectionContent } from "./AiSectionContent";
 import { CredentialStorageNotice } from "./CredentialStorageNotice";
+import {
+  projectCredentialsInKeychain,
+  rememberProjectCredentials,
+} from "../../lib/project-credentials";
 
 export type SettingsSection =
   | "language"
@@ -466,6 +475,7 @@ function normalizePreferences(preferences: ProjectPreferences): ProjectPreferenc
         key: variable.key.trim(),
         value: variable.value,
         enabled: variable.enabled,
+        ...(variable.secret === false ? { secret: false } : {}),
       }))
       .filter((variable) => variable.key.length > 0),
     geocoding: normalizeGeocodingPreferences(preferences.geocoding),
@@ -535,6 +545,7 @@ export function SettingsDialog({
   const shareHost = shareHostLabel();
   const shareSettingsUrl = shareBaseUrl ? `${shareBaseUrl}/settings` : null;
   const keychainStorage = credentialStorageLocation() === "keychain";
+  const projectKeychainWritable = projectCredentialsInKeychain();
   const shareTokenComponents: TransComponents = {
     tokenLink: (
       <a
@@ -635,12 +646,18 @@ export function SettingsDialog({
     ? section
     : // "interface" has no gate, so it is always a valid, visible fallback.
       (SECTION_ITEMS.find((item) => isSectionVisible(item.id))?.id ?? "interface");
+  // The preferences (with stored credentials filled in) the draft is seeded
+  // from, so saving writes only the credentials the user actually changed.
+  const [initialCredentialPreferences] = useState(() =>
+    overlayStoredPreferenceCredentials(preferences),
+  );
   const [draftPreferences, setDraftPreferences] = useState<DraftPreferences>(() =>
-    clonePreferences(preferences),
+    clonePreferences(initialCredentialPreferences),
   );
   const [draftDesktopSettings, setDraftDesktopSettings] = useState<DraftDesktopSettings>(() =>
-    cloneDesktopSettings(desktopSettings, preferences),
+    cloneDesktopSettings(desktopSettings, initialCredentialPreferences),
   );
+  const seededCredentialPreferencesRef = useRef<ProjectPreferences>(initialCredentialPreferences);
   const [error, setError] = useState<string | null>(null);
   // Live map projection, captured when the dialog opens. The Globe projection
   // lets the map drift slightly past restricted bounds, so we warn users to
@@ -743,13 +760,12 @@ export function SettingsDialog({
       setCustomColorDraft(null);
       return;
     }
-    const seededPreferences = clonePreferences(useAppStore.getState().preferences);
+    const storePreferences = overlayStoredPreferenceCredentials(useAppStore.getState().preferences);
+    seededCredentialPreferencesRef.current = storePreferences;
+    const seededPreferences = clonePreferences(storePreferences);
     setDraftPreferences(seededPreferences);
     setDraftDesktopSettings(
-      cloneDesktopSettings(
-        useDesktopSettingsStore.getState().desktopSettings,
-        useAppStore.getState().preferences,
-      ),
+      cloneDesktopSettings(useDesktopSettingsStore.getState().desktopSettings, storePreferences),
     );
     // Land the AI section on the first profile's provider, or the first
     // available provider if no profiles exist, so the user sees something
@@ -1378,6 +1394,15 @@ export function SettingsDialog({
       return;
     }
 
+    if (projectCredentialsInKeychain()) {
+      // Before setPreferences: the cache update is synchronous, so a cleared
+      // value is gone before the runtime env re-projects. The store keeps the
+      // plaintext until a project save moves it out, so a failed keychain
+      // write never loses the value: that save falls back to the prompt.
+      void rememberProjectCredentials(
+        changedPreferenceCredentials(seededCredentialPreferencesRef.current, normalized),
+      );
+    }
     setPreferences(normalized);
     // When a level preset is still active, recompute its hidden lists from the
     // current plugin registry at save time. The draft was snapshotted when the
@@ -2668,6 +2693,7 @@ export function SettingsDialog({
               ) : null}
               {effectiveSection === "geocoding" ? (
                 <div className="space-y-5">
+                  <CredentialStorageNotice />
                   <div className="space-y-1">
                     <h3 className="text-sm font-semibold">{t("settings.geocoding.title")}</h3>
                     <p className="text-xs text-muted-foreground">
@@ -2742,7 +2768,11 @@ export function SettingsDialog({
                               </Button>
                             </div>
                             <p className="text-xs text-amber-600 dark:text-amber-500">
-                              {t("settings.geocoding.secretsWarning")}
+                              {projectKeychainWritable
+                                ? t("settings.geocoding.secretsWarningKeychain")
+                                : keychainStorage
+                                  ? t("settings.geocoding.secretsWarningUnavailable")
+                                  : t("settings.geocoding.secretsWarning")}
                             </p>
                           </div>
                         ) : null}
@@ -2979,8 +3009,17 @@ export function SettingsDialog({
                   </div>
                   <div className="flex items-start gap-2 rounded-md border border-amber-500/40 bg-amber-500/10 p-3 text-xs text-amber-700 dark:text-amber-300">
                     <TriangleAlert className="mt-0.5 h-4 w-4 shrink-0" />
-                    <span>{t("settings.env.secretsWarning")}</span>
+                    <span>
+                      {projectKeychainWritable
+                        ? t("settings.env.secretsWarningKeychain")
+                        : keychainStorage
+                          ? t("settings.env.secretsWarningUnavailable")
+                          : t("settings.env.secretsWarning")}
+                    </span>
                   </div>
+                  <p className="text-xs text-muted-foreground">
+                    {t("settings.env.headerReferenceHint")}
+                  </p>
                   {draftPreferences.environmentVariables.length === 0 ? (
                     <div className="rounded-md border border-dashed p-4 text-sm text-muted-foreground">
                       {t("settings.env.empty")}
@@ -2989,10 +3028,14 @@ export function SettingsDialog({
                     <div className="space-y-2">
                       {draftPreferences.environmentVariables.map((variable, index) => {
                         const variableName = variable.key || t("settings.env.variableFallback");
+                        const secret = isSecretEnvironmentVariable(variable);
+                        const secretLabel = secret
+                          ? t("settings.env.secretOnAria", { name: variableName })
+                          : t("settings.env.secretOffAria", { name: variableName });
                         return (
                           <div
                             key={variable.id}
-                            className="grid grid-cols-[1.25rem_minmax(7rem,1fr)_minmax(7rem,1fr)_2rem_2rem] items-center gap-2"
+                            className="grid grid-cols-[1.25rem_minmax(7rem,1fr)_minmax(7rem,1fr)_2rem_2rem_2rem] items-center gap-2"
                           >
                             <input
                               aria-label={t("settings.env.enableAria", {
@@ -3029,6 +3072,21 @@ export function SettingsDialog({
                                 })
                               }
                             />
+                            <Button
+                              aria-label={secretLabel}
+                              title={secretLabel}
+                              className="h-8 w-8"
+                              type="button"
+                              size="icon"
+                              variant="ghost"
+                              onClick={() => updateEnvironmentVariable(index, { secret: !secret })}
+                            >
+                              {secret ? (
+                                <Lock className="h-3.5 w-3.5" />
+                              ) : (
+                                <Unlock className="h-3.5 w-3.5" />
+                              )}
+                            </Button>
                             <Button
                               aria-label={
                                 revealedValueIds.has(variable.id)

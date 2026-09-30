@@ -2141,6 +2141,13 @@ body,
   color: hsl(var(--popover-foreground)) !important;
 }
 
+/* The Request headers field is the library's growable field (`min-height: 0`),
+   so a filled tileset list squeezed it below its content and the headers hint
+   ran over the next label. Keep it at least content height; the panel scrolls. */
+.geolibre-3d-tiles-panel .three-d-tiles-field-grow {
+  flex-shrink: 0;
+}
+
 .geolibre-3d-tiles-panel .three-d-tiles-input {
   background: hsl(var(--background)) !important;
   border-color: hsl(var(--input)) !important;

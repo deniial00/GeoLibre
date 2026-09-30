@@ -463,6 +463,7 @@ export {
   startLayerGeometryEdit,
   endLayerGeometryEdit,
   getGeometryEditTargetLayerId,
+  isGeoEditorUsingRightClick,
   subscribeGeometryEdit,
   isGeoEditorAvailableForImport,
   getGeoEditorFeatureCount,
@@ -483,6 +484,15 @@ export {
 } from "./plugins/geo-editor-view-import";
 export { maplibreGeoAgentPlugin, GEOAGENT_PLUGIN_ID } from "./plugins/maplibre-geoagent";
 export { maplibreUsgsLidarPlugin } from "./plugins/maplibre-usgs-lidar";
+export {
+  pointCloudAnnotationPlugin,
+  POINT_CLOUD_ANNOTATION_PLUGIN_ID,
+  setPointCloudAnnotationFileSaver,
+  setPointCloudPrelabelRunner,
+  setPointCloudLabelWriter,
+  type PointCloudAnnotationFileSaver,
+  type PointCloudLabelWriter,
+} from "./plugins/point-cloud-annotation";
 export {
   buildBasinUrl,
   buildFlowtraceBody,

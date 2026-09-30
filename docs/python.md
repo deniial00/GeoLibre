@@ -180,7 +180,8 @@ m2
 ```
 
 `to_project()`, `save_project()`, and `to_html()` redact credentials — API keys,
-tokens, authenticated request headers, environment variables, geocoder keys, and
+tokens, authenticated request headers, secret environment variables (every row
+not marked `"secret": false`), geocoder keys, and
 credential URL parameters — so anything you serialize, commit, or share is safe
 by default. Pass `keep_credentials=True` to `to_project()` or `save_project()`
 for a trusted local file that must keep working without re-entering them:
@@ -270,7 +271,7 @@ m.on_layer_change(lambda e: print("layers", e["layerIds"]))
 | `list_algorithms()` | Available processing algorithms (`id`, `parameters`, …). |
 | `run_algorithm(id, parameters=None, timeout=)` | Run an algorithm; returns `{logs, resultLayerIds}`. |
 | `to_image(path=None, timeout=)` | Capture the map as PNG bytes, or write to `path`. |
-| `to_html(path=None, title=, width=, height=, app_url=)` | Export a standalone HTML page that embeds the current project (credentials redacted); returns the HTML or writes to `path`. |
+| `to_html(path=None, title=, width=, height=, app_url=)` | Export a standalone HTML page that embeds the current project (credentials redacted) in this map's `layout` and `theme`; returns the HTML or writes to `path`. |
 | `on(event, cb)` / `on_click` / `on_selection_change` / `on_layer_change` | Register event callbacks; returns an unsubscribe function. |
 | `request(method, params=None, timeout=)` | Low-level command primitive behind the methods above. |
 
@@ -304,6 +305,11 @@ m.on_layer_change(lambda e: print("layers", e["layerIds"]))
 | `add_wfs(endpoint, type_name, name=, version=, output_format=, srs_name=, max_features=, **style)` | Add a WFS layer (GetFeature GeoJSON, fetched and inlined). |
 | `add_cog(url, name=, bands=, colormap=, rescale=, **style)` | Add a Cloud Optimized GeoTIFF (URL or a kernel-side local GeoTIFF path). |
 | `add_raster(source, name=, bands=, colormap=, rescale=, array_args=, **style)` | Add a COG/GeoTIFF URL or path, or an xarray DataArray/Dataset (xarray needs `geolibre[raster]`). |
+| `add_lidar(url, name=None, **style)` | Add a LAS, LAZ, COPC or EPT point cloud by URL (COPC/EPT stream by level of detail). |
+| `point_cloud_annotations()` | Read the point labels, instance ids, custom classes, 3D boxes and 3D vectors saved by the app's [point cloud annotator](user-guide/point-cloud-annotation.md). Labels and instance ids are keyed by source URL, then node key and point index; `geolibre.project.apply_point_labels` writes a whole-file source's labels onto `laspy` classification. |
+| `prelabel_point_cloud(url, input_file, tool="ground")` | Run the annotator's Whitebox pre-label on a local copy of a LiDAR layer and save the changed classes as its labels (`ground` or `ground-vegetation`; needs `geolibre[pointcloud]`). |
+| `write_labeled_point_cloud(url, input_file, output_file)` | Write a local copy of a LiDAR layer's LAS/LAZ/COPC file with the saved labels and instance ids applied, streaming files larger than memory (needs `geolibre[pointcloud]`). |
+| `set_point_cloud_classes(classes)` | Define the annotator's custom classes, e.g. `[{"code": 64, "name": "Car", "color": "#e11d48"}]` (codes 19-255); the LiDAR layer draws them in their colour and names them in its legend. |
 | `add_3d_tiles(url=None, name=, ion_asset_id=, altitude_offset=, request_headers=, **style)` | Add a 3D Tiles `tileset.json` URL, or a Cesium Ion tileset by asset id (3D globe only). |
 | `add_cesium_ion(asset_id, name=, kind="3d-tiles", altitude_offset=, **style)` | Add a Cesium Ion asset by id: a 3D Tiles tileset or (`kind="imagery"`) an imagery layer. Renders on the 3D globe, with the app's Ion token. |
 | `add_czml(url=None, name=, data=, source_path=, **style)` | Add a CZML (Cesium Language) dynamic 3D scene by URL or inline packets: orbits, vehicle tracks, moving models. Renders on the 3D globe, which follows the document's clock. |

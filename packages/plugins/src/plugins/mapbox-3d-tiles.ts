@@ -1,6 +1,12 @@
 import { onArcgisViewDestroy } from "@geolibre/map/arcgis-control-adapters";
 import { applyTilesetAltitudeOffset, type PositionedTileset } from "./tiles-altitude-offset";
-import { useAppStore, type GeoLibreLayer, resolveThreeDTilesRequestHeaders } from "@geolibre/core";
+import {
+  allowsCredentialHeaders,
+  useAppStore,
+  type GeoLibreLayer,
+  resolveThreeDTilesRequestHeaders,
+  resolveProjectHeaderReferences,
+} from "@geolibre/core";
 import type { Layer } from "@deck.gl/core";
 import type { GeoLibreAppAPI } from "../types";
 import { ensureSharedDeckOverlay, setSharedDeckLayers } from "./shared-deck-overlay";
@@ -42,6 +48,24 @@ let signature = "";
 let revisionCounter = 0;
 const versions = new Map<string, { source: string; revision: number }>();
 
+/**
+ * The loaders.gl `fetch` option for a tileset. Headers only ever go over HTTPS
+ * (or loopback): every request, including child tiles the tileset JSON names
+ * by absolute URL, is refused rather than sent with credentials over plaintext.
+ */
+function credentialFetch(
+  headers: Record<string, string> | undefined,
+): RequestInit | ((url: string, init?: RequestInit) => Promise<Response>) {
+  if (!headers || Object.keys(headers).length === 0) return { headers };
+  return (url, init) =>
+    /^(?:data|blob):/i.test(url) || allowsCredentialHeaders(url)
+      ? fetch(url, {
+          ...init,
+          headers: { ...(init?.headers as Record<string, string>), ...headers },
+        })
+      : Promise.reject(new Error(`Request headers are not sent over ${url}`));
+}
+
 export function isMapboxTilesLayer(layer: GeoLibreLayer): boolean {
   return layer.type === "3d-tiles" && layer.metadata.sourceKind === "3d-tiles-url";
 }
@@ -69,8 +93,27 @@ export async function restoreMapboxTiles(app: GeoLibreAppAPI, flyToId?: string):
   const render = () => {
     if (boundMap !== map) return;
     const layers = useAppStore.getState().layers.filter(isMapboxTilesLayer);
+    // `source.requestHeaders` holds `${NAME}` templates, so the resolved values
+    // join the signature and revision: a changed variable rebuilds the layer.
+    const headers = new Map(
+      layers.map((layer) => [
+        layer.id,
+        resolveThreeDTilesRequestHeaders(
+          String(layer.source.url),
+          resolveProjectHeaderReferences(
+            layer.source.requestHeaders as Record<string, string> | undefined,
+          ),
+        ),
+      ]),
+    );
     const next = JSON.stringify(
-      layers.map(({ id, source, visible, opacity }) => ({ id, source, visible, opacity })),
+      layers.map(({ id, source, visible, opacity }) => ({
+        id,
+        source,
+        visible,
+        opacity,
+        headers: headers.get(id),
+      })),
     );
     if (next === signature) return;
     signature = next;
@@ -86,7 +129,7 @@ export async function restoreMapboxTiles(app: GeoLibreAppAPI, flyToId?: string):
     // Revisions are unique across the session, so a removed and re-added layer
     // (or a re-sourced one) never shares a token with a superseded instance.
     const revision = (layer: GeoLibreLayer) => {
-      const source = JSON.stringify(layer.source);
+      const source = JSON.stringify([layer.source, headers.get(layer.id)]);
       const previous = versions.get(layer.id);
       if (previous?.source === source) return previous.revision;
       const revision = ++revisionCounter;
@@ -110,12 +153,7 @@ export async function restoreMapboxTiles(app: GeoLibreAppAPI, flyToId?: string):
           pickable: false,
           loadOptions: {
             ...THREE_D_TILES_DECK_LOAD_OPTIONS,
-            fetch: {
-              headers: resolveThreeDTilesRequestHeaders(
-                String(layer.source.url),
-                layer.source.requestHeaders as Record<string, string> | undefined,
-              ),
-            },
+            fetch: credentialFetch(headers.get(layer.id)),
           },
           onTilesetLoad: (tileset: PositionedTileset & { zoom?: number }) => {
             applyThreeDTilesTilesetMemoryLimit(tileset);
@@ -165,7 +203,12 @@ export async function restoreMapboxTiles(app: GeoLibreAppAPI, flyToId?: string):
     );
   };
   unsubscribe = useAppStore.subscribe((state, previous) => {
-    if (state.layers !== previous.layers) render();
+    if (
+      state.layers !== previous.layers ||
+      state.preferences.environmentVariables !== previous.preferences.environmentVariables
+    ) {
+      render();
+    }
   });
   if (newlyBound) {
     const cleanup = () => {

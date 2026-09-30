@@ -39,6 +39,11 @@ import {
   useDesktopSettingsStore,
 } from "../hooks/useDesktopSettings";
 import { desktopShareSessionAccounts, hydrateDesktopShareSession } from "./share-oauth";
+import {
+  hydrateProjectCredentials,
+  readProjectCredentialIndex,
+  setProjectCredentialsWritable,
+} from "./project-credentials";
 
 export async function hydrateDesktopCredentials(): Promise<void> {
   if (credentialStorageLocation() !== "keychain") return;
@@ -48,6 +53,15 @@ export async function hydrateDesktopCredentials(): Promise<void> {
   } catch (error) {
     reportCredentialStorageError(error);
     postgresIds = null;
+  }
+  // Not gated by shouldPersistDesktopSettings(): project credentials are
+  // unrelated to the shared-settings session.
+  let projectAccounts: string[] | null;
+  try {
+    projectAccounts = readProjectCredentialIndex();
+  } catch (error) {
+    reportCredentialStorageError(error);
+    projectAccounts = null;
   }
   const settingsAccounts = shouldPersistDesktopSettings()
     ? desktopSettingsSecretAccounts(
@@ -59,6 +73,7 @@ export async function hydrateDesktopCredentials(): Promise<void> {
     ...(postgresIds ?? []).map(postgresConnectionAccount),
     ...settingsAccounts,
     ...desktopShareSessionAccounts(),
+    ...(projectAccounts ?? []),
   ];
   // `null` means the read failed and was reported; nothing else touches the
   // keychain during hydration, so a dismissed unlock prompt stays dismissed.
@@ -74,12 +89,14 @@ export async function hydrateDesktopCredentials(): Promise<void> {
   try {
     await hydratePostgresConnections(postgresIds, stored);
     await hydrateSettingsSecrets(stored);
+    hydrateProjectCredentials(projectAccounts, stored);
   } catch (error) {
     // Unforeseen failure: fall back to a session-only state that never writes
     // plaintext and never drops the legacy values.
     reportCredentialStorageError(error);
     setPostgresKeychainWritable(false);
     setSettingsKeychainWritable(false);
+    setProjectCredentialsWritable(false);
     setKeychainPostgresConnections(withNewIds(readBrowserPostgresConnections()));
     const { secrets } = splitDesktopSettingsSecrets(
       useDesktopSettingsStore.getState().desktopSettings,

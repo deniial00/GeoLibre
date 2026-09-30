@@ -195,12 +195,42 @@ different places per build:
   a restart the token is discarded if its issuer is on the unsaved list; if
   that list could not be written either, the token is restored, and it still
   works only if the revoke request also failed.
+  Credentials a project file would otherwise carry (geocoding API keys
+  `preferences.geocoding.apiKeys` and secret Environment Variables) are
+  stored device-wide by name as `project.geocoding.apiKey.<providerId>` and
+  `project.env.<VARIABLE>`; the non-secret
+  `geolibre.projectCredentials.accounts` list indexes them, with the same
+  index-first write order. Saving a project moves geocoding keys and uniquely
+  named secret environment values to the keychain, leaving empty values in
+  the file. Duplicate or nameless secret environment rows cannot be assigned
+  a unique account and remain for the local keep/strip save prompt.
+  Settings writes a value only when the user changes it. Clearing a field
+  deletes the stored value only if the field showed that value; clearing a
+  project-file override that differed from it drops the override and the
+  shared value applies again. Opening a file that
+  still carries plaintext values uses them for that session and writes nothing
+  until the next save. `@geolibre/core`'s `project-credential-refs.ts` fills
+  empty values from the stored ones where they are used (runtime environment,
+  Settings); a value in the file wins. Removing or renaming a variable never
+  deletes its stored value, since other projects on the device may use the
+  same name. A failed keychain write likewise falls back to the keep/strip
+  save prompt.
+  Layer request headers are not stored by layer: a header value references a
+  variable as `${NAME}` (for example `Authorization: Bearer ${TILES_TOKEN}`),
+  saved as typed and resolved from the project's enabled Environment
+  Variables when the request is made (`resolveProjectHeaderReferences`). A
+  header whose variable is unset is not sent. Redaction keeps a header value
+  that is only an optional scheme word plus one reference, and removes any
+  other header value as before.
 - **Web, Jupyter embed, mobile:** localStorage, as before. The web OAuth
-  refresh token stays in tab-scoped sessionStorage.
+  refresh token stays in tab-scoped sessionStorage. Project-file credentials
+  stay in the project file, behind the keep/strip save prompt.
 
 If the credential store is unavailable (for example, no Secret Service on a
-Linux session), credentials stay in memory for the session only, nothing new is
-written as plaintext, and the app shows a warning in the shell and in Settings.
+Linux session), credentials stay in memory for the session and Settings reports
+that the keychain cannot store project credentials. A local project save asks
+whether to keep remaining credentials in plaintext or strip them; it never
+writes them without an explicit choice.
 
 ### Native HTTP trust store and mutual TLS
 
