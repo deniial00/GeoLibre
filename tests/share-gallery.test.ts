@@ -4,6 +4,8 @@ import type { AddressInfo } from "node:net";
 import { describe, it } from "node:test";
 import {
   canOwnOrganizationProjects,
+  declineProjectTransfer,
+  fetchIncomingTransfers,
   fetchMyGroups,
   fetchMyOrganizations,
   fetchMyProjects,
@@ -17,7 +19,9 @@ import {
   loadSharedProjectThumbnail,
   projectOpenToken,
   publicSharingRestriction,
+  requestProjectTransfer,
   resolveThumbnailUrl,
+  setProjectDeleteProtection,
   shareAuthorizedFetch,
 } from "../apps/geolibre-desktop/src/lib/share-gallery";
 
@@ -57,6 +61,23 @@ function fakeFetch(status: number, body: unknown): { fn: typeof fetch; calls: st
     } as Response;
   }) as unknown as typeof fetch;
   return { fn, calls };
+}
+
+/** Like {@link fakeFetch}, but keeps each request's init so method/body can be asserted. */
+function recordingFetch(
+  status: number,
+  body: unknown,
+): { fn: typeof fetch; requests: { url: string; init: RequestInit }[] } {
+  const requests: { url: string; init: RequestInit }[] = [];
+  const fn = (async (url: string, init: RequestInit = {}) => {
+    requests.push({ url, init });
+    return {
+      ok: status >= 200 && status < 300,
+      status,
+      json: async () => body,
+    } as Response;
+  }) as unknown as typeof fetch;
+  return { fn, requests };
 }
 
 describe("resolveThumbnailUrl", () => {
@@ -637,5 +658,131 @@ describe("projectOpenToken", () => {
 
   it("sends nothing when there is no token to send", () => {
     assert.equal(projectOpenToken({ visibility: "private" }, ""), undefined);
+  });
+});
+
+function rawTransfer(overrides: Record<string, unknown> = {}) {
+  return {
+    id: "t-1",
+    projectId: "abc-123",
+    projectTitle: "My Map",
+    projectSlug: "my-map",
+    fromUsername: "giswqs",
+    toUsername: "bob",
+    toOrganization: null,
+    slug: "my-map",
+    status: "pending",
+    createdAt: "2026-09-30T00:00:00Z",
+    resolvedAt: null,
+    ...overrides,
+  };
+}
+
+describe("delete protection and ownership transfers", () => {
+  it("normalizes deleteProtected to null when the host does not expose it", async () => {
+    const { fn } = fakeFetch(200, { projects: [rawProject()] });
+    const { projects } = await fetchSharedProjects({ baseUrl: BASE, fetchImpl: fn });
+    assert.equal(projects[0].deleteProtected, null);
+  });
+
+  it("preserves an explicit deleteProtected flag", async () => {
+    const { fn } = fakeFetch(200, { projects: [rawProject({ deleteProtected: true })] });
+    const { projects } = await fetchSharedProjects({ baseUrl: BASE, fetchImpl: fn });
+    assert.equal(projects[0].deleteProtected, true);
+  });
+
+  it("PATCHes the protection flag as JSON with a bearer token", async () => {
+    const { fn, requests } = recordingFetch(200, {
+      project: rawProject({ deleteProtected: true }),
+    });
+    const project = await setProjectDeleteProtection({
+      token: "glb_tok",
+      projectId: "abc-123",
+      deleteProtected: true,
+      baseUrl: BASE,
+      fetchImpl: fn,
+    });
+    assert.equal(project.deleteProtected, true);
+    assert.equal(requests[0].url, `${BASE}/api/projects/abc-123`);
+    assert.equal(requests[0].init.method, "PATCH");
+    const headers = new Headers(requests[0].init.headers);
+    assert.equal(headers.get("Authorization"), "Bearer glb_tok");
+    assert.equal(headers.get("Content-Type"), "application/json");
+    assert.deepEqual(JSON.parse(String(requests[0].init.body)), { deleteProtected: true });
+  });
+
+  it("POSTs a user transfer and normalizes the pending offer", async () => {
+    const { fn, requests } = recordingFetch(201, {
+      transfer: rawTransfer(),
+      project: rawProject(),
+    });
+    const result = await requestProjectTransfer({
+      token: "glb_tok",
+      projectId: "abc-123",
+      target: { username: "bob" },
+      baseUrl: BASE,
+      fetchImpl: fn,
+    });
+    assert.equal(requests[0].url, `${BASE}/api/projects/abc-123/transfers`);
+    assert.equal(requests[0].init.method, "POST");
+    assert.deepEqual(JSON.parse(String(requests[0].init.body)), { username: "bob" });
+    assert.equal(result.transfer.toUsername, "bob");
+    assert.equal(result.transfer.status, "pending");
+    assert.equal(result.project?.id, "abc-123");
+  });
+
+  it("maps a slug conflict refusal to a typed error", async () => {
+    const { fn } = fakeFetch(409, { error: "slug already exists for the new owner" });
+    await assert.rejects(
+      requestProjectTransfer({
+        token: "glb_tok",
+        projectId: "abc-123",
+        target: { username: "bob" },
+        baseUrl: BASE,
+        fetchImpl: fn,
+      }),
+      (error: unknown) => error instanceof GalleryError && error.code === "slug-conflict",
+    );
+  });
+
+  it("maps an unknown recipient to a typed error", async () => {
+    const { fn } = fakeFetch(404, { error: "user not found" });
+    await assert.rejects(
+      requestProjectTransfer({
+        token: "glb_tok",
+        projectId: "abc-123",
+        target: { username: "nobody" },
+        baseUrl: BASE,
+        fetchImpl: fn,
+      }),
+      (error: unknown) => error instanceof GalleryError && error.code === "user-not-found",
+    );
+  });
+
+  it("resolves a decline against an empty 204 body", async () => {
+    const { fn, requests } = recordingFetch(204, null);
+    await declineProjectTransfer({
+      token: "glb_tok",
+      transferId: "t-1",
+      baseUrl: BASE,
+      fetchImpl: fn,
+    });
+    assert.equal(requests[0].url, `${BASE}/api/transfers/t-1/decline`);
+    assert.equal(requests[0].init.method, "POST");
+  });
+
+  it("lists incoming transfers and drops records without an id", async () => {
+    const { fn, requests } = recordingFetch(200, {
+      transfers: [rawTransfer({ slug: undefined }), { projectId: "abc-123" }],
+    });
+    const transfers = await fetchIncomingTransfers({
+      token: "glb_tok",
+      baseUrl: BASE,
+      fetchImpl: fn,
+    });
+    assert.equal(requests[0].url, `${BASE}/api/transfers/incoming`);
+    assert.equal(transfers.length, 1);
+    assert.equal(transfers[0].id, "t-1");
+    assert.equal(transfers[0].slug, "");
   });
 });

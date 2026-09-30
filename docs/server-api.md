@@ -287,6 +287,11 @@ The same rule governs private reads: administrators and active creators can
 read private organization projects they can manage. Membership alone does not
 grant a publisher, member, or viewer access to somebody else's private project.
 
+An administrator can also move a project *into* the organization with
+`POST /api/projects/{id}/transfers` (`{"organizationId": "..."}`), which applies
+immediately because the caller already manages the recipient (see
+[Transfers](#transfers)).
+
 Routes:
 
 - `GET /api/organizations/mine` lists memberships and each caller's `role`.
@@ -426,6 +431,7 @@ a membership-confined group.
   "forkCount": 0,
   "versionCount": 1,
   "featured": false,
+  "deleteProtected": false,
   "createdAt": "2026-08-03T12:00:00Z",
   "updatedAt": "2026-08-03T12:00:00Z",
   "tags": [],
@@ -446,6 +452,11 @@ Clients must use this value instead of reconstructing authorization from roles.
 Anonymous responses omit it. Because authenticated public responses vary by
 caller, they use `Cache-Control: private, no-store`. Unknown fields must be
 ignored by consumers.
+
+`deleteProtected` is the owner's per-project "prevent deletion" switch. It is
+`false` by default and present in every project representation, anonymous ones
+included. While it is `true`, `DELETE /api/projects/{id}` is refused (see
+below).
 
 ### `POST /api/projects`
 
@@ -535,7 +546,10 @@ return the immutable project document itself.
 ### `PATCH /api/projects/{id}`
 
 Requires ownership, or organization administrator / active organization creator access for organization-owned projects. Accepted fields are `title`, `description`, `visibility`,
-`tags`, `organizationId`, and `groupIds`. Response: `{"project": <project>}`.
+`tags`, `organizationId`, `groupIds`, and `deleteProtected`. Response: `{"project": <project>}`.
+An explicit `null` for `visibility`, `organizationId`, or `deleteProtected`
+where the field is non-nullable is refused with `422` rather than failing at
+commit.
 
 ### `PUT /api/projects/{id}/content`
 
@@ -557,6 +571,13 @@ Response `201`: `{"project": <project>, "version": <positive integer>}`.
 ### `DELETE /api/projects/{id}`
 
 Requires ownership. Deletes metadata and stored objects. Response: `204`.
+When the project's `deleteProtected` is `true`, the request is refused with
+`409` and `{"error": "project is delete-protected; turn off deleteProtected
+before deleting it"}`. The phrase `delete-protected` is stable: clients match
+on it to explain the refusal. Turning the switch off with
+`PATCH /api/projects/{id}` `{"deleteProtected": false}` unblocks the delete.
+
+Deleting a project also removes its pending transfers and its redirect rows.
 
 ### `GET /api/projects/{id}/activity`
 
@@ -573,7 +594,8 @@ at 100 entries:
 ```
 
 Actions and their `details`: `version_save` (`version`), `fork`
-(`forked_project_id`), `visibility_change` (`before`, `after`), `fetch` of
+(`forked_project_id`), `visibility_change` (`before`, `after`), `transfer`
+(`from`, `to` — `"org:<slug>"` or a username), `fetch` of
 the raw JSON (`version`) and `open` of the project page. `actorId` is the
 acting account, or `null` for an anonymous visitor. Anonymous `open` and
 `fetch` events are **never stored per visitor**: they are aggregated into one
@@ -611,6 +633,103 @@ and the organization's public sharing policy apply to it exactly as on create.
 
 Every successful read of the latest raw document may increment `views`; servers
 must not count failed or unauthorized reads.
+
+When a project was moved by a transfer, the address it vacated answers `301
+Moved Permanently` to the project's new raw JSON (for the `.geolibre.json`
+route) or new page URL (for the page route). The redirect is followed only when
+the caller can already see the target project, so a private or
+organization-only project's new address is not disclosed to others: an
+anonymous request to a vacated private address is `404`, not `301`.
+Authorized redirects to private or organization-only projects use
+`Cache-Control: private, no-store` so the old path cannot retain a previously
+authorized destination after sign-out.
+
+### Transfers
+
+A project can be handed to another user, who must accept, or to an organization
+the caller administers, which applies immediately. The project keeps its `id`,
+`views`, `forkCount`, version history, and activity; only its namespace and
+slug change. Every transfer clears the project's group shares (they were grants
+to the previous audience) and records a permanent redirect for the address it
+vacates.
+
+`POST /api/projects/{id}/transfers` requires ownership, or administrator
+membership for an organization-owned project, plus `write:projects`. An active
+organization creator who is not an administrator cannot transfer its property
+out. The body takes exactly one of `username` or `organizationId`, and an
+optional `slug`:
+
+```json
+{"username": "bob", "slug": "wetlands"}
+```
+
+- A **user** target creates a `pending` transfer. Nothing moves until that user
+  accepts, so the project keeps its current owner and address in the meantime.
+  Responds `201` with `{"transfer": <transfer>, "project": <project>}`.
+- An **organization** target requires that the caller administers the
+  organization and is applied immediately (the transfer is stored as
+  `accepted`). It responds `201` with the moved `project`.
+
+Refusals use stable phrases so clients can explain them:
+
+| Status | `error` | Cause |
+| --- | --- | --- |
+| `409` | `slug already exists for the new owner` | The destination namespace already uses the requested slug; retry with another `slug`. |
+| `409` | `a transfer is already pending for this project` | One pending transfer per project. |
+| `404` | `user not found` | No account has that username. |
+| `422` | `provide exactly one of username or organizationId` | Both or neither target was given. |
+| `422` | `project already belongs to that owner` | The destination is already the owner. |
+
+Receiving and managing:
+
+- `GET /api/transfers/incoming` lists the caller's pending offers, newest
+  first: `{"transfers": [...]}`.
+- `GET /api/transfers/outgoing` lists the pending transfers the caller started:
+  `{"transfers": [...]}`.
+- `POST /api/transfers/{id}/accept` (recipient only) moves the project. Its body
+  is optional: `{"slug": "..."}` overrides the destination slug, which is how a
+  recipient resolves a slug conflict (`409 slug already exists for the new
+  owner`). Responds `200` with `{"project": <project>, "transfer": <transfer>}`.
+  If the initiator no longer manages the project, the offer is cancelled and
+  the response is `409 transfer is no longer valid`.
+- `POST /api/transfers/{id}/decline` (recipient only) responds `204`.
+- `DELETE /api/transfers/{id}` cancels a pending transfer (the initiator, or
+  anyone who can still manage the project) and responds `204`.
+
+A transfer can change visibility: a project that was `public` becomes
+`organization` when it moves into an organization whose `publicSharingPolicy`
+is not `yes`, and a project that was `organization` becomes `private` when it
+moves to an individual. Both changes are recorded as `visibility_change`
+activity.
+
+A vacated `<username>/<slug>` (or `/org/<slug>/<slug>`) address stays
+**reserved** while its redirect exists: a later upload of the same title in that
+namespace receives a `-2` suffix rather than taking over the old link.
+
+Both listing routes use `Cache-Control: private, no-store`.
+
+A transfer is returned as:
+
+```json
+{
+  "id": "uuid",
+  "projectId": "uuid",
+  "projectTitle": "Wetlands",
+  "projectSlug": "wetlands",
+  "fromUsername": "ada",
+  "toUsername": "bob",
+  "toOrganization": null,
+  "slug": "wetlands",
+  "status": "pending",
+  "createdAt": "2026-09-30T12:00:00Z",
+  "resolvedAt": null
+}
+```
+
+`toUsername` is `null` for an organization transfer, where `toOrganization` is
+`{"id", "slug", "name"}` instead. `status` is `pending`, `accepted`, `declined`,
+or `cancelled`. `projectSlug` is the project's slug *at the time of the
+response*; `slug` is the slug it will take at its destination.
 
 ### Thumbnails
 

@@ -1572,6 +1572,7 @@ def test_postgresql_upgrade_sql_is_idempotent_and_covers_legacy_constraints():
     assert "add column if not exists email" in sql
     assert "visibility type varchar(16)" in sql
     assert "owner_id drop not null" in sql
+    assert "delete_protected" in sql
     assert "on delete set null" in sql
     assert "uq_project_org_slug" in sql
     assert "uq_group_accepted_owner" in sql
@@ -1722,6 +1723,7 @@ def test_existing_sqlite_schema_is_upgraded_additively(tmp_path):
     assert "email" in account_columns
     assert "organization_id" in project_columns
     assert "created_by_id" in project_columns
+    assert "delete_protected" in project_columns
     assert backfilled_creator == "old-account"
     assert compatibility_owner is None
     assert creator is not None
