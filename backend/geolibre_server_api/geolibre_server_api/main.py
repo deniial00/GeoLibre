@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-import hashlib
 import json
 import logging
 import os
@@ -2942,7 +2941,21 @@ def create_app(
         carry a strong ETag and ``no-cache``, so every cached copy is revalidated
         against the origin: a project made private (or demoted by an organization
         policy change) stops being served at once instead of after a max-age.
+
+        A version's stored body is written once and never changed, so the
+        project id and version number identify the bytes exactly. The ETag is
+        derived from them, and a matching ``If-None-Match`` is answered before
+        the body is read, so revalidation costs no storage read or hashing.
         """
+        if not protected(project):
+            etag = f'"{project.id}-v{version.number}"'
+            headers = {"Cache-Control": "public, no-cache", "ETag": etag}
+            candidates = {
+                candidate.strip().removeprefix("W/")
+                for candidate in request.headers.get("if-none-match", "").split(",")
+            }
+            if etag in candidates or "*" in candidates:
+                return Response(status_code=304, headers=headers)
         try:
             content = object_storage.get(version.object_key)
         except KeyError:
@@ -2953,14 +2966,6 @@ def create_app(
                 media_type="application/json",
                 headers={"Cache-Control": "private, no-store"},
             )
-        etag = f'"{hashlib.sha256(content).hexdigest()}"'
-        headers = {"Cache-Control": "public, no-cache", "ETag": etag}
-        candidates = {
-            candidate.strip().removeprefix("W/")
-            for candidate in request.headers.get("if-none-match", "").split(",")
-        }
-        if etag in candidates or "*" in candidates:
-            return Response(status_code=304, headers=headers)
         return Response(content, media_type="application/json", headers=headers)
 
     @app.get("/api/projects/{project_id}/versions")

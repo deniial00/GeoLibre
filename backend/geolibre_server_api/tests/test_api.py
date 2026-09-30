@@ -1976,6 +1976,20 @@ def test_public_raw_revalidates_and_demotion_blocks_cached_etag(client):
     historical = client.get(version)
     assert historical.headers["cache-control"] == "public, no-cache"
     assert client.get(version, headers={"If-None-Match": etag}).status_code == 304
+    for header in (f"W/{etag}", f'"other", {etag}', "*"):
+        assert client.get(raw, headers={"If-None-Match": header}).status_code == 304
+
+    saved = client.put(
+        f"/api/projects/{project['id']}/content",
+        headers=auth(tokens["member"]),
+        json={"content": json.dumps({"version": "1.0", "title": "cached v2", "layers": []})},
+    )
+    assert saved.status_code == 201, saved.text
+    changed = client.get(raw, headers={"If-None-Match": etag})
+    assert changed.status_code == 200
+    assert changed.headers["etag"] != etag
+    assert changed.json()["title"] == "cached v2"
+    assert client.get(version, headers={"If-None-Match": etag}).status_code == 304
 
     assert (
         client.patch(
