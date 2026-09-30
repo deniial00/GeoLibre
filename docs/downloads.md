@@ -72,9 +72,12 @@ anyway** to proceed.
 
 Prefer not to install? Download the `*-x64-portable.zip` asset from the latest
 [release](https://github.com/opengeos/GeoLibre/releases), unzip it anywhere
-(including a USB drive), and run `geolibre-desktop.exe`. No installer, admin
-rights, or registry changes are involved, and the build does not auto-update, so
-download a newer zip to upgrade.
+(including a USB drive), and run `geolibre-desktop.exe`. No installer or admin
+rights are involved. Each launch registers the app for the current user as the
+handler for `org.geolibre.desktop:` sign-in links (under
+`HKCU\Software\Classes`), its only registry change, so share-server sign-in can
+return to it from the browser. The build does not auto-update, so download a
+newer zip to upgrade.
 
 The portable build relies on the Microsoft Edge WebView2 Runtime, which is
 preinstalled on Windows 11 and current Windows 10. If the app does not start,
