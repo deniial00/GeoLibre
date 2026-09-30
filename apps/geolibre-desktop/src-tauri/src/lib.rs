@@ -522,6 +522,22 @@ pub fn run() {
                     }
                 });
             }
+            // The portable zip has no installer step, so nothing registers the
+            // OAuth callback scheme and a sign-in link from the browser never
+            // reaches the app (#2667). `build-portable.ps1` drops a marker next
+            // to the exe; only that build claims the scheme, per user, at
+            // runtime. NSIS/MSI already register it at install time, and MSIX
+            // declares it in the package manifest and virtualizes HKCU writes.
+            #[cfg(windows)]
+            if is_portable_windows_build() {
+                use tauri_plugin_deep_link::DeepLinkExt;
+                let handle = app.handle().clone();
+                std::thread::spawn(move || {
+                    if let Err(error) = handle.deep_link().register_all() {
+                        eprintln!("Deep link: could not register URL schemes ({error}).");
+                    }
+                });
+            }
             Ok(())
         })
         .build(tauri::generate_context!())
@@ -546,6 +562,19 @@ pub fn run() {
 
 fn current_working_directory() -> PathBuf {
     env::current_dir().unwrap_or_else(|_| PathBuf::from("."))
+}
+
+/// Marker file `packaging/portable/build-portable.ps1` writes next to the exe.
+#[cfg(windows)]
+const PORTABLE_MARKER_FILE: &str = "portable.marker";
+
+/// Whether this process runs from the portable zip rather than an installer.
+#[cfg(windows)]
+fn is_portable_windows_build() -> bool {
+    env::current_exe()
+        .ok()
+        .and_then(|exe| exe.parent().map(|dir| dir.join(PORTABLE_MARKER_FILE)))
+        .is_some_and(|marker| marker.is_file())
 }
 
 fn has_geolibre_project_extension(path: &Path) -> bool {
