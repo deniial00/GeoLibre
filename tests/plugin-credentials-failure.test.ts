@@ -25,7 +25,8 @@ const invoked: string[] = [];
 
 const { hydrateDesktopCredentials } =
   await import("../apps/geolibre-desktop/src/lib/credential-hydration");
-const { pluginCredentialHost } = await import("../apps/geolibre-desktop/src/lib/plugin-credentials");
+const { pluginCredentialHost } =
+  await import("../apps/geolibre-desktop/src/lib/plugin-credentials");
 const { useCredentialStorageStatus } =
   await import("../apps/geolibre-desktop/src/lib/credential-store");
 

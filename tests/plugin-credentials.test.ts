@@ -42,8 +42,10 @@ import type { GeoLibreAppAPI, GeoLibrePlugin } from "../packages/plugins/src/typ
 // Dynamic imports: the Tauri/localStorage stubs above must exist before these load.
 const { hydrateDesktopCredentials } =
   await import("../apps/geolibre-desktop/src/lib/credential-hydration");
-const { pluginCredentialHost } = await import("../apps/geolibre-desktop/src/lib/plugin-credentials");
-const { queueCredentialChanges } = await import("../apps/geolibre-desktop/src/lib/credential-store");
+const { pluginCredentialHost } =
+  await import("../apps/geolibre-desktop/src/lib/plugin-credentials");
+const { queueCredentialChanges } =
+  await import("../apps/geolibre-desktop/src/lib/credential-store");
 const { PluginManager } = await import("../packages/plugins/src/plugin-manager");
 
 // Resolves once every queued keychain write has drained.
@@ -63,7 +65,9 @@ describe("app.credentials on desktop", () => {
       activate: (api) => void (scoped = api),
       deactivate: () => undefined,
     } as GeoLibrePlugin);
-    manager.activate("ext-plugin", { credentials: pluginCredentialHost } as unknown as GeoLibreAppAPI);
+    manager.activate("ext-plugin", {
+      credentials: pluginCredentialHost,
+    } as unknown as GeoLibreAppAPI);
     const credentials = scoped?.credentials;
     assert.ok(credentials);
 

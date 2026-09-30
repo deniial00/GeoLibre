@@ -16,7 +16,8 @@ let failWrites = false;
   },
 };
 
-const { pluginCredentialHost } = await import("../apps/geolibre-desktop/src/lib/plugin-credentials");
+const { pluginCredentialHost } =
+  await import("../apps/geolibre-desktop/src/lib/plugin-credentials");
 
 describe("app.credentials on the web build", () => {
   it("stores per plugin in localStorage and deletes on an empty value", () => {

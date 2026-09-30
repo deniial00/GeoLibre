@@ -45,10 +45,7 @@ import {
   readProjectCredentialIndex,
   setProjectCredentialsWritable,
 } from "./project-credentials";
-import {
-  hydratePluginCredentials,
-  readPluginCredentialIndex,
-} from "./plugin-credentials";
+import { hydratePluginCredentials, readPluginCredentialIndex } from "./plugin-credentials";
 
 export async function hydrateDesktopCredentials(): Promise<void> {
   if (credentialStorageLocation() !== "keychain") return;
