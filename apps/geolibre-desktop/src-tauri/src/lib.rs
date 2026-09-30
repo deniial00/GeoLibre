@@ -513,15 +513,7 @@ pub fn run() {
             // shells out to update-desktop-database and xdg-mime, and window
             // creation must not wait on them.
             #[cfg(target_os = "linux")]
-            {
-                use tauri_plugin_deep_link::DeepLinkExt;
-                let handle = app.handle().clone();
-                std::thread::spawn(move || {
-                    if let Err(error) = handle.deep_link().register_all() {
-                        eprintln!("Deep link: could not register URL schemes ({error}).");
-                    }
-                });
-            }
+            spawn_deep_link_registration(app);
             // The portable zip has no installer step, so nothing registers the
             // OAuth callback scheme and a sign-in link from the browser never
             // reaches the app (#2667). `build-portable.ps1` drops a marker next
@@ -530,13 +522,7 @@ pub fn run() {
             // declares it in the package manifest and virtualizes HKCU writes.
             #[cfg(windows)]
             if is_portable_windows_build() {
-                use tauri_plugin_deep_link::DeepLinkExt;
-                let handle = app.handle().clone();
-                std::thread::spawn(move || {
-                    if let Err(error) = handle.deep_link().register_all() {
-                        eprintln!("Deep link: could not register URL schemes ({error}).");
-                    }
-                });
+                spawn_deep_link_registration(app);
             }
             Ok(())
         })
@@ -556,6 +542,17 @@ pub fn run() {
             );
             enqueue_project_paths(_app, paths);
             focus_main_window(_app);
+        }
+    });
+}
+
+#[cfg(any(target_os = "linux", windows))]
+fn spawn_deep_link_registration(app: &tauri::App) {
+    use tauri_plugin_deep_link::DeepLinkExt;
+    let handle = app.handle().clone();
+    std::thread::spawn(move || {
+        if let Err(error) = handle.deep_link().register_all() {
+            eprintln!("Deep link: could not register URL schemes ({error}).");
         }
     });
 }
