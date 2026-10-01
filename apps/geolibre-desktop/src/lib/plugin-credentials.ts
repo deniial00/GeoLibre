@@ -128,10 +128,10 @@ export async function hydratePluginCredentials(
         JSON.stringify(nextIndex),
       );
     }
-    for (const [account, { value }] of Object.entries(legacy)) {
+    for (const [account, { key, value }] of Object.entries(legacy)) {
       if (stored[account] !== value) await writeSecureCredential(account, value);
+      window.localStorage.removeItem(key);
     }
-    for (const { key } of Object.values(legacy)) window.localStorage.removeItem(key);
   } catch (error) {
     reportCredentialStorageError(error);
     writable = false;
