@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import logging
 import time
 
@@ -407,3 +408,87 @@ def test_idp_error_returns_access_denied_to_the_client(oauth_client):
     assert response.status_code == 303
     assert response.headers["location"].startswith(f"{WEB_REDIRECT}?")
     assert redirect_params(response)["error"] == "access_denied"
+
+
+def test_sso_role_drop_unpublishes_public_projects(oauth_client, fake_idp):
+    token, org_id = _org_with_idp(
+        oauth_client, roleMappings=[{"value": "gis-admins", "role": "publisher"}]
+    )
+    policy = oauth_client.patch(
+        f"/api/organizations/{org_id}",
+        json={"publicSharingPolicy": "publishers"},
+        headers=auth(token),
+    )
+    assert policy.status_code == 200, policy.text
+    scope = "read:projects write:projects share:public"
+    claims = fake_idp.base_claims("u1", preferred_username="grace", groups=["gis-admins"])
+    callback, verifier = sso_sign_in(oauth_client, fake_idp, "acme", claims, scope=scope)
+    publisher = _signed_in(oauth_client, callback, verifier)
+    created = oauth_client.post(
+        "/api/projects",
+        headers=auth(publisher),
+        json={
+            "filename": "wetlands.geolibre.json",
+            "content": json.dumps({"version": "1.0", "title": "Wetlands", "layers": []}),
+            "visibility": "public",
+            "organizationId": org_id,
+        },
+    )
+    assert created.status_code == 201, created.text
+    project_id = created.json()["project"]["id"]
+
+    claims = fake_idp.base_claims("u1", preferred_username="grace", groups=[])
+    callback, verifier = sso_sign_in(oauth_client, fake_idp, "acme", claims)
+    _signed_in(oauth_client, callback, verifier)
+    project = oauth_client.get(f"/api/projects/{project_id}", headers=auth(token))
+    assert project.status_code == 200, project.text
+    assert project.json()["project"]["visibility"] == "organization"
+
+
+def test_break_glass_administrator_cannot_be_demoted_or_removed(oauth_client):
+    token = admin_token(oauth_client)
+    org_id = create_org(oauth_client, token)
+    add_member(oauth_client, token, org_id, "bob", role="administrator")
+    configured = configure_idp(oauth_client, token, org_id, breakGlassUsername="ada")
+    assert configured.status_code == 200, configured.text
+    bob = admin_token(oauth_client, username="bob")
+    members = f"/api/organizations/{org_id}/members"
+    refused = {"error": "account is the organization's break-glass administrator"}
+
+    demoted = oauth_client.put(
+        members, json={"username": "ada", "role": "member"}, headers=auth(bob)
+    )
+    assert (demoted.status_code, demoted.json()) == (422, refused)
+    removed = oauth_client.delete(f"{members}/ada", headers=auth(bob))
+    assert (removed.status_code, removed.json()) == (422, refused)
+    left = oauth_client.delete(f"{members}/me", headers=auth(token))
+    assert (left.status_code, left.json()) == (422, refused)
+
+    # Clearing the break-glass account on the provider is the way out.
+    cleared = configure_idp(oauth_client, token, org_id)
+    assert cleared.status_code == 200, cleared.text
+    demoted = oauth_client.put(
+        members, json={"username": "ada", "role": "member"}, headers=auth(bob)
+    )
+    assert demoted.status_code == 200, demoted.text
+
+
+def test_sso_mapping_keeps_the_break_glass_administrator(oauth_client, fake_idp):
+    admins = [{"value": "gis-admins", "role": "administrator"}]
+    token, org_id = _org_with_idp(oauth_client, roleMappings=admins)
+    claims = fake_idp.base_claims("u1", preferred_username="grace", groups=["gis-admins"])
+    callback, verifier = sso_sign_in(oauth_client, fake_idp, "acme", claims)
+    _signed_in(oauth_client, callback, verifier)
+    configured = configure_idp(
+        oauth_client, token, org_id, roleMappings=admins, breakGlassUsername="grace"
+    )
+    assert configured.status_code == 200, configured.text
+
+    # ada is still an administrator, so only the break-glass rule keeps grace's role.
+    claims = fake_idp.base_claims("u1", preferred_username="grace", groups=[])
+    callback, verifier = sso_sign_in(oauth_client, fake_idp, "acme", claims)
+    grace = _signed_in(oauth_client, callback, verifier)
+    orgs = oauth_client.get("/api/organizations/mine", headers=auth(grace)).json()
+    assert [(org["slug"], org["role"]) for org in orgs["organizations"]] == [
+        ("acme", "administrator")
+    ]

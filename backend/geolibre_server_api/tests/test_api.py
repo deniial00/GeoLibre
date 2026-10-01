@@ -1798,7 +1798,8 @@ def test_activity_log_aggregates_anonymous_opens_and_is_owner_only(client):
 
 
 def test_anonymous_bucket_insert_race_falls_back_to_increment(client):
-    from geolibre_server_api.main import ProjectActivity, log_project_activity
+    from geolibre_server_api.project_models import ProjectActivity
+    from geolibre_server_api.projects import log_project_activity
     from sqlalchemy import select
     from sqlalchemy.orm import Session
 

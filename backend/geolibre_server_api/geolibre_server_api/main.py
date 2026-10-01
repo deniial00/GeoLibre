@@ -9,7 +9,7 @@ import secrets
 import shutil
 import uuid
 from contextlib import asynccontextmanager, suppress
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Annotated, Callable, Literal
 from urllib.parse import quote, urlparse
@@ -21,14 +21,6 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, RedirectResponse
 from pydantic import BaseModel, Field
 from sqlalchemy import (
-    Boolean,
-    ForeignKey,
-    Index,
-    Integer,
-    String,
-    Text,
-    UniqueConstraint,
-    and_,
     create_engine,
     delete,
     event,
@@ -40,7 +32,7 @@ from sqlalchemy import (
     update,
 )
 from sqlalchemy.exc import IntegrityError, OperationalError
-from sqlalchemy.orm import Mapped, Session, mapped_column, relationship, selectinload, sessionmaker
+from sqlalchemy.orm import Session, selectinload, sessionmaker
 
 from geolibre_server_api import enterprise_models  # noqa: F401
 from geolibre_server_api.auth import (
@@ -71,7 +63,21 @@ from geolibre_server_api.org_models import (
     OrganizationMember,
     OrganizationRole,
 )
-from geolibre_server_api.policy import organization_role, require_organization_admin
+from geolibre_server_api.policy import (
+    organization_role,
+    require_not_break_glass,
+    require_organization_admin,
+)
+from geolibre_server_api.project_models import (
+    PENDING_TRANSFER_INDEX,
+    Project,
+    ProjectActivity,
+    ProjectGroup,
+    ProjectRedirect,
+    ProjectTransfer,
+    Version,
+)
+from geolibre_server_api.projects import demote_disallowed_public_projects, log_project_activity
 from geolibre_server_api.proxy_identity import load_trusted_proxy_config
 
 Visibility = Literal["public", "unlisted", "private", "organization"]
@@ -85,168 +91,6 @@ IMAGE_TYPES = {"image/png", "image/jpeg", "image/webp"}
 
 OAUTH_CLEANUP_INTERVAL_SECONDS = 300
 logger = logging.getLogger(__name__)
-
-
-class Project(Base):
-    __tablename__ = "projects"
-    __table_args__ = (
-        UniqueConstraint("owner_id", "slug", name="uq_project_owner_slug"),
-        UniqueConstraint("organization_id", "slug", name="uq_project_org_slug"),
-    )
-    id: Mapped[str] = mapped_column(String(36), primary_key=True)
-    owner_id: Mapped[str | None] = mapped_column(
-        ForeignKey("accounts.id", ondelete="SET NULL"), nullable=True, index=True
-    )
-    created_by_id: Mapped[str | None] = mapped_column(
-        ForeignKey("accounts.id", ondelete="SET NULL"), nullable=True, index=True
-    )
-    organization_id: Mapped[str | None] = mapped_column(
-        ForeignKey("organizations.id", ondelete="SET NULL"), nullable=True, index=True
-    )
-    slug: Mapped[str] = mapped_column(String(100))
-    title: Mapped[str] = mapped_column(String(100))
-    description: Mapped[str] = mapped_column(Text, default="")
-    visibility: Mapped[str] = mapped_column(String(16))
-    tags_json: Mapped[str] = mapped_column(Text, default="[]")
-    thumbnail_type: Mapped[str | None] = mapped_column(String(20), nullable=True)
-    views: Mapped[int] = mapped_column(Integer, default=0)
-    fork_count: Mapped[int] = mapped_column(Integer, default=0)
-    featured: Mapped[bool] = mapped_column(Boolean, default=False)
-    # Owner opt-in: while true the project refuses DELETE with a 409 naming this
-    # switch. Off by default, per GeoLibre#1670.
-    delete_protected: Mapped[bool] = mapped_column(Boolean, default=False)
-    created_at: Mapped[str] = mapped_column(String(32))
-    updated_at: Mapped[str] = mapped_column(String(32), index=True)
-    owner: Mapped[Account | None] = relationship(back_populates="projects", foreign_keys=[owner_id])
-    organization: Mapped[Organization | None] = relationship()
-    versions: Mapped[list[Version]] = relationship(
-        back_populates="project",
-        cascade="all, delete-orphan",
-        order_by="Version.number",
-    )
-    group_shares: Mapped[list[ProjectGroup]] = relationship(
-        back_populates="project", cascade="all, delete-orphan"
-    )
-    # Cascaded so "delete project" still removes its pending transfers and its
-    # redirect rows on a database whose foreign keys are not enforced.
-    transfers: Mapped[list[ProjectTransfer]] = relationship(
-        back_populates="project", cascade="all, delete-orphan"
-    )
-    redirects: Mapped[list[ProjectRedirect]] = relationship(
-        back_populates="project", cascade="all, delete-orphan"
-    )
-
-
-class ProjectGroup(Base):
-    __tablename__ = "project_groups"
-    project_id: Mapped[str] = mapped_column(
-        ForeignKey("projects.id", ondelete="CASCADE"), primary_key=True
-    )
-    group_id: Mapped[str] = mapped_column(
-        ForeignKey("groups.id", ondelete="CASCADE"), primary_key=True
-    )
-    project: Mapped[Project] = relationship(back_populates="group_shares")
-    group: Mapped[Group] = relationship()
-
-
-class Version(Base):
-    __tablename__ = "versions"
-    project_id: Mapped[str] = mapped_column(
-        ForeignKey("projects.id", ondelete="CASCADE"), primary_key=True
-    )
-    number: Mapped[int] = mapped_column(Integer, primary_key=True)
-    object_key: Mapped[str] = mapped_column(Text)
-    created_at: Mapped[str] = mapped_column(String(32))
-    project: Mapped[Project] = relationship(back_populates="versions")
-
-
-class ProjectActivity(Base):
-    __tablename__ = "project_activities"
-    id: Mapped[str] = mapped_column(String(36), primary_key=True)
-    project_id: Mapped[str] = mapped_column(
-        ForeignKey("projects.id", ondelete="CASCADE"), index=True
-    )
-    actor_id: Mapped[str | None] = mapped_column(
-        ForeignKey("accounts.id", ondelete="SET NULL"), nullable=True, index=True
-    )
-    action: Mapped[str] = mapped_column(String(50))
-    details_json: Mapped[str] = mapped_column(Text, default="{}")
-    # Anonymous open/fetch events collapse into one row per project, action and
-    # UTC day: `bucket_key` ("<project>:<action>:<YYYY-MM-DD>") is unique so two
-    # concurrent requests cannot create duplicate buckets, and `count` is
-    # incremented database-side so they cannot lose each other's increment.
-    bucket_key: Mapped[str | None] = mapped_column(String(100), nullable=True, unique=True)
-    count: Mapped[int] = mapped_column(Integer, default=1)
-    created_at: Mapped[str] = mapped_column(String(32), index=True)
-
-
-class ProjectTransfer(Base):
-    """A pending or resolved hand-off of a project to a user or organization.
-
-    A user target stays ``pending`` until that user accepts; an organization
-    target is applied immediately by an administrator and is stored as
-    ``accepted`` so the project's history shows who moved it and where.
-    """
-
-    __tablename__ = "project_transfers"
-    id: Mapped[str] = mapped_column(String(36), primary_key=True)
-    project_id: Mapped[str] = mapped_column(
-        ForeignKey("projects.id", ondelete="CASCADE"), index=True
-    )
-    from_account_id: Mapped[str] = mapped_column(ForeignKey("accounts.id", ondelete="CASCADE"))
-    to_account_id: Mapped[str | None] = mapped_column(
-        ForeignKey("accounts.id", ondelete="CASCADE"), nullable=True, index=True
-    )
-    to_organization_id: Mapped[str | None] = mapped_column(
-        ForeignKey("organizations.id", ondelete="CASCADE"), nullable=True
-    )
-    slug: Mapped[str] = mapped_column(String(100))
-    status: Mapped[str] = mapped_column(String(16), default="pending")
-    created_at: Mapped[str] = mapped_column(String(32), index=True)
-    resolved_at: Mapped[str | None] = mapped_column(String(32), nullable=True)
-    project: Mapped[Project] = relationship(back_populates="transfers")
-    from_account: Mapped[Account] = relationship(foreign_keys=[from_account_id])
-    to_account: Mapped[Account | None] = relationship(foreign_keys=[to_account_id])
-    to_organization: Mapped[Organization | None] = relationship()
-
-
-PENDING_TRANSFER_INDEX = Index(
-    "uq_project_transfers_pending",
-    ProjectTransfer.project_id,
-    unique=True,
-    sqlite_where=ProjectTransfer.status == "pending",
-    postgresql_where=ProjectTransfer.status == "pending",
-)
-
-
-class ProjectRedirect(Base):
-    """The namespace and slug a project vacated when it was transferred.
-
-    Rows keep the old ``<username>/<slug>`` (or ``/org/<slug>/<slug>``) address
-    answering 301 to the project's new home, and keep ``unique_slug`` from
-    handing that address to a new upload.
-    """
-
-    __tablename__ = "project_redirects"
-    __table_args__ = (
-        UniqueConstraint("account_id", "slug", name="uq_redirect_account_slug"),
-        UniqueConstraint("organization_id", "slug", name="uq_redirect_org_slug"),
-    )
-    id: Mapped[str] = mapped_column(String(36), primary_key=True)
-    project_id: Mapped[str] = mapped_column(
-        ForeignKey("projects.id", ondelete="CASCADE"), index=True
-    )
-    account_id: Mapped[str | None] = mapped_column(
-        ForeignKey("accounts.id", ondelete="CASCADE"), nullable=True, index=True
-    )
-    organization_id: Mapped[str | None] = mapped_column(
-        ForeignKey("organizations.id", ondelete="CASCADE"), nullable=True, index=True
-    )
-    slug: Mapped[str] = mapped_column(String(100))
-    created_at: Mapped[str] = mapped_column(String(32))
-    project: Mapped[Project] = relationship(back_populates="redirects")
-    account: Mapped[Account | None] = relationship(foreign_keys=[account_id])
-    organization: Mapped[Organization | None] = relationship()
 
 
 # project_json reads project.owner.username and len(project.versions), both lazy.
@@ -377,87 +221,6 @@ TRANSFER_SLUG_CONFLICT = "slug already exists for the new owner"
 TRANSFER_PENDING = "a transfer is already pending for this project"
 TRANSFER_INVALID = "transfer is no longer valid"
 DELETE_PROTECTED = "project is delete-protected; turn off deleteProtected before deleting it"
-
-
-# Activity rows older than this are pruned the next time the project logs an
-# event, so the log never grows without bound (GeoLibre#1678 asks for a stated
-# retention period plus owner-initiated deletion, the latter being
-# DELETE /api/projects/{id}/activity).
-ACTIVITY_RETENTION_DAYS = int(os.getenv("GEOLIBRE_ACTIVITY_RETENTION_DAYS", "90"))
-# Actions an anonymous visitor can trigger. These are never stored per hit:
-# they are aggregated into one row per project, action and UTC day carrying a
-# count, so the owner learns "opened 40 times on 2026-08-21" and nothing about
-# who did it.
-AGGREGATED_ANONYMOUS_ACTIONS = frozenset({"open", "fetch"})
-
-
-def log_project_activity(
-    session: Session,
-    project_id: str,
-    actor_id: str | None,
-    action: str,
-    details: dict | None = None,
-) -> None:
-    """Record a project event, aggregating anonymous opens/fetches per day.
-
-    Args:
-        session: The open database session; the caller commits.
-        project_id: The project the event belongs to.
-        actor_id: The authenticated account, or ``None`` for an anonymous visitor.
-        action: A short action name such as ``"fork"`` or ``"visibility_change"``.
-        details: Optional JSON-serializable context stored with the row.
-    """
-    timestamp = now()
-    cutoff = (
-        (datetime.now(UTC) - timedelta(days=ACTIVITY_RETENTION_DAYS))
-        .isoformat()
-        .replace("+00:00", "Z")
-    )
-    session.execute(
-        delete(ProjectActivity).where(
-            ProjectActivity.project_id == project_id, ProjectActivity.created_at < cutoff
-        )
-    )
-    bucket_key = None
-    if actor_id is None and action in AGGREGATED_ANONYMOUS_ACTIONS:
-        day = timestamp[:10]
-        bucket_key = f"{project_id}:{action}:{day}"
-        details = {"date": day}
-        # Atomic increment: no read-modify-write, so two concurrent hits cannot
-        # overwrite each other's count.
-        updated = session.execute(
-            update(ProjectActivity)
-            .where(ProjectActivity.bucket_key == bucket_key)
-            .values(count=ProjectActivity.count + 1)
-        ).rowcount
-        if updated:
-            return
-    row = ProjectActivity(
-        id=str(uuid.uuid4()),
-        project_id=project_id,
-        actor_id=actor_id,
-        action=action,
-        details_json=json.dumps(details or {}),
-        bucket_key=bucket_key,
-        count=1,
-        created_at=timestamp,
-    )
-    if bucket_key is None:
-        session.add(row)
-        return
-    # Two requests can both miss the UPDATE and race to create the day's bucket;
-    # the unique key makes the loser's INSERT fail, and it falls back to the
-    # increment.
-    try:
-        with session.begin_nested():
-            session.add(row)
-            session.flush()
-    except IntegrityError:
-        session.execute(
-            update(ProjectActivity)
-            .where(ProjectActivity.bucket_key == bucket_key)
-            .values(count=ProjectActivity.count + 1)
-        )
 
 
 def activity_json(act: ProjectActivity) -> dict:
@@ -1305,41 +1068,6 @@ def create_app(
         session.execute(delete(Group).where(Group.id.in_(group_ids)))
         return thumbnail_group_ids
 
-    def demote_disallowed_public_projects(
-        session: Session, organization: Organization, actor: Account
-    ) -> None:
-        """Make public org projects organization-only when their creator may no longer publish.
-
-        Mirrors ``can_publish_public``: a project stays public only while its
-        creator, in their current role, could publish it publicly now.
-        """
-        policy = organization.public_sharing_policy
-        if policy == "yes":
-            return
-        rows = session.execute(
-            select(Project, OrganizationMember.role)
-            .outerjoin(
-                OrganizationMember,
-                and_(
-                    OrganizationMember.organization_id == Project.organization_id,
-                    OrganizationMember.account_id == Project.created_by_id,
-                ),
-            )
-            .where(Project.organization_id == organization.id, Project.visibility == "public")
-        ).all()
-        for project, role in rows:
-            if role == "administrator" or (policy == "publishers" and role == "publisher"):
-                continue
-            project.visibility = "organization"
-            project.updated_at = now()
-            log_project_activity(
-                session,
-                project.id,
-                actor.id,
-                "visibility_change",
-                {"before": "public", "after": "organization"},
-            )
-
     def validate_access_targets(
         session: Session,
         account: Account,
@@ -1944,7 +1672,7 @@ def create_app(
         if updates.get("categories") is not None:
             organization.categories_json = json.dumps(updates["categories"])
         if updates.get("public_sharing_policy") in {"no", "publishers"}:
-            demote_disallowed_public_projects(session, organization, account)
+            demote_disallowed_public_projects(session, organization, account.id)
         session.commit()
         return {"organization": organization_json(organization, "administrator")}
 
@@ -2043,6 +1771,7 @@ def create_app(
                 )
                 if admin_count == 1:
                     raise HTTPException(409, "organization must have an administrator")
+                require_not_break_glass(session, organization_id, target.id)
             member.role = body.role
         invitation_target_predicate = OrganizationInvitation.username == target.username
         if target.email:
@@ -2062,7 +1791,7 @@ def create_app(
         organization = session.get(Organization, organization_id)
         assert organization is not None
         # A lowered role may no longer publish what the member made public.
-        demote_disallowed_public_projects(session, organization, account)
+        demote_disallowed_public_projects(session, organization, account.id)
         session.commit()
         member.account = target
         return {"member": member_json(member)}
@@ -2097,6 +1826,7 @@ def create_app(
             )
             if admin_count == 1:
                 raise HTTPException(409, "organization must have an administrator")
+        require_not_break_glass(session, organization_id, target.id)
         session.delete(member)
         detach_from_organization_groups(session, organization_id, target, account)
         organization = session.get(Organization, organization_id)
@@ -2104,7 +1834,7 @@ def create_app(
         session.flush()
         # A former member can no longer publish, so their public projects fall
         # back to organization visibility under a restrictive policy.
-        demote_disallowed_public_projects(session, organization, account)
+        demote_disallowed_public_projects(session, organization, account.id)
         session.commit()
 
     @app.post("/api/organizations/{organization_id}/invitations", status_code=201)

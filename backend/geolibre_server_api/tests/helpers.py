@@ -266,13 +266,14 @@ def start_sso(
     org_slug,
     *,
     label="Test device",
+    scope="read:projects",
     authorization_endpoint=f"{FakeIdp.ISSUER}/authorize",
 ):
     """Choose organization sign-in on the consent page.
 
     Returns (pkce_verifier, idp_authorize_params, idp_location).
     """
-    response, verifier, interaction, csrf = start_authorize(client)
+    response, verifier, interaction, csrf = start_authorize(client, scope=scope)
     assert response.status_code == 200, response.text
     assert interaction and csrf, "consent form missing interaction/csrf"
     redirected = client.post(
@@ -293,12 +294,12 @@ def start_sso(
     return verifier, redirect_params(redirected), location
 
 
-def sso_sign_in(client, fake_idp, org_slug, claims, *, label="Test device"):
+def sso_sign_in(client, fake_idp, org_slug, claims, *, label="Test device", scope="read:projects"):
     """Sign in through *fake_idp*; returns (callback_response, pkce_verifier).
 
     The IdP will sign *claims* plus the nonce the server sent.
     """
-    verifier, params, _ = start_sso(client, org_slug, label=label)
+    verifier, params, _ = start_sso(client, org_slug, label=label, scope=scope)
     code = f"c-{uuid4().hex}"
     fake_idp.issue(code, {**claims, "nonce": params["nonce"]}, params["code_challenge"])
     callback = client.get(

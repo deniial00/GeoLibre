@@ -13,7 +13,7 @@ from sqlalchemy import Boolean, ForeignKey, Index, Integer, String, Text
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 if TYPE_CHECKING:
-    from geolibre_server_api.main import Project  # noqa: F401
+    from geolibre_server_api.project_models import Project  # noqa: F401
 
 
 class Base(DeclarativeBase):

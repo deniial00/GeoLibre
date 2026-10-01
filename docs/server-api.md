@@ -323,10 +323,13 @@ Routes:
   longer publish them become `organization`.
 - `DELETE /api/organizations/{id}/members/{username}` removes a member
   (administrator only), and `{username}=me` leaves. The last administrator
-  cannot be removed, leave, or be demoted. Projects the leaver created stay
-  owned by the organization, and their `public` ones become `organization`
-  unless the policy is `yes`. The leaver's memberships and pending invitations
-  in the organization's groups are removed. Groups they own pass to the
+  cannot be removed, leave, or be demoted (`409`). Neither can the break-glass
+  administrator of the organization's identity provider (`422 account is the
+  organization's break-glass administrator`); clear `breakGlassUsername` on the
+  provider first. Projects the leaver created stay owned by the organization,
+  and their `public` ones become `organization` unless the policy is `yes`. The
+  leaver's memberships and pending invitations in the organization's groups
+  are removed. Groups they own pass to the
   administrator who removed them; a member who owns one must transfer it before
   leaving (`409`).
 - `POST /api/organizations/{id}/invitations` creates a pending invitation for
@@ -605,8 +608,11 @@ and `identity provider discovery failed`. Out-of-range values are a generic
 - **Mappings,** applied at every sign-in from the `groupsClaim` value (a string
   or a list of strings): the role is the highest-ranked `role` among matching
   `roleMappings`, else `defaultRole`. A new member receives it; an existing
-  member's role follows it only when `roleMappings` is non-empty, and the
-  organization's last administrator is never demoted. For each mapped group,
+  member's role follows it only when `roleMappings` is non-empty, and neither
+  the organization's last administrator nor its break-glass administrator is
+  ever demoted. A lowered role re-applies the public sharing policy as
+  `PUT /api/organizations/{id}/members` does: `public` projects the member can
+  no longer publish become `organization`. For each mapped group,
   the account becomes a `member` when a matching value is present and loses a
   plain `member` row when none is; owner and manager rows are never changed.
 - **Built-in accounts:** with `allowBuiltinAccounts: false`, a correct password
@@ -615,7 +621,9 @@ and `identity provider discovery failed`. Out-of-range values are a generic
   `POST /api/account/password`, and `Your organization requires single
   sign-on. Use “Sign in with your organization”.` on the consent page. The
   break-glass account keeps password sign-in only while it remains an
-  administrator of the organization; lockout still applies to it.
+  administrator of the organization; lockout still applies to it. While it is
+  the break-glass account it cannot be demoted, removed, or leave (`422`);
+  clear `breakGlassUsername` first.
 - **Deletion** removes the provider, its account links, and pending sign-in
   redirects. Accounts and memberships remain, but accounts created through
   single sign-on have no way to sign in. A provider configured later links

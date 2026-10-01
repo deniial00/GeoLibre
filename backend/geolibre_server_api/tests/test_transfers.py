@@ -12,7 +12,7 @@ import json
 import uuid
 
 import pytest
-from geolibre_server_api.main import ProjectTransfer
+from geolibre_server_api.project_models import ProjectTransfer
 from helpers import account, auth, create_project
 from sqlalchemy.exc import IntegrityError
 

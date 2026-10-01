@@ -204,3 +204,15 @@ def password_login_allowed(session: Session, account_id: str) -> bool:
     return all(
         break_glass == account_id and role == "administrator" for break_glass, role in blocking
     )
+
+
+def require_not_break_glass(session: Session, organization_id: str, account_id: str) -> None:
+    """Refuse to demote or remove the org's break-glass account; clear it on the provider first."""
+    break_glass = session.scalar(
+        select(OrganizationIdentityProvider.id).where(
+            OrganizationIdentityProvider.organization_id == organization_id,
+            OrganizationIdentityProvider.break_glass_account_id == account_id,
+        )
+    )
+    if break_glass is not None:
+        raise HTTPException(422, "account is the organization's break-glass administrator")

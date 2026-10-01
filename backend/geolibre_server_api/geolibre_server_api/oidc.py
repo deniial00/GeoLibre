@@ -39,7 +39,14 @@ from geolibre_server_api.enterprise_models import (
     FederatedIdentity,
     OrganizationIdentityProvider,
 )
-from geolibre_server_api.org_models import ROLE_RANK, Group, GroupMember, OrganizationMember
+from geolibre_server_api.org_models import (
+    ROLE_RANK,
+    Group,
+    GroupMember,
+    Organization,
+    OrganizationMember,
+)
+from geolibre_server_api.projects import demote_disallowed_public_projects
 from geolibre_server_api.proxy_identity import ProxyIdentity, parse_networks
 
 logger = logging.getLogger(__name__)
@@ -344,9 +351,11 @@ def apply_org_mapping(
             )
         )
     elif role_mappings and member.role != mapped_role:
-        demotes_last_admin = (
-            member.role == "administrator"
-            and session.scalar(
+        keeps_admin = member.role == "administrator" and (
+            # The break-glass account must stay an administrator to keep its
+            # password sign-in; clearing it on the provider is the way out.
+            provider.break_glass_account_id == account_id
+            or session.scalar(
                 select(func.count())
                 .select_from(OrganizationMember)
                 .where(
@@ -356,8 +365,13 @@ def apply_org_mapping(
             )
             == 1
         )
-        if not demotes_last_admin:
+        if not keeps_admin:
+            lowered = ROLE_RANK[mapped_role] < ROLE_RANK[member.role]
             member.role = mapped_role
+            if lowered:
+                # The lowered role may no longer publish what the member made public.
+                organization = session.get(Organization, organization_id)
+                demote_disallowed_public_projects(session, organization, account_id)
 
     group_mappings = json.loads(provider.group_mappings_json or "[]")
     if not group_mappings:
