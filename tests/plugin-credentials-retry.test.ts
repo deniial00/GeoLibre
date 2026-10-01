@@ -40,8 +40,10 @@ let failKeychainDeletes = false;
 // Dynamic imports: the stubs above must exist before these load.
 const { hydrateDesktopCredentials } =
   await import("../apps/geolibre-desktop/src/lib/credential-hydration");
-const { pluginCredentialHost } = await import("../apps/geolibre-desktop/src/lib/plugin-credentials");
-const { queueCredentialChanges } = await import("../apps/geolibre-desktop/src/lib/credential-store");
+const { pluginCredentialHost } =
+  await import("../apps/geolibre-desktop/src/lib/plugin-credentials");
+const { queueCredentialChanges } =
+  await import("../apps/geolibre-desktop/src/lib/credential-store");
 
 const settle = () => queueCredentialChanges({}, {});
 const index = () => JSON.parse(storage.get(INDEX_KEY) ?? "[]") as string[];

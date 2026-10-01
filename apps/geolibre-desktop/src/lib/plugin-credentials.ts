@@ -161,10 +161,7 @@ function setDesktop(account: string, value: string): boolean {
       if (account in values || hasPendingCredential(account)) return;
       try {
         const index = readPluginCredentialIndex().filter((entry) => entry !== account);
-        window.localStorage.setItem(
-          PLUGIN_CREDENTIAL_ACCOUNTS_STORAGE_KEY,
-          JSON.stringify(index),
-        );
+        window.localStorage.setItem(PLUGIN_CREDENTIAL_ACCOUNTS_STORAGE_KEY, JSON.stringify(index));
       } catch (error) {
         reportCredentialStorageError(error);
       }
