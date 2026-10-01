@@ -1,0 +1,7 @@
+{
+  "version": 1,
+  "capabilities": ["data:add"],
+  "plugins": {
+    "sideload": "no"
+  }
+}

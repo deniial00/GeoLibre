@@ -1,0 +1,15 @@
+{
+  "version": 1,
+  "services": {
+    "catalog": [
+      {
+        "id": "a",
+        "name": "S a",
+        "kind": "wcs",
+        "fields": {
+          "url": "https://example.com/wms"
+        }
+      }
+    ]
+  }
+}

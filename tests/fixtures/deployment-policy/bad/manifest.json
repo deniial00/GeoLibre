@@ -1,0 +1,120 @@
+{
+  "version-2.json": {
+    "schema": "reject",
+    "parser": "null"
+  },
+  "version-missing.json": {
+    "schema": "reject",
+    "parser": "null"
+  },
+  "version-string.json": {
+    "schema": "reject",
+    "parser": "null"
+  },
+  "not-object.json": {
+    "schema": "reject",
+    "parser": "null"
+  },
+  "unknown-top-level-key.json": {
+    "schema": "reject",
+    "parser": {
+      "dropped": []
+    }
+  },
+  "capabilities-unknown.json": {
+    "schema": "reject",
+    "parser": {
+      "dropped": ["capabilities"]
+    }
+  },
+  "capabilities-duplicate.json": {
+    "schema": "reject",
+    "parser": {
+      "dropped": ["capabilities"]
+    }
+  },
+  "plugins-sideload-string.json": {
+    "schema": "reject",
+    "parser": {
+      "dropped": ["plugins"]
+    }
+  },
+  "plugins-allowed-trimmed-duplicate.json": {
+    "schema": "accept",
+    "parser": {
+      "dropped": ["plugins"]
+    }
+  },
+  "interface-token-key.json": {
+    "schema": "reject",
+    "parser": {
+      "dropped": ["interface"]
+    }
+  },
+  "interface-bad-level.json": {
+    "schema": "reject",
+    "parser": {
+      "dropped": ["interface"]
+    }
+  },
+  "services-duplicate-trimmed-id.json": {
+    "schema": "accept",
+    "parser": {
+      "dropped": ["services"]
+    }
+  },
+  "services-empty-fields.json": {
+    "schema": "reject",
+    "parser": {
+      "dropped": ["services"]
+    }
+  },
+  "services-bad-kind.json": {
+    "schema": "reject",
+    "parser": {
+      "dropped": ["services"]
+    }
+  },
+  "services-unsafe-integer.json": {
+    "schema": "accept",
+    "parser": {
+      "dropped": ["services"]
+    }
+  },
+  "sharing-ftp-share-url.json": {
+    "schema": "reject",
+    "parser": {
+      "dropped": ["sharing"]
+    }
+  },
+  "sharing-https-collab-url.json": {
+    "schema": "reject",
+    "parser": {
+      "dropped": ["sharing"]
+    }
+  },
+  "geolens-bad-value.json": {
+    "schema": "reject",
+    "parser": {
+      "dropped": ["geolens"]
+    }
+  },
+  "ai-token-key.json": {
+    "schema": "reject",
+    "parser": {
+      "dropped": ["ai"]
+    }
+  },
+  "branding-appname-61.json": {
+    "schema": "reject",
+    "parser": {
+      "dropped": ["branding"]
+    }
+  },
+  "branding-not-object.json": {
+    "schema": "reject",
+    "parser": {
+      "dropped": ["branding"]
+    }
+  }
+}

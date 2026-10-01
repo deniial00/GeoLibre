@@ -51,7 +51,14 @@ export interface ServiceLibraryEntry {
   deployment?: boolean;
 }
 
-const SERVICE_KINDS: readonly ServiceLibraryKind[] = ["wms", "wfs", "wmts", "xyz", "arcgis", "csw"];
+export const SERVICE_KINDS: readonly ServiceLibraryKind[] = [
+  "wms",
+  "wfs",
+  "wmts",
+  "xyz",
+  "arcgis",
+  "csw",
+];
 
 /** The wrapped JSON shape produced by {@link serializeUserServices}. */
 const EXPORT_FORMAT = "geolibre-service-library";

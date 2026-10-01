@@ -1,0 +1,8 @@
+{
+  "version": 1,
+  "capabilities": ["data:add"],
+  "ai": {
+    "enabled": true,
+    "token": "x"
+  }
+}

@@ -1,0 +1,16 @@
+{
+  "version": 1,
+  "sharing": {
+    "shareUrl": "off",
+    "embedOrigins": ["*"]
+  },
+  "geolens": {
+    "url": "off"
+  },
+  "services": {
+    "builtins": false
+  },
+  "branding": {
+    "welcome": false
+  }
+}

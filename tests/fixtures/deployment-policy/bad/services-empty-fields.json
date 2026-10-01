@@ -1,0 +1,13 @@
+{
+  "version": 1,
+  "services": {
+    "catalog": [
+      {
+        "id": "a",
+        "name": "S a",
+        "kind": "wms",
+        "fields": {}
+      }
+    ]
+  }
+}

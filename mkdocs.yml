@@ -102,6 +102,7 @@ nav:
       - Collaboration: collaboration.md
       - UI Profiles: ui-profiles.md
       - Deployment Capabilities: deployment-capabilities.md
+      - Deployment Policy: deployment-policy.md
       - Internationalization: i18n.md
       - Python Package: python.md
       - R Package: r.md
