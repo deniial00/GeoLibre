@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { readFileSync, readdirSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { test, type TestContext } from "node:test";
 import { fileURLToPath } from "node:url";
 import Ajv2020 from "ajv/dist/2020";
@@ -32,14 +32,8 @@ const SECTIONS = [
   "branding",
 ];
 
-function fixtureNames(kind: "good" | "bad"): string[] {
-  return readdirSync(`${FIXTURES}${kind}`)
-    .filter((name) => name.endsWith(".json") && name !== "manifest.json")
-    .sort();
-}
-
-function readFixture(kind: "good" | "bad", name: string): string {
-  return readFileSync(`${FIXTURES}${kind}/${name}`, "utf8");
+function readFixture(name: string): string {
+  return readFileSync(`${FIXTURES}${name}`, "utf8");
 }
 
 /** Collects console.warn messages into the returned array; restored after the test. */
@@ -51,10 +45,31 @@ function captureWarnings(t: TestContext): string[] {
   return messages;
 }
 
-test("good fixtures validate and round-trip silently", (t) => {
+const SCHEMA_ID =
+  "https://raw.githubusercontent.com/opengeos/GeoLibre/main/schema/deployment.schema.json";
+
+// Small valid documents kept inline; the exhaustive one lives in good/full.json.
+const GOOD_DOCUMENTS: Record<string, string> = {
+  minimal: readFixture("good/minimal.json"),
+  full: readFixture("good/full.json"),
+  "empty lists": JSON.stringify({
+    version: 1,
+    capabilities: [],
+    plugins: { allowed: [], sideload: false },
+  }),
+  "off switches": JSON.stringify({
+    version: 1,
+    sharing: { shareUrl: "off", embedOrigins: ["*"] },
+    geolens: { url: "off" },
+    services: { builtins: false },
+    branding: { welcome: false },
+  }),
+  "with $schema": JSON.stringify({ $schema: SCHEMA_ID, version: 1, capabilities: ["data:add"] }),
+};
+
+test("good documents validate and round-trip silently", (t) => {
   const warnings = captureWarnings(t);
-  for (const name of fixtureNames("good")) {
-    const text = readFixture("good", name);
+  for (const [name, text] of Object.entries(GOOD_DOCUMENTS)) {
     const json = JSON.parse(text);
     assert.equal(validate(json), true, `${name}: ${JSON.stringify(validate.errors)}`);
     const { $schema: _ignored, ...expected } = json;
@@ -63,19 +78,20 @@ test("good fixtures validate and round-trip silently", (t) => {
   assert.equal(warnings.length, 0);
 });
 
-test("bad fixtures match the manifest for schema and parser", (t) => {
-  const manifest = JSON.parse(readFixture("bad", "manifest.json")) as Record<
-    string,
-    { schema: "reject" | "accept"; parser: "null" | { dropped: string[] } }
-  >;
-  const names = fixtureNames("bad");
-  assert.deepEqual(Object.keys(manifest).sort(), names);
+interface BadCase {
+  input: unknown;
+  /** Whether JSON Schema alone rejects it; "accept" marks rules only the parser enforces. */
+  schema: "reject" | "accept";
+  parser: "null" | { dropped: string[] };
+}
 
+test("bad cases match expected schema and parser results", (t) => {
+  const cases = JSON.parse(readFixture("bad-cases.json")) as Record<string, BadCase>;
   const warnings = captureWarnings(t);
-  for (const name of names) {
-    const text = readFixture("bad", name);
+  for (const [name, expected] of Object.entries(cases)) {
+    // 9007199254740993 cannot survive JSON.stringify, so the case holds a placeholder.
+    const text = JSON.stringify(expected.input).replace('"__UNSAFE__"', "9007199254740993");
     const json = JSON.parse(text);
-    const expected = manifest[name];
     assert.equal(validate(json), expected.schema === "accept", `${name}: schema`);
 
     warnings.length = 0;
@@ -94,7 +110,7 @@ test("bad fixtures match the manifest for schema and parser", (t) => {
       kept.sort(),
       name,
     );
-    const unknownKeyWarning = name === "unknown-top-level-key.json" ? 1 : 0;
+    const unknownKeyWarning = name === "unknown-top-level-key" ? 1 : 0;
     assert.equal(warnings.length, expected.parser.dropped.length + unknownKeyWarning, name);
   }
 });

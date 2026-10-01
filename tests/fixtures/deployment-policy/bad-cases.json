@@ -1,0 +1,272 @@
+{
+  "version-2": {
+    "input": {
+      "version": 2
+    },
+    "schema": "reject",
+    "parser": "null"
+  },
+  "version-missing": {
+    "input": {
+      "capabilities": ["data:add"]
+    },
+    "schema": "reject",
+    "parser": "null"
+  },
+  "version-string": {
+    "input": {
+      "version": "1"
+    },
+    "schema": "reject",
+    "parser": "null"
+  },
+  "not-object": {
+    "input": [],
+    "schema": "reject",
+    "parser": "null"
+  },
+  "unknown-top-level-key": {
+    "input": {
+      "version": 1,
+      "theme": "dark"
+    },
+    "schema": "reject",
+    "parser": {
+      "dropped": []
+    }
+  },
+  "capabilities-unknown": {
+    "input": {
+      "version": 1,
+      "capabilities": ["data:add", "data:delete"]
+    },
+    "schema": "reject",
+    "parser": {
+      "dropped": ["capabilities"]
+    }
+  },
+  "capabilities-duplicate": {
+    "input": {
+      "version": 1,
+      "capabilities": ["data:add", "data:add"]
+    },
+    "schema": "reject",
+    "parser": {
+      "dropped": ["capabilities"]
+    }
+  },
+  "plugins-sideload-string": {
+    "input": {
+      "version": 1,
+      "capabilities": ["data:add"],
+      "plugins": {
+        "sideload": "no"
+      }
+    },
+    "schema": "reject",
+    "parser": {
+      "dropped": ["plugins"]
+    }
+  },
+  "plugins-allowed-trimmed-duplicate": {
+    "input": {
+      "version": 1,
+      "capabilities": ["data:add"],
+      "plugins": {
+        "allowed": ["a", " a"]
+      }
+    },
+    "schema": "accept",
+    "parser": {
+      "dropped": ["plugins"]
+    }
+  },
+  "interface-token-key": {
+    "input": {
+      "version": 1,
+      "capabilities": ["data:add"],
+      "interface": {
+        "lock": true,
+        "token": "x"
+      }
+    },
+    "schema": "reject",
+    "parser": {
+      "dropped": ["interface"]
+    }
+  },
+  "interface-bad-level": {
+    "input": {
+      "version": 1,
+      "interface": {
+        "level": "expert"
+      }
+    },
+    "schema": "reject",
+    "parser": {
+      "dropped": ["interface"]
+    }
+  },
+  "services-duplicate-trimmed-id": {
+    "input": {
+      "version": 1,
+      "services": {
+        "catalog": [
+          {
+            "id": "a",
+            "name": "S a",
+            "kind": "wms",
+            "fields": {
+              "url": "https://example.com/wms"
+            }
+          },
+          {
+            "id": "a ",
+            "name": "S a ",
+            "kind": "wms",
+            "fields": {
+              "url": "https://example.com/wms"
+            }
+          }
+        ]
+      }
+    },
+    "schema": "accept",
+    "parser": {
+      "dropped": ["services"]
+    }
+  },
+  "services-empty-fields": {
+    "input": {
+      "version": 1,
+      "services": {
+        "catalog": [
+          {
+            "id": "a",
+            "name": "S a",
+            "kind": "wms",
+            "fields": {}
+          }
+        ]
+      }
+    },
+    "schema": "reject",
+    "parser": {
+      "dropped": ["services"]
+    }
+  },
+  "services-bad-kind": {
+    "input": {
+      "version": 1,
+      "services": {
+        "catalog": [
+          {
+            "id": "a",
+            "name": "S a",
+            "kind": "wcs",
+            "fields": {
+              "url": "https://example.com/wms"
+            }
+          }
+        ]
+      }
+    },
+    "schema": "reject",
+    "parser": {
+      "dropped": ["services"]
+    }
+  },
+  "services-unsafe-integer": {
+    "input": {
+      "version": 1,
+      "services": {
+        "catalog": [
+          {
+            "id": "a",
+            "name": "S a",
+            "kind": "wms",
+            "fields": {
+              "big": "__UNSAFE__"
+            }
+          }
+        ]
+      }
+    },
+    "schema": "accept",
+    "parser": {
+      "dropped": ["services"]
+    }
+  },
+  "sharing-ftp-share-url": {
+    "input": {
+      "version": 1,
+      "sharing": {
+        "shareUrl": "ftp://x"
+      }
+    },
+    "schema": "reject",
+    "parser": {
+      "dropped": ["sharing"]
+    }
+  },
+  "sharing-https-collab-url": {
+    "input": {
+      "version": 1,
+      "sharing": {
+        "collabUrl": "https://relay.example.com"
+      }
+    },
+    "schema": "reject",
+    "parser": {
+      "dropped": ["sharing"]
+    }
+  },
+  "geolens-bad-value": {
+    "input": {
+      "version": 1,
+      "geolens": {
+        "url": "on"
+      }
+    },
+    "schema": "reject",
+    "parser": {
+      "dropped": ["geolens"]
+    }
+  },
+  "ai-token-key": {
+    "input": {
+      "version": 1,
+      "capabilities": ["data:add"],
+      "ai": {
+        "enabled": true,
+        "token": "x"
+      }
+    },
+    "schema": "reject",
+    "parser": {
+      "dropped": ["ai"]
+    }
+  },
+  "branding-appname-61": {
+    "input": {
+      "version": 1,
+      "branding": {
+        "appName": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+      }
+    },
+    "schema": "reject",
+    "parser": {
+      "dropped": ["branding"]
+    }
+  },
+  "branding-not-object": {
+    "input": {
+      "version": 1,
+      "branding": "Acme"
+    },
+    "schema": "reject",
+    "parser": {
+      "dropped": ["branding"]
+    }
+  }
+}
