@@ -12,7 +12,6 @@ import {
   type VesselObservation,
 } from "../packages/plugins/src/plugins/gods-eye-view-vessel-feeds";
 import {
-  GODS_EYE_VIEW_KEY_STORAGE_PREFIX,
   resolveGodsEyeViewKey,
   writeStoredGodsEyeViewKey,
 } from "../packages/plugins/src/plugins/gods-eye-view-keys";
@@ -40,7 +39,11 @@ const positionReport = {
   },
 };
 const classBReport = {
-  MetaData: { MMSI: 338323929, ShipName: "SATARA", time_utc: "2026-09-24 16:47:15.399 +0000 UTC" },
+  MetaData: {
+    MMSI: 338323929,
+    ShipName: "SATARA",
+    time_utc: "2026-09-24 16:47:15.399 +0000 UTC",
+  },
   MessageType: "StandardClassBPositionReport",
   Message: {
     StandardClassBPositionReport: {
@@ -100,8 +103,11 @@ describe("AISStream message parsing", () => {
       },
     });
     assert.deepEqual(
-      parseAisMessage('{"Message":{},"MessageType":"SubscriptionConfirmation"}', 0),
-      { kind: "confirmed" },
+      parseAisMessage(
+        '{"Message":{},"MessageType":"SubscriptionConfirmation"}',
+        0
+      ),
+      { kind: "confirmed" }
     );
     assert.deepEqual(parseAisMessage('{"error":"Api Key Is Not Valid"}', 0), {
       kind: "error",
@@ -110,7 +116,9 @@ describe("AISStream message parsing", () => {
     assert.deepEqual(parseAisMessage("not json", 0), { kind: "ignored" });
     const unavailable = structuredClone(positionReport);
     unavailable.Message.PositionReport.Latitude = 91;
-    assert.deepEqual(parseAisMessage(JSON.stringify(unavailable), 0), { kind: "ignored" });
+    assert.deepEqual(parseAisMessage(JSON.stringify(unavailable), 0), {
+      kind: "ignored",
+    });
   });
 
   it("groups AIS ship-type codes into readable categories", () => {
@@ -124,7 +132,9 @@ describe("AISStream message parsing", () => {
 
 describe("AIS vessel CZML", () => {
   const now = new Date("2026-09-24T17:00:00Z");
-  const vessel = (overrides: Partial<VesselObservation> = {}): VesselObservation => ({
+  const vessel = (
+    overrides: Partial<VesselObservation> = {}
+  ): VesselObservation => ({
     mmsi: "1",
     latitude: 40,
     longitude: -74,
@@ -136,7 +146,11 @@ describe("AIS vessel CZML", () => {
   });
 
   it("dead-reckons a moving vessel and holds a moored one in place", () => {
-    const result = vesselsToCzml([vessel(), vessel({ mmsi: "2", speedKnots: 0.1 })], now, 600);
+    const result = vesselsToCzml(
+      [vessel(), vessel({ mmsi: "2", speedKnots: 0.1 })],
+      now,
+      600
+    );
     const moving = result.packets[1].position as {
       cartographicDegrees: number[];
       forwardExtrapolationType: string;
@@ -145,8 +159,9 @@ describe("AIS vessel CZML", () => {
     assert.ok(lon1 > lon0, "an eastbound vessel moves east");
     assert.ok(Math.abs(lat1 - lat0) < 1e-3);
     assert.equal(moving.forwardExtrapolationType, "HOLD");
-    const moored = (result.packets[2].position as { cartographicDegrees: number[] })
-      .cartographicDegrees;
+    const moored = (
+      result.packets[2].position as { cartographicDegrees: number[] }
+    ).cartographicDegrees;
     assert.deepEqual(moored.slice(1, 4), moored.slice(5, 8));
     assert.equal(result.attributes.features.length, 2);
   });
@@ -176,7 +191,9 @@ class FakeSocket implements AisSocket {
   }
   deliver(frame: unknown) {
     // AISStream sends JSON in binary frames.
-    this.onmessage?.({ data: new TextEncoder().encode(JSON.stringify(frame)).buffer });
+    this.onmessage?.({
+      data: new TextEncoder().encode(JSON.stringify(frame)).buffer,
+    });
   }
   drop() {
     this.readyState = 3;
@@ -222,7 +239,10 @@ describe("AISStream client", () => {
         [41.5, -73],
       ],
     ]);
-    sockets[0].deliver({ MessageType: "SubscriptionConfirmation", Message: {} });
+    sockets[0].deliver({
+      MessageType: "SubscriptionConfirmation",
+      Message: {},
+    });
     sockets[0].deliver(positionReport);
     sockets[0].deliver(staticData);
     const snapshot = client.snapshot();
@@ -238,7 +258,11 @@ describe("AISStream client", () => {
     sockets[0].open();
     sockets[0].deliver(positionReport);
     client.update("key-1", harbor);
-    assert.equal(sockets[0].sent.length, 1, "an unchanged view is not a resubscription");
+    assert.equal(
+      sockets[0].sent.length,
+      1,
+      "an unchanged view is not a resubscription"
+    );
     client.update("key-1", [3.9, 51.8, 4.6, 52.1]);
     assert.equal(sockets.length, 1);
     assert.equal(sockets[0].sent.length, 2);
@@ -276,7 +300,10 @@ describe("AISStream client", () => {
   it("does not blame a key that has already worked for later network drops", async () => {
     client.update("good", harbor);
     sockets[0].open();
-    sockets[0].deliver({ MessageType: "SubscriptionConfirmation", Message: {} });
+    sockets[0].deliver({
+      MessageType: "SubscriptionConfirmation",
+      Message: {},
+    });
     // A pan resubscribes, then the network drops twice before any frame.
     client.update("good", [3.9, 51.8, 4.6, 52.1]);
     sockets[0].drop();
@@ -316,37 +343,41 @@ describe("AISStream client", () => {
 
 describe("God's Eye View API keys", () => {
   const values = new Map<string, string>();
-  const storage = {
-    getItem: (key: string) => values.get(key) ?? null,
-    setItem: (key: string, value: string) => void values.set(key, value),
-    removeItem: (key: string) => void values.delete(key),
+  const credentials = {
+    get: (name: string) => values.get(name) ?? "",
+    set: (name: string, value: string) => {
+      if (value) values.set(name, value);
+      else values.delete(name);
+      return true;
+    },
+    location: () => "browser" as const,
   };
-  let original: PropertyDescriptor | undefined;
-  beforeEach(() => {
-    values.clear();
-    original = Object.getOwnPropertyDescriptor(globalThis, "localStorage");
-    Object.defineProperty(globalThis, "localStorage", { configurable: true, value: storage });
-  });
-  afterEach(() => {
-    if (original) Object.defineProperty(globalThis, "localStorage", original);
-    else delete (globalThis as { localStorage?: unknown }).localStorage;
-  });
+  beforeEach(() => values.clear());
 
   it("prefers the panel's key, then falls back to the runtime environment", () => {
     const env = { VITE_TOMTOM_API_KEY: " env-key " };
-    assert.deepEqual(resolveGodsEyeViewKey("tomtom", env), {
+    assert.deepEqual(resolveGodsEyeViewKey(credentials, "tomtom", env), {
       key: "env-key",
       source: "environment",
     });
-    assert.equal(writeStoredGodsEyeViewKey("tomtom", " panel-key "), true);
-    assert.equal(values.get(`${GODS_EYE_VIEW_KEY_STORAGE_PREFIX}tomtom`), "panel-key");
-    assert.deepEqual(resolveGodsEyeViewKey("tomtom", env), { key: "panel-key", source: "panel" });
-    writeStoredGodsEyeViewKey("tomtom", "");
-    assert.equal(values.size, 0);
-    assert.equal(resolveGodsEyeViewKey("aisstream", {}), null);
-    assert.deepEqual(resolveGodsEyeViewKey("aisstream", { AISSTREAM_API_KEY: "a" }), {
-      key: "a",
-      source: "environment",
+    assert.equal(
+      writeStoredGodsEyeViewKey(credentials, "tomtom", " panel-key "),
+      true
+    );
+    assert.equal(values.get("tomtom"), "panel-key");
+    assert.deepEqual(resolveGodsEyeViewKey(credentials, "tomtom", env), {
+      key: "panel-key",
+      source: "panel",
     });
+    writeStoredGodsEyeViewKey(credentials, "tomtom", "");
+    assert.equal(values.size, 0);
+    assert.equal(resolveGodsEyeViewKey(credentials, "aisstream", {}), null);
+    assert.deepEqual(
+      resolveGodsEyeViewKey(undefined, "aisstream", { AISSTREAM_API_KEY: "a" }),
+      {
+        key: "a",
+        source: "environment",
+      }
+    );
   });
 });

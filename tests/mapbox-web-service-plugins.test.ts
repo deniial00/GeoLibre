@@ -56,7 +56,8 @@ function fakeMapboxMap(document: Document) {
   const container = document.createElement("div");
   const canvas = document.createElement("canvas");
   container.appendChild(canvas);
-  const key = (type: string, layerId?: string) => (layerId ? `${type}:${layerId}` : type);
+  const key = (type: string, layerId?: string) =>
+    layerId ? `${type}:${layerId}` : type;
   const map = {
     sources,
     layers,
@@ -110,7 +111,9 @@ function fakeMapboxMap(document: Document) {
     },
     getLayer: (id: string) => layers.find((layer) => layer.id === id),
     addLayer: (spec: Record<string, unknown>, beforeId?: string) => {
-      const index = beforeId ? layers.findIndex((layer) => layer.id === beforeId) : -1;
+      const index = beforeId
+        ? layers.findIndex((layer) => layer.id === beforeId)
+        : -1;
       if (index >= 0) layers.splice(index, 0, { ...spec });
       else layers.push({ ...spec });
     },
@@ -140,7 +143,10 @@ function fakeMapboxMap(document: Document) {
       getNorth: () => 45,
     }),
     getProjection: () => ({ name: "mercator" }),
-    project: (position: [number, number]) => ({ x: position[0], y: position[1] }),
+    project: (position: [number, number]) => ({
+      x: position[0],
+      y: position[1],
+    }),
     unproject: (point: [number, number]) => ({ lng: point[0], lat: point[1] }),
     queryRenderedFeatures: () => [],
     fitBounds: () => {},
@@ -156,12 +162,17 @@ function fakeMapboxMap(document: Document) {
 type FakeMap = ReturnType<typeof fakeMapboxMap>;
 
 /** A host that only exposes a Mapbox map, with dockable and floating panels. */
-function mapboxOnlyHost(map: FakeMap, document: Document) {
+function mapboxOnlyHost(
+  map: FakeMap,
+  document: Document,
+  credentials: Record<string, string> = {}
+) {
   const panels = new Map<string, GeoLibreRightPanelRegistration>();
   const floating = new Map<string, GeoLibreFloatingPanelRegistration>();
   const containers = new Map<string, HTMLElement>();
   const cleanups = new Map<string, () => void>();
   const controls: unknown[] = [];
+  const credentialValues = new Map(Object.entries(credentials));
   const app = {
     getMap: () => null,
     getMapboxMap: () => map,
@@ -187,7 +198,9 @@ function mapboxOnlyHost(map: FakeMap, document: Document) {
       cleanups.delete(id);
       containers.delete(id);
     },
-    registerFloatingPanel: (registration: GeoLibreFloatingPanelRegistration) => {
+    registerFloatingPanel: (
+      registration: GeoLibreFloatingPanelRegistration
+    ) => {
       floating.set(registration.id, registration);
       return () => {
         floating.delete(registration.id);
@@ -205,6 +218,15 @@ function mapboxOnlyHost(map: FakeMap, document: Document) {
     },
     onBasemapChange: () => () => {},
     onLocaleChange: () => () => {},
+    credentials: {
+      get: (name: string) => credentialValues.get(name) ?? "",
+      set: (name: string, value: string) => {
+        if (value) credentialValues.set(name, value);
+        else credentialValues.delete(name);
+        return true;
+      },
+      location: () => "browser" as const,
+    },
     translate: (_key: string, fallback: string) => fallback,
     registerExternalNativeLayer: (registration: {
       id: string;
@@ -236,7 +258,13 @@ function mapboxOnlyHost(map: FakeMap, document: Document) {
       useAppStore.getState().removeLayer(id);
     },
   };
-  return { app: app as unknown as GeoLibreAppAPI, panels, floating, containers, controls };
+  return {
+    app: app as unknown as GeoLibreAppAPI,
+    panels,
+    floating,
+    containers,
+    controls,
+  };
 }
 
 describe("Web Services and service browsers on the Mapbox renderer", () => {
@@ -264,13 +292,21 @@ describe("Web Services and service browsers on the Mapbox renderer", () => {
     const storage = new Map<string, string>();
     // linkedom has no <select> value setter and no Option constructor; the
     // upstream panels use both while building their forms.
-    const selectProto = (dom.window as unknown as { HTMLSelectElement: { prototype: object } })
-      .HTMLSelectElement.prototype;
-    const valueDescriptor = Object.getOwnPropertyDescriptor(selectProto, "value");
+    const selectProto = (
+      dom.window as unknown as { HTMLSelectElement: { prototype: object } }
+    ).HTMLSelectElement.prototype;
+    const valueDescriptor = Object.getOwnPropertyDescriptor(
+      selectProto,
+      "value"
+    );
     Object.defineProperty(selectProto, "value", {
       configurable: true,
       get(this: Element) {
-        return this.getAttribute("data-test-value") ?? valueDescriptor?.get?.call(this) ?? "";
+        return (
+          this.getAttribute("data-test-value") ??
+          valueDescriptor?.get?.call(this) ??
+          ""
+        );
       },
       set(this: Element, value: unknown) {
         this.setAttribute("data-test-value", String(value));
@@ -295,7 +331,8 @@ describe("Web Services and service browsers on the Mapbox renderer", () => {
       Event: dom.window.Event,
       Option: TestOption,
       ResizeObserver: TestResizeObserver,
-      requestAnimationFrame: (callback: (time: number) => void) => setTimeout(() => callback(0), 0),
+      requestAnimationFrame: (callback: (time: number) => void) =>
+        setTimeout(() => callback(0), 0),
       cancelAnimationFrame: (handle: number) => clearTimeout(handle),
       CSS: { escape: (value: string) => value },
       localStorage: {
@@ -339,8 +376,16 @@ describe("Web Services and service browsers on the Mapbox renderer", () => {
       maplibreUsgsLidarPlugin,
       maplibreMapillaryPlugin,
     ]) {
-      assert.equal(isPluginEngineSupported(plugin, "mapbox"), true, `${plugin.id} on mapbox`);
-      assert.equal(isPluginEngineSupported(plugin, "maplibre"), true, `${plugin.id} on maplibre`);
+      assert.equal(
+        isPluginEngineSupported(plugin, "mapbox"),
+        true,
+        `${plugin.id} on mapbox`
+      );
+      assert.equal(
+        isPluginEngineSupported(plugin, "maplibre"),
+        true,
+        `${plugin.id} on maplibre`
+      );
     }
     // Engine-neutral catalogs keep the globe they already had.
     for (const plugin of [
@@ -348,7 +393,11 @@ describe("Web Services and service browsers on the Mapbox renderer", () => {
       maplibreTennesseeGisPlugin,
       maplibreSourceCoopPlugin,
     ]) {
-      assert.equal(isPluginEngineSupported(plugin, "cesium"), true, `${plugin.id} on cesium`);
+      assert.equal(
+        isPluginEngineSupported(plugin, "cesium"),
+        true,
+        `${plugin.id} on cesium`
+      );
     }
   });
 
@@ -356,8 +405,14 @@ describe("Web Services and service browsers on the Mapbox renderer", () => {
     // The one MapLibre class the control built itself — the location `Marker`,
     // whose update path reads `_camera.transform` — comes from
     // maplibre-gl-streetview's `createMarker` option, fed mapbox-gl's own.
-    assert.equal(isPluginEngineSupported(maplibreStreetViewPlugin, "mapbox"), true);
-    assert.equal(isPluginEngineSupported(maplibreStreetViewPlugin, "maplibre"), true);
+    assert.equal(
+      isPluginEngineSupported(maplibreStreetViewPlugin, "mapbox"),
+      true
+    );
+    assert.equal(
+      isPluginEngineSupported(maplibreStreetViewPlugin, "maplibre"),
+      true
+    );
   });
 
   it("runs GeoAgent on both 2D engines now that its tools follow the host", () => {
@@ -366,8 +421,11 @@ describe("Web Services and service browsers on the Mapbox renderer", () => {
     // Earth Engine client in at import time, which needs a browser window, so
     // its declaration is read off the source rather than imported.
     const geoagent = readFileSync(
-      new URL("../packages/plugins/src/plugins/maplibre-geoagent.ts", import.meta.url),
-      "utf8",
+      new URL(
+        "../packages/plugins/src/plugins/maplibre-geoagent.ts",
+        import.meta.url
+      ),
+      "utf8"
     );
     assert.match(geoagent, /engines:\s*\["maplibre",\s*"mapbox"\]/);
   });
@@ -376,7 +434,10 @@ describe("Web Services and service browsers on the Mapbox renderer", () => {
     const map = fakeMapboxMap(document);
     const { app } = mapboxOnlyHost(map, document);
     assert.equal(getStyleMap(app), map as unknown);
-    assert.equal(getStyleMap({ getMap: () => null } as unknown as GeoLibreAppAPI), null);
+    assert.equal(
+      getStyleMap({ getMap: () => null } as unknown as GeoLibreAppAPI),
+      null
+    );
     assert.equal(getStyleMap(null), null);
   });
 
@@ -403,7 +464,10 @@ describe("Web Services and service browsers on the Mapbox renderer", () => {
     const cleanup = mountMapControlInPanel(app, control as never, container);
     assert.ok(cleanup, "the bridge mounts against the Mapbox map");
     assert.equal(boundTo, map);
-    assert.equal(container.querySelector(".vantor-panel")?.textContent, "panel");
+    assert.equal(
+      container.querySelector(".vantor-panel")?.textContent,
+      "panel"
+    );
     assert.ok(map.handlers.get("remove")?.size, "participates in map teardown");
     unmountMapControlFromPanel(control as never);
     assert.equal(removedFrom, map);
@@ -418,7 +482,10 @@ describe("Web Services and service browsers on the Mapbox renderer", () => {
     assert.notEqual(result, false, "activation must not refuse a Mapbox host");
     const container = containers.get("fema-wms-panel");
     assert.ok(container, "the panel opened");
-    assert.ok(container.children.length > 0, "the control's panel content is docked");
+    assert.ok(
+      container.children.length > 0,
+      "the control's panel content is docked"
+    );
     // The control lists its layers from a GetCapabilities request it cannot
     // make here; the store sync only needs its own state, so adopt a layer the
     // way a reopened project does and let the control draw it natively.
@@ -426,7 +493,11 @@ describe("Web Services and service browsers on the Mapbox renderer", () => {
       id: "fema-wms-28",
       name: "FEMA NFHL Flood Hazard Zones",
       type: "wms",
-      source: { type: "raster", sourceId: "fema-wms-28", tiles: ["https://example.test/wms"] },
+      source: {
+        type: "raster",
+        sourceId: "fema-wms-28",
+        tiles: ["https://example.test/wms"],
+      },
       visible: true,
       opacity: 0.6,
       style: {},
@@ -442,13 +513,19 @@ describe("Web Services and service browsers on the Mapbox renderer", () => {
     await new Promise((resolve) => setTimeout(resolve, 0));
     assert.ok(
       map.getSource("fema-wms-28"),
-      "the control added its native source to the Mapbox map",
+      "the control added its native source to the Mapbox map"
     );
     assert.ok(map.getLayer("fema-wms-28"), "and its native raster layer");
     // The engine would adopt those ids rather than compile a second copy.
-    const stored = useAppStore.getState().layers.find((layer) => layer.id === "fema-wms-28");
+    const stored = useAppStore
+      .getState()
+      .layers.find((layer) => layer.id === "fema-wms-28");
     assert.ok(stored);
-    assert.equal(isMapboxPluginLayer(stored), false, "raster tiles go through the compiler");
+    assert.equal(
+      isMapboxPluginLayer(stored),
+      false,
+      "raster tiles go through the compiler"
+    );
     maplibreFemaWmsPlugin.deactivate(app);
     assert.equal(containers.has("fema-wms-panel"), false);
   });
@@ -456,7 +533,11 @@ describe("Web Services and service browsers on the Mapbox renderer", () => {
   it("refuses to activate a docked panel with no 2D map at all", () => {
     const map = fakeMapboxMap(document);
     const { app } = mapboxOnlyHost(map, document);
-    const noMap = { ...app, getMap: () => null, getMapboxMap: () => null } as GeoLibreAppAPI;
+    const noMap = {
+      ...app,
+      getMap: () => null,
+      getMapboxMap: () => null,
+    } as GeoLibreAppAPI;
     assert.equal(maplibreFemaWmsPlugin.activate(noMap), false);
     assert.equal(maplibreVantorPlugin.activate(noMap), false);
     assert.equal(maplibreUsgsNldiPlugin.activate(noMap), false);
@@ -466,13 +547,20 @@ describe("Web Services and service browsers on the Mapbox renderer", () => {
     const map = fakeMapboxMap(document);
     const { app } = mapboxOnlyHost(map, document);
     assert.notEqual(maplibreUsgsNldiPlugin.activate(app), false);
-    assert.equal(map.handlers.get("click")?.size, 1, "the click listener is on the Mapbox map");
+    assert.equal(
+      map.handlers.get("click")?.size,
+      1,
+      "the click listener is on the Mapbox map"
+    );
     assert.equal(map.getCanvas().style.cursor, "crosshair");
-    map.fire("click", { lngLat: { lng: -95.3, lat: 29.7 }, point: { x: 10, y: 10 } });
+    map.fire("click", {
+      lngLat: { lng: -95.3, lat: 29.7 },
+      point: { x: 10, y: 10 },
+    });
     await new Promise((resolve) => setTimeout(resolve, 20));
     assert.ok(
       fetchCalls.some((url) => url.includes("nldi")),
-      "a click reaches the NLDI service from the Mapbox map",
+      "a click reaches the NLDI service from the Mapbox map"
     );
     maplibreUsgsNldiPlugin.deactivate(app);
     assert.equal(map.handlers.get("click")?.size ?? 0, 0);
@@ -507,40 +595,72 @@ describe("Web Services and service browsers on the Mapbox renderer", () => {
     }
     const map = fakeMapboxMap(document);
     const { app, controls } = mapboxOnlyHost(map, document);
-    (app as { getMapboxGl?: () => unknown }).getMapboxGl = () => ({ Popup: FakePopup });
-    assert.equal(isPluginEngineSupported(maplibreOvertureMapsPlugin, "mapbox"), true);
+    (app as { getMapboxGl?: () => unknown }).getMapboxGl = () => ({
+      Popup: FakePopup,
+    });
+    assert.equal(
+      isPluginEngineSupported(maplibreOvertureMapsPlugin, "mapbox"),
+      true
+    );
     assert.notEqual(maplibreOvertureMapsPlugin.activate(app), false);
-    assert.equal(controls.length, 1, "the control is mounted on the Mapbox map");
+    assert.equal(
+      controls.length,
+      1,
+      "the control is mounted on the Mapbox map"
+    );
     // The release list is fetched (and fails here), then the fallback release
     // is applied, which adds the theme sources and layers.
     const deadline = Date.now() + 5000;
     while (!map.getSource("overture-buildings") && Date.now() < deadline) {
       await new Promise((resolve) => setTimeout(resolve, 5));
     }
-    const source = map.getSource("overture-buildings") as { url?: string } | undefined;
+    const source = map.getSource("overture-buildings") as
+      | { url?: string }
+      | undefined;
     assert.ok(source, "buildings source on the Mapbox map");
-    assert.match(source.url ?? "", /^https:\/\/.+\/buildings\.pmtiles$/, "plain archive URL");
-    assert.ok(map.getLayer("overture-buildings-building-fill"), "buildings fill layer");
+    assert.match(
+      source.url ?? "",
+      /^https:\/\/.+\/buildings\.pmtiles$/,
+      "plain archive URL"
+    );
+    assert.ok(
+      map.getLayer("overture-buildings-building-fill"),
+      "buildings fill layer"
+    );
     const stored = useAppStore
       .getState()
-      .layers.filter((layer) => layer.id.startsWith("overture-maps-buildings-"));
+      .layers.filter((layer) =>
+        layer.id.startsWith("overture-maps-buildings-")
+      );
     assert.ok(stored.length > 0, "Layers-panel mirrors");
     for (const layer of stored) {
-      assert.equal(isMapboxPluginLayer(layer), true, `${layer.id} is plugin-owned on Mapbox`);
+      assert.equal(
+        isMapboxPluginLayer(layer),
+        true,
+        `${layer.id} is plugin-owned on Mapbox`
+      );
       assert.doesNotMatch(layer.sourcePath ?? "", /^pmtiles:\/\//, layer.id);
     }
     // A click on a rendered feature opens mapbox-gl's popup, not MapLibre's.
     map.queryRenderedFeatures = () =>
       [{ sourceLayer: "building", properties: { height: 10 } }] as never;
-    map.fire("click", { point: { x: 1, y: 1 }, lngLat: { lng: -73.9, lat: 40.7 } });
+    map.fire("click", {
+      point: { x: 1, y: 1 },
+      lngLat: { lng: -73.9, lat: 40.7 },
+    });
     assert.equal(popups.length, 1, "one popup constructed");
-    assert.deepEqual(popups[0].options, { maxWidth: "320px", className: "overture-popup" });
+    assert.deepEqual(popups[0].options, {
+      maxWidth: "320px",
+      className: "overture-popup",
+    });
     assert.equal(popups[0].addedTo, map);
     maplibreOvertureMapsPlugin.deactivate(app);
     assert.equal(controls.length, 0);
     assert.equal(
-      useAppStore.getState().layers.filter((layer) => layer.id.startsWith("overture-maps-")).length,
-      0,
+      useAppStore
+        .getState()
+        .layers.filter((layer) => layer.id.startsWith("overture-maps-")).length,
+      0
     );
   });
 
@@ -554,13 +674,14 @@ describe("Web Services and service browsers on the Mapbox renderer", () => {
   });
 
   it("draws Mapillary's coverage on Mapbox as plugin-owned native layers", () => {
-    localStorage.setItem("geolibre:mapillary-access-token", "MLY|test");
     const map = fakeMapboxMap(document);
-    const { app, floating } = mapboxOnlyHost(map, document);
+    const { app, floating } = mapboxOnlyHost(map, document, {
+      "access-token": "MLY|test",
+    });
     assert.notEqual(maplibreMapillaryPlugin.activate(app), false);
     assert.ok(
       map.getSource("geolibre-mapillary-coverage"),
-      "vector coverage source on the Mapbox map",
+      "vector coverage source on the Mapbox map"
     );
     assert.ok(map.getLayer("geolibre-mapillary-sequence"), "sequence lines");
     assert.ok(map.getLayer("geolibre-mapillary-image"), "image points");
@@ -571,13 +692,16 @@ describe("Web Services and service browsers on the Mapbox renderer", () => {
     assert.equal(stored.length, 2, "two Layers-panel entries");
     // Their store records carry no drawable source, so the engine leaves the
     // drawing to the plugin and only mirrors visibility/opacity.
-    for (const layer of stored) assert.equal(isMapboxPluginLayer(layer), true, layer.id);
+    for (const layer of stored)
+      assert.equal(isMapboxPluginLayer(layer), true, layer.id);
     maplibreMapillaryPlugin.deactivate(app);
     assert.equal(map.getSource("geolibre-mapillary-coverage"), undefined);
     assert.equal(
-      useAppStore.getState().layers.filter((layer) => layer.id.startsWith("geolibre-mapillary"))
+      useAppStore
+        .getState()
+        .layers.filter((layer) => layer.id.startsWith("geolibre-mapillary"))
         .length,
-      0,
+      0
     );
   });
 });

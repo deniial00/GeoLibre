@@ -1,4 +1,7 @@
-import { readControlPreference, writeControlPreference } from "../../lib/control-preferences";
+import {
+  readControlPreference,
+  writeControlPreference,
+} from "../../lib/control-preferences";
 import {
   SCRIPT_MAP_CONTROL_EVENT,
   clearScriptMapControls,
@@ -118,7 +121,11 @@ import {
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { createAppAPI, getPluginManager, usePluginRegistry } from "../../hooks/usePlugins";
+import {
+  createAppAPI,
+  getPluginManager,
+  usePluginRegistry,
+} from "../../hooks/usePlugins";
 import { useConsentGatedActions } from "../../hooks/useConsentGatedActions";
 import { useOsmPbfLoader } from "../../hooks/useOsmPbfLoader";
 import type { ProjectFileActions } from "../../hooks/useProjectFileActions";
@@ -130,7 +137,11 @@ import { isMobile } from "../../lib/is-mobile";
 import { isTauri } from "../../lib/tauri-io";
 import { isMaptoolkitBasemapActive } from "../../lib/maptoolkit-basemap";
 import { useDesktopSettingsStore } from "../../hooks/useDesktopSettings";
-import { MENU_MANAGED_PLUGIN_IDS, isMenuVisible, isPluginVisible } from "../../lib/ui-profile";
+import {
+  MENU_MANAGED_PLUGIN_IDS,
+  isMenuVisible,
+  isPluginVisible,
+} from "../../lib/ui-profile";
 import { CommandPalette } from "../command/CommandPalette";
 import { KeyboardShortcutsDialog } from "../command/KeyboardShortcutsDialog";
 import { useGlobalShortcuts } from "../../hooks/useGlobalShortcuts";
@@ -145,7 +156,10 @@ import { pluginDisplayName } from "../../lib/plugin-display-name";
 import { masHidesDataSource } from "../../lib/mas-build";
 import { IS_STORE_BUILD } from "../../lib/updates";
 import { AddDataDialog, type AddDataKind } from "./AddDataDialog";
-import { serviceUrlParameter, type ServiceUrlParameter } from "../../lib/data-url";
+import {
+  serviceUrlParameter,
+  type ServiceUrlParameter,
+} from "../../lib/data-url";
 import {
   OPEN_ADD_DATA_EVENT,
   type OpenAddDataDetail,
@@ -177,7 +191,10 @@ import { HelpMenu } from "./toolbar/HelpMenu";
 import { OsmPbfDialogs } from "./toolbar/OsmPbfDialogs";
 import { PluginsMenu } from "./toolbar/PluginsMenu";
 import { PluginToolbarMenus } from "./toolbar/PluginToolbarMenus";
-import { EARTH_ENGINE_AVAILABLE, ProcessingMenu } from "./toolbar/ProcessingMenu";
+import {
+  EARTH_ENGINE_AVAILABLE,
+  ProcessingMenu,
+} from "./toolbar/ProcessingMenu";
 import { ProjectFileDialogs } from "./toolbar/ProjectFileDialogs";
 import { ProjectMenu } from "./toolbar/ProjectMenu";
 import { googleEarthUrl, googleMapsUrl } from "../../lib/external-map-links";
@@ -251,7 +268,9 @@ export function TopToolbar({
   viewer = false,
 }: TopToolbarProps) {
   const { t, i18n } = useTranslation();
-  const deploymentCapabilities = useAppStore((state) => state.deploymentCapabilities);
+  const deploymentCapabilities = useAppStore(
+    (state) => state.deploymentCapabilities
+  );
   const appPrivileges = useAppStore((state) => state.capabilities.privileges);
   // The reverse-geocode plugin lives in the framework-agnostic plugins package
   // and cannot call t() itself, so push the translated popup strings into it
@@ -264,7 +283,8 @@ export function TopToolbar({
       failed: t("geocode.reverseFailed"),
     });
     setBasemapControlLabels({
-      confirmStyleReplace: (name, count) => t("basemaps.confirmStyleReplace", { name, count }),
+      confirmStyleReplace: (name, count) =>
+        t("basemaps.confirmStyleReplace", { name, count }),
     });
     setAnnotationLabels({
       toolbar: t("annotations.toolbar"),
@@ -407,7 +427,10 @@ export function TopToolbar({
       adding: (title) => t("arcgisHub.adding", { title }),
       added: (title) => t("arcgisHub.added", { title }),
       addedCapped: (title, limit) =>
-        t("arcgisHub.addedCapped", { title, limit: limit.toLocaleString(i18n.language) }),
+        t("arcgisHub.addedCapped", {
+          title,
+          limit: limit.toLocaleString(i18n.language),
+        }),
       addError: t("arcgisHub.addError"),
       zoom: t("arcgisHub.zoom"),
       download: t("arcgisHub.download"),
@@ -416,7 +439,10 @@ export function TopToolbar({
         t("arcgisHub.downloading", { completed, total, title }),
       downloadStarted: (title) => t("arcgisHub.downloadStarted", { title }),
       downloadCapped: (title, limit) =>
-        t("arcgisHub.downloadCapped", { title, limit: limit.toLocaleString(i18n.language) }),
+        t("arcgisHub.downloadCapped", {
+          title,
+          limit: limit.toLocaleString(i18n.language),
+        }),
       downloadFirstLayer: (title, layerCount) =>
         t("arcgisHub.downloadFirstLayer", { title, layerCount }),
       downloadError: t("arcgisHub.downloadError"),
@@ -468,13 +494,15 @@ export function TopToolbar({
     setOpenDataCatalogLabels({
       socrataHint: t("openDataCatalogs.socrataHint"),
       ckanHint: t("openDataCatalogs.ckanHint"),
-      searchPlaceholder: (name) => t("openDataCatalogs.searchPlaceholder", { name }),
+      searchPlaceholder: (name) =>
+        t("openDataCatalogs.searchPlaceholder", { name }),
       search: t("openDataCatalogs.search"),
       enterKeyword: t("openDataCatalogs.enterKeyword"),
       loadMore: t("openDataCatalogs.loadMore"),
       searching: t("openDataCatalogs.searching"),
       noResults: t("openDataCatalogs.noResults"),
-      showing: (shown, total) => t("openDataCatalogs.showing", { shown, total }),
+      showing: (shown, total) =>
+        t("openDataCatalogs.showing", { shown, total }),
       noDescription: t("openDataCatalogs.noDescription"),
       add: t("openDataCatalogs.add"),
       details: t("openDataCatalogs.details"),
@@ -526,7 +554,8 @@ export function TopToolbar({
       cogNote: t("earthdataGis.cogNote"),
       cogDownload: t("earthdataGis.cogDownload"),
       cogDownloading: t("earthdataGis.cogDownloading"),
-      cogRetrying: (width, height) => t("earthdataGis.cogRetrying", { width, height }),
+      cogRetrying: (width, height) =>
+        t("earthdataGis.cogRetrying", { width, height }),
       cogConverting: t("earthdataGis.cogConverting"),
       cogDone: (width, height) => t("earthdataGis.cogDone", { width, height }),
       cogFailed: (message) => t("earthdataGis.cogFailed", { message }),
@@ -582,7 +611,8 @@ export function TopToolbar({
       select: t("s3Browser.select"),
       selectAll: t("s3Browser.selectAll"),
       addSelected: (count) => t("s3Browser.addSelected", { count }),
-      addingProgress: (index, total) => t("s3Browser.addingProgress", { index, total }),
+      addingProgress: (index, total) =>
+        t("s3Browser.addingProgress", { index, total }),
       addFailed: (name, message) => t("s3Browser.addFailed", { name, message }),
       error: (message) => t("s3Browser.error", { message }),
     });
@@ -624,7 +654,8 @@ export function TopToolbar({
       addError: (message) => t("sourceCoop.addError", { message }),
       largeFileWarning: (size) => t("sourceCoop.largeFileWarning", { size }),
       streamHint: (size) => t("sourceCoop.streamHint", { size }),
-      tooLargeToOpen: (size, limit) => t("sourceCoop.tooLargeToOpen", { size, limit }),
+      tooLargeToOpen: (size, limit) =>
+        t("sourceCoop.tooLargeToOpen", { size, limit }),
     });
     setHuggingFaceLabels({
       browseTab: t("huggingFace.browseTab"),
@@ -669,9 +700,11 @@ export function TopToolbar({
       notRasterIndex: t("huggingFace.notRasterIndex"),
       largeFileWarning: (size) => t("huggingFace.largeFileWarning", { size }),
       streamHint: (size) => t("huggingFace.streamHint", { size }),
-      tooLargeToOpen: (size, limit) => t("huggingFace.tooLargeToOpen", { size, limit }),
+      tooLargeToOpen: (size, limit) =>
+        t("huggingFace.tooLargeToOpen", { size, limit }),
       tokenLabel: t("huggingFace.tokenLabel"),
       tokenHint: t("huggingFace.tokenHint"),
+      tokenHintKeychain: t("huggingFace.tokenHintKeychain"),
       tokenPlaceholder: t("huggingFace.tokenPlaceholder"),
       tokenSave: t("huggingFace.tokenSave"),
       tokenClear: t("huggingFace.tokenClear"),
@@ -704,18 +737,23 @@ export function TopToolbar({
       remoteRasterNote: t("huggingFace.remoteRasterNote"),
       noUploadableLayers: t("huggingFace.noUploadableLayers"),
       clearSelection: t("huggingFace.clearSelection"),
-      selectedFiles: (count, size) => t("huggingFace.selectedFiles", { count, size }),
+      selectedFiles: (count, size) =>
+        t("huggingFace.selectedFiles", { count, size }),
       commitMessageLabel: t("huggingFace.commitMessageLabel"),
       commitMessagePlaceholder: t("huggingFace.commitMessagePlaceholder"),
       upload: t("huggingFace.upload"),
       uploadPreparing: t("huggingFace.uploadPreparing"),
-      uploadHashing: (name, index, total) => t("huggingFace.uploadHashing", { name, index, total }),
-      uploadSending: (name, index, total) => t("huggingFace.uploadSending", { name, index, total }),
+      uploadHashing: (name, index, total) =>
+        t("huggingFace.uploadHashing", { name, index, total }),
+      uploadSending: (name, index, total) =>
+        t("huggingFace.uploadSending", { name, index, total }),
       uploadCommitting: t("huggingFace.uploadCommitting"),
       uploadDone: (count) => t("huggingFace.uploadDone", { count }),
       uploadError: (message) => t("huggingFace.uploadError", { message }),
-      fileTooLarge: (name, limit) => t("huggingFace.fileTooLarge", { name, limit }),
-      selectionTooLarge: (size, limit) => t("huggingFace.selectionTooLarge", { size, limit }),
+      fileTooLarge: (name, limit) =>
+        t("huggingFace.fileTooLarge", { name, limit }),
+      selectionTooLarge: (size, limit) =>
+        t("huggingFace.selectionTooLarge", { size, limit }),
       openUploaded: t("huggingFace.openUploaded"),
       rgbHeading: t("huggingFace.rgbHeading"),
       rgbHint: t("huggingFace.rgbHint"),
@@ -983,9 +1021,13 @@ export function TopToolbar({
       basinButton: t("usgsNldi.basinButton"),
       navigationPlaceholder: t("usgsNldi.navigationPlaceholder"),
       navigationUpstreamMain: t("usgsNldi.navigationUpstreamMain"),
-      navigationUpstreamTributaries: t("usgsNldi.navigationUpstreamTributaries"),
+      navigationUpstreamTributaries: t(
+        "usgsNldi.navigationUpstreamTributaries"
+      ),
       navigationDownstreamMain: t("usgsNldi.navigationDownstreamMain"),
-      navigationDownstreamDiversions: t("usgsNldi.navigationDownstreamDiversions"),
+      navigationDownstreamDiversions: t(
+        "usgsNldi.navigationDownstreamDiversions"
+      ),
       sourcePlaceholder: t("usgsNldi.sourcePlaceholder"),
       distancePlaceholder: t("usgsNldi.distancePlaceholder"),
       navigationButton: t("usgsNldi.navigationButton"),
@@ -1009,7 +1051,12 @@ export function TopToolbar({
       tracing: t("usgsNldi.tracing"),
       flowlineRendered: (comid, usedFallback) =>
         comid
-          ? t(usedFallback ? "usgsNldi.flowlineFallbackComid" : "usgsNldi.flowlineComid", { comid })
+          ? t(
+              usedFallback
+                ? "usgsNldi.flowlineFallbackComid"
+                : "usgsNldi.flowlineComid",
+              { comid }
+            )
           : t(usedFallback ? "usgsNldi.flowlineFallback" : "usgsNldi.flowline"),
       requestFailed: t("usgsNldi.requestFailed"),
       nothingToAdd: t("usgsNldi.nothingToAdd"),
@@ -1134,7 +1181,8 @@ export function TopToolbar({
       noResults: t("stacPlugin.noResults"),
       searchFailed: t("stacPlugin.searchFailed"),
       showing: (count) => t("stacPlugin.showing", { count }),
-      showingOfMatched: (count, matched) => t("stacPlugin.showingOfMatched", { count, matched }),
+      showingOfMatched: (count, matched) =>
+        t("stacPlugin.showingOfMatched", { count, matched }),
       loadMore: t("stacPlugin.loadMore"),
       renderOptions: t("stacPlugin.renderOptions"),
       renderingEngine: t("stacPlugin.renderingEngine"),
@@ -1154,7 +1202,8 @@ export function TopToolbar({
       nodataPlaceholder: t("stacPlugin.nodataPlaceholder"),
       renderHint: t("stacPlugin.renderHint"),
       initialStatus: t("stacPlugin.initialStatus"),
-      catalogInfo: (title, kind) => t("stacPlugin.catalogInfo", { title, kind }),
+      catalogInfo: (title, kind) =>
+        t("stacPlugin.catalogInfo", { title, kind }),
       zoom: t("stacPlugin.zoom"),
       add: t("stacPlugin.add"),
       download: t("stacPlugin.download"),
@@ -1244,7 +1293,9 @@ export function TopToolbar({
   const setRasterToolOpen = useAppStore((s) => s.setRasterToolOpen);
   const setSegmentationOpen = useAppStore((s) => s.setSegmentationOpen);
   const setObjectDetectionOpen = useAppStore((s) => s.setObjectDetectionOpen);
-  const setSegmentEverythingOpen = useAppStore((s) => s.setSegmentEverythingOpen);
+  const setSegmentEverythingOpen = useAppStore(
+    (s) => s.setSegmentEverythingOpen
+  );
   // The globe owns the primary map, so the MapLibre-only entries below are dead
   // while it is active and the View menu becomes the only way back to 2D (#2217).
   const primaryRenderer = useAppStore((s) => s.primaryRenderer);
@@ -1258,9 +1309,15 @@ export function TopToolbar({
   const cesiumPrimary = primaryRenderer === "cesium";
   const capabilities = useMapCapabilities(mapControllerRef);
   const setSqlWorkspaceOpen = useAppStore((s) => s.setSqlWorkspaceOpen);
-  const setLoadEditorFeaturesOpen = useAppStore((s) => s.setLoadEditorFeaturesOpen);
-  const loadEditorFeaturesOpen = useAppStore((s) => s.ui.loadEditorFeaturesOpen);
-  const loadEditorFeaturesLayerId = useAppStore((s) => s.ui.loadEditorFeaturesLayerId);
+  const setLoadEditorFeaturesOpen = useAppStore(
+    (s) => s.setLoadEditorFeaturesOpen
+  );
+  const loadEditorFeaturesOpen = useAppStore(
+    (s) => s.ui.loadEditorFeaturesOpen
+  );
+  const loadEditorFeaturesLayerId = useAppStore(
+    (s) => s.ui.loadEditorFeaturesLayerId
+  );
   const setPythonConsoleOpen = useAppStore((s) => s.setPythonConsoleOpen);
   const setAssistantOpen = useAppStore((s) => s.setAssistantOpen);
   const projectName = useAppStore((s) => s.projectName);
@@ -1271,7 +1328,9 @@ export function TopToolbar({
   // session-status badge can reopen it from outside this component tree (#754).
   // The dialog itself is rendered by DesktopShell (not here) so it survives
   // toolbar-hidden layouts; the toolbar only triggers it via this setter.
-  const setCollaborateDialogOpen = useAppStore((s) => s.setCollaborateDialogOpen);
+  const setCollaborateDialogOpen = useAppStore(
+    (s) => s.setCollaborateDialogOpen
+  );
 
   const {
     plugins,
@@ -1285,15 +1344,17 @@ export function TopToolbar({
   } = usePluginRegistry();
   // Plugin ids hidden by the active UI profile (issue #500). Recompute only when
   // the profile changes so the Plugins menu can drop them.
-  const uiProfile = useDesktopSettingsStore((state) => state.desktopSettings.uiProfile);
+  const uiProfile = useDesktopSettingsStore(
+    (state) => state.desktopSettings.uiProfile
+  );
   const hiddenPluginIds = useMemo(
     () =>
       new Set(
         plugins
           .filter((plugin) => !isPluginVisible(uiProfile, plugin.id))
-          .map((plugin) => plugin.id),
+          .map((plugin) => plugin.id)
       ),
-    [plugins, uiProfile],
+    [plugins, uiProfile]
   );
   // Plugins the user can toggle from the Plugins menu, offered as visibility
   // checkboxes in Settings → Interface. Excludes the four plugins that are
@@ -1304,12 +1365,15 @@ export function TopToolbar({
       plugins
         .filter((plugin) => !MENU_MANAGED_PLUGIN_IDS.has(plugin.id))
         .map((plugin) => ({ id: plugin.id, name: plugin.name })),
-    [plugins],
+    [plugins]
   );
   // mapControllerRef is a stable ref object and createAppAPI dereferences
   // `.current` lazily, so memoizing on the ref keeps a single appApi identity
   // across renders without going stale.
-  const appApi = useMemo(() => createAppAPI(mapControllerRef), [mapControllerRef]);
+  const appApi = useMemo(
+    () => createAppAPI(mapControllerRef),
+    [mapControllerRef]
+  );
 
   const panels = useToolbarPanels(appApi);
   // Fill in the geometry kind for vector-tile layers that arrived without it
@@ -1323,31 +1387,33 @@ export function TopToolbar({
   const viewportHistory = useViewportHistory(
     mapControllerRef,
     mapReadyGeneration,
-    projectGeneration,
+    projectGeneration
   );
 
   // Tracks an active IME composition so pressing Enter to confirm a CJK
   // candidate doesn't blur the project-name field mid-composition.
   const projectNameComposingRef = useRef(false);
 
-  const [controlsVisible, setControlsVisible] = useState<Record<ToolbarMapControl, boolean>>(() =>
-    MAP_CONTROL_ITEMS.reduce(
-      (acc, { id }) => {
-        acc[id] =
-          id === "terrain" || id === "maptoolkit-logo"
-            ? DEFAULT_BUILT_IN_CONTROL_VISIBILITY[id]
-            : readControlPreference(id, DEFAULT_BUILT_IN_CONTROL_VISIBILITY[id]);
-        return acc;
-      },
-      {} as Record<ToolbarMapControl, boolean>,
-    ),
+  const [controlsVisible, setControlsVisible] = useState<
+    Record<ToolbarMapControl, boolean>
+  >(() =>
+    MAP_CONTROL_ITEMS.reduce((acc, { id }) => {
+      acc[id] =
+        id === "terrain" || id === "maptoolkit-logo"
+          ? DEFAULT_BUILT_IN_CONTROL_VISIBILITY[id]
+          : readControlPreference(id, DEFAULT_BUILT_IN_CONTROL_VISIBILITY[id]);
+      return acc;
+    }, {} as Record<ToolbarMapControl, boolean>)
   );
   // Restore optional chrome after startup and renderer replacement. Terrain is
   // project state and the Maptoolkit logo follows attribution requirements.
   useEffect(() => {
     for (const { id } of MAP_CONTROL_ITEMS) {
       if (id !== "terrain" && id !== "maptoolkit-logo")
-        mapControllerRef.current?.setBuiltInControlVisible(id, controlsVisible[id]);
+        mapControllerRef.current?.setBuiltInControlVisible(
+          id,
+          controlsVisible[id]
+        );
     }
   }, [mapControllerRef, mapReadyGeneration, controlsVisible]);
 
@@ -1360,16 +1426,23 @@ export function TopToolbar({
   // toolbar is unmounted in `?maponly` embeds.
   useEffect(() => {
     const onScriptControl = (event: Event) => {
-      const { control, visible } = (event as CustomEvent<ScriptMapControlDetail>).detail;
+      const { control, visible } = (
+        event as CustomEvent<ScriptMapControlDetail>
+      ).detail;
       setControlsVisible((current) =>
-        current[control] === visible ? current : { ...current, [control]: visible },
+        current[control] === visible
+          ? current
+          : { ...current, [control]: visible }
       );
     };
     window.addEventListener(SCRIPT_MAP_CONTROL_EVENT, onScriptControl);
-    return () => window.removeEventListener(SCRIPT_MAP_CONTROL_EVENT, onScriptControl);
+    return () =>
+      window.removeEventListener(SCRIPT_MAP_CONTROL_EVENT, onScriptControl);
   }, []);
 
-  const terrainEnabled = useAppStore((state) => state.preferences.map.terrainEnabled);
+  const terrainEnabled = useAppStore(
+    (state) => state.preferences.map.terrainEnabled
+  );
 
   // Terrain is project state, unlike the other optional map chrome, so applying
   // it to the map lives in `useTerrainRestore` (DesktopShell) — this toolbar is
@@ -1377,7 +1450,9 @@ export function TopToolbar({
   // checkbox mirrors that state here.
   useEffect(() => {
     setControlsVisible((current) =>
-      current.terrain === terrainEnabled ? current : { ...current, terrain: terrainEnabled },
+      current.terrain === terrainEnabled
+        ? current
+        : { ...current, terrain: terrainEnabled }
     );
   }, [terrainEnabled]);
   // `keyword` has no deep-link parameter — only the Browser panel's saved CSW
@@ -1385,7 +1460,9 @@ export function TopToolbar({
   const [initialService, setInitialService] = useState<
     (ServiceUrlParameter & { keyword?: string | null }) | null
   >(() =>
-    viewer || typeof window === "undefined" ? null : serviceUrlParameter(window.location.search),
+    viewer || typeof window === "undefined"
+      ? null
+      : serviceUrlParameter(window.location.search)
   );
   const [addDataKind, setAddDataKind] = useState<AddDataKind | null>(() => {
     const kind = initialService?.kind as AddDataKind | undefined;
@@ -1394,7 +1471,9 @@ export function TopToolbar({
     // that, even though no service kind is hidden today.
     return kind && !masHidesDataSource(kind) ? kind : null;
   });
-  const [addDataTargetGroupId, setAddDataTargetGroupId] = useState<string | null>(null);
+  const [addDataTargetGroupId, setAddDataTargetGroupId] = useState<
+    string | null
+  >(null);
   const addDataInitialLayerIdsRef = useRef<Set<string>>(new Set());
   // Every path that opens the dialog outside the OPEN_ADD_DATA_EVENT listener
   // (the Add Data menu, the command palette, the 3D-model button) is ungrouped,
@@ -1406,9 +1485,9 @@ export function TopToolbar({
     setAddDataKind(kind);
   }, []);
   // PostgreSQL prefill (saved connection / clicked table) from the Browser panel.
-  const [addDataPostgres, setAddDataPostgres] = useState<OpenAddDataPostgres | undefined>(
-    undefined,
-  );
+  const [addDataPostgres, setAddDataPostgres] = useState<
+    OpenAddDataPostgres | undefined
+  >(undefined);
   // Drop the prefill whenever the dialog isn't on the PostgreSQL source, so a
   // stale prefill can't leak into a later postgres open reached via a path that
   // sets addDataKind directly (command palette / menus) rather than through the
@@ -1439,12 +1518,12 @@ export function TopToolbar({
                 styleUrl: null,
                 keyword: detail.keyword ?? null,
               }
-            : null,
+            : null
         );
         setAddDataPostgres(detail.postgres);
         setAddDataTargetGroupId(detail.groupId ?? null);
         addDataInitialLayerIdsRef.current = new Set(
-          useAppStore.getState().layers.map((layer) => layer.id),
+          useAppStore.getState().layers.map((layer) => layer.id)
         );
         setAddDataKind(detail.kind);
       }
@@ -1454,7 +1533,9 @@ export function TopToolbar({
   }, [viewer]);
   // Deck.gl Layer kind the Add Data dialog opens on (e.g. the 3D-model entry
   // jumps straight to the scenegraph layer type).
-  const [addDataDeckVizKind, setAddDataDeckVizKind] = useState<string | undefined>(undefined);
+  const [addDataDeckVizKind, setAddDataDeckVizKind] = useState<
+    string | undefined
+  >(undefined);
   const [netcdfDialogOpen, setNetcdfDialogOpen] = useState(false);
   const [newProjectDialogOpen, setNewProjectDialogOpen] = useState(false);
   const [managePluginsOpen, setManagePluginsOpen] = useState(false);
@@ -1500,7 +1581,7 @@ export function TopToolbar({
     for (const control of ALL_BUILT_IN_CONTROL_IDS) {
       mapControllerRef.current?.setBuiltInControlVisible(
         control,
-        NEW_PROJECT_VISIBLE_BUILT_IN_CONTROLS.has(control),
+        NEW_PROJECT_VISIBLE_BUILT_IN_CONTROLS.has(control)
       );
     }
     // New Project resets every control to its default, so an earlier scripted
@@ -1533,7 +1614,8 @@ export function TopToolbar({
     // The ArcGIS view and the globe draw Zarr natively and have no Zarr control
     // to open, so they take the Add Data form instead.
     zarr: () =>
-      appApi.getMapRenderer?.() === "arcgis" || appApi.getMapRenderer?.() === "cesium"
+      appApi.getMapRenderer?.() === "arcgis" ||
+      appApi.getMapRenderer?.() === "cesium"
         ? openAddDataKind("zarr")
         : openZarrLayerPanel(appApi),
     netcdf: () => setNetcdfDialogOpen(true),
@@ -1546,7 +1628,9 @@ export function TopToolbar({
 
   const toggleMapControl = (control: ToolbarMapControl) => {
     const visible = !controlsVisible[control];
-    const updated = mapControllerRef.current?.setBuiltInControlVisible(control, visible) ?? false;
+    const updated =
+      mapControllerRef.current?.setBuiltInControlVisible(control, visible) ??
+      false;
     if (!updated) return;
     // An explicit user choice revokes an earlier scripted one, so
     // `useScriptControlRestore` stops forcing the scripted value back on the
@@ -1589,14 +1673,17 @@ export function TopToolbar({
   // landing before the controller exists (mapControllerRef.current still
   // null) is not retried, which our mount ordering does not otherwise hit.
   const maptoolkitBasemapActive = useAppStore((s) =>
-    isMaptoolkitBasemapActive(s.basemapStyleUrl, s.layers),
+    isMaptoolkitBasemapActive(s.basemapStyleUrl, s.layers)
   );
   useEffect(() => {
-    mapControllerRef.current?.setBuiltInControlVisible("maptoolkit-logo", maptoolkitBasemapActive);
+    mapControllerRef.current?.setBuiltInControlVisible(
+      "maptoolkit-logo",
+      maptoolkitBasemapActive
+    );
     setControlsVisible((current) =>
       current["maptoolkit-logo"] === maptoolkitBasemapActive
         ? current
-        : { ...current, "maptoolkit-logo": maptoolkitBasemapActive },
+        : { ...current, "maptoolkit-logo": maptoolkitBasemapActive }
     );
   }, [maptoolkitBasemapActive, mapControllerRef]);
 
@@ -1708,14 +1795,14 @@ export function TopToolbar({
     },
     // Sources the Mac App Store build hides in the Add Data menu must not be
     // reachable through the palette either.
-    ...ADD_DATA_KIND_COMMANDS.filter(({ kind }) => !masHidesDataSource(kind)).map(
-      ({ kind, titleKey }) => ({
-        id: `add.${kind}`,
-        title: t("toolbar.command.addLayer", { name: t(titleKey) }),
-        group: t("toolbar.commandGroup.addData"),
-        run: () => openAddDataKind(kind),
-      }),
-    ),
+    ...ADD_DATA_KIND_COMMANDS.filter(
+      ({ kind }) => !masHidesDataSource(kind)
+    ).map(({ kind, titleKey }) => ({
+      id: `add.${kind}`,
+      title: t("toolbar.command.addLayer", { name: t(titleKey) }),
+      group: t("toolbar.commandGroup.addData"),
+      run: () => openAddDataKind(kind),
+    })),
     {
       id: "add.stac",
       title: t("toolbar.command.addStacLayer"),
@@ -1828,7 +1915,8 @@ export function TopToolbar({
       id: "proc.modelBuilder",
       title: t("toolbar.command.modelBuilder"),
       group: t("toolbar.commandGroup.processing"),
-      keywords: "model builder pipeline chain modeler workflow graph canvas node",
+      keywords:
+        "model builder pipeline chain modeler workflow graph canvas node",
       icon: Workflow,
       run: () => setModelBuilderOpen(true),
     },
@@ -1872,7 +1960,8 @@ export function TopToolbar({
             id: "proc.segmentEverything",
             title: t("toolbar.command.segmentEverything"),
             group: t("toolbar.commandGroup.processing"),
-            keywords: "segment everything slimsam sam automatic mask imagery polygons",
+            keywords:
+              "segment everything slimsam sam automatic mask imagery polygons",
             icon: Sparkles,
             run: () => setSegmentEverythingOpen(true),
           },
@@ -2165,7 +2254,7 @@ export function TopToolbar({
           plugin.id !== GRATICULE_PLUGIN_ID &&
           plugin.id !== CLOUDS_PLUGIN_ID &&
           plugin.id !== PRECIPITATION_PLUGIN_ID &&
-          plugin.id !== DECK_VIZ_PLUGIN_ID,
+          plugin.id !== DECK_VIZ_PLUGIN_ID
       )
       .map((plugin) => ({
         id: `plugin.${plugin.id}`,
@@ -2175,7 +2264,8 @@ export function TopToolbar({
         group: t("toolbar.commandGroup.plugins"),
         keywords: isActive(plugin.id) ? "plugin deactivate" : "plugin activate",
         disabledReason:
-          !isActive(plugin.id) && !isPluginEngineSupported(plugin, primaryRenderer)
+          !isActive(plugin.id) &&
+          !isPluginEngineSupported(plugin, primaryRenderer)
             ? t("renderer.pluginUnsupported")
             : undefined,
         run: () => toggle(plugin.id, appApi),
@@ -2239,12 +2329,12 @@ export function TopToolbar({
                 supportsAddDataRenderer(
                   command.id.slice(4),
                   primaryRenderer,
-                  capabilities.deckOverlay,
-                )),
+                  capabilities.deckOverlay
+                ))
           ),
-          deploymentCapabilities,
+          deploymentCapabilities
         ),
-        appPrivileges,
+        appPrivileges
       ),
     [
       commands,
@@ -2253,14 +2343,14 @@ export function TopToolbar({
       primaryRenderer,
       addDataReady,
       capabilities.deckOverlay,
-    ],
+    ]
   );
   const shortcutCommands = useMemo(
     () =>
       viewer
         ? allowedCommands.filter((command) => command.id.startsWith("view."))
         : allowedCommands,
-    [allowedCommands, viewer],
+    [allowedCommands, viewer]
   );
   useGlobalShortcuts({
     commands: shortcutCommands,
@@ -2276,7 +2366,9 @@ export function TopToolbar({
   // name from tauri.ios.conf.json, the home-screen icon, and the store listing),
   // so titling it "GeoLibre Desktop" there contradicts every other surface.
   // A deployment can replace either with its own name (GEOLIBRE_APP_NAME).
-  const appTitle = resolveAppName(isTauri() && !isMobile() ? "GeoLibre Desktop" : "GeoLibre");
+  const appTitle = resolveAppName(
+    isTauri() && !isMobile() ? "GeoLibre Desktop" : "GeoLibre"
+  );
   const renderToolbarLabel = (label: string) =>
     showLabels ? <span className="hidden sm:inline">{label}</span> : null;
   const chrome: ToolbarChrome = {
@@ -2292,12 +2384,14 @@ export function TopToolbar({
         // One row at every width: menus that don't fit scroll horizontally
         // instead of wrapping onto a second row (#871).
         "flex min-h-11 min-w-0 shrink-0 flex-nowrap items-center gap-1 overflow-x-auto border-b bg-card py-1",
-        compact ? "px-1.5" : "px-2",
+        compact ? "px-1.5" : "px-2"
       )}
     >
       <span className="me-1 flex shrink-0 items-center gap-1.5 text-sm font-semibold text-primary md:me-2">
         <Map className="h-4 w-4" />
-        {showProjectInfo ? <span className="hidden sm:inline">{appTitle}</span> : null}
+        {showProjectInfo ? (
+          <span className="hidden sm:inline">{appTitle}</span>
+        ) : null}
       </span>
       {!viewer && isMenuVisible(uiProfile, "project") && (
         <ProjectMenu
@@ -2308,9 +2402,15 @@ export function TopToolbar({
           onOpenFromFile={() => void projectFiles.handleOpenFromFile()}
           onOpenFromUrl={() => projectFiles.setProjectUrlDialogOpen(true)}
           onOpenGallery={() => setGalleryDialogOpen(true)}
-          onImportQgisProject={() => void projectFiles.handleImportQgisProject()}
-          onImportArcgisProject={() => void projectFiles.handleImportArcgisProject()}
-          onImportLayerStyles={() => void projectFiles.handleImportLayerStyles()}
+          onImportQgisProject={() =>
+            void projectFiles.handleImportQgisProject()
+          }
+          onImportArcgisProject={() =>
+            void projectFiles.handleImportArcgisProject()
+          }
+          onImportLayerStyles={() =>
+            void projectFiles.handleImportLayerStyles()
+          }
           onOpenRecent={(path) => {
             void projectFiles.handleOpenRecent(path).then((error) => {
               if (error) projectFiles.setActionError(error);
@@ -2323,7 +2423,9 @@ export function TopToolbar({
           onSaveAsTemplate={() => projectFiles.handleSaveAsTemplate()}
           onShare={() => setShareDialogOpen(true)}
           onExportHtml={() => void projectFiles.handleExportHtml()}
-          onExportLayerStyles={() => void projectFiles.handleExportLayerStyles()}
+          onExportLayerStyles={() =>
+            void projectFiles.handleExportLayerStyles()
+          }
           onCollaborate={() => setCollaborateDialogOpen(true)}
           onPrintLayout={() => setPrintLayoutOpen(true)}
           onOpenOfflineBasemap={onOpenBasemapExtract}
@@ -2369,7 +2471,9 @@ export function TopToolbar({
           }}
           onResetNorth={() => mapControllerRef.current?.resetNorth()}
           onResetPitch={() => mapControllerRef.current?.resetPitch()}
-          onResetPitchBearing={() => mapControllerRef.current?.resetNorthPitch()}
+          onResetPitchBearing={() =>
+            mapControllerRef.current?.resetNorthPitch()
+          }
           onSetView={() => setSetViewOpen(true)}
           // `readView()`, not `getMap()`: both hand-offs only need a camera, which
           // every engine reports, and the MapLibre escape hatch is `null` on the
@@ -2378,12 +2482,16 @@ export function TopToolbar({
           onViewInGoogleEarth={() => {
             const view = mapControllerRef.current?.readView();
             if (!view) return;
-            void openExternalLink(googleEarthUrl(view.center[1], view.center[0], view.zoom));
+            void openExternalLink(
+              googleEarthUrl(view.center[1], view.center[0], view.zoom)
+            );
           }}
           onViewInGoogleMaps={() => {
             const view = mapControllerRef.current?.readView();
             if (!view) return;
-            void openExternalLink(googleMapsUrl(view.center[1], view.center[0], view.zoom));
+            void openExternalLink(
+              googleMapsUrl(view.center[1], view.center[0], view.zoom)
+            );
           }}
           onZoomIn={() => mapControllerRef.current?.zoomIn()}
           onZoomOut={() => mapControllerRef.current?.zoomOut()}
@@ -2395,21 +2503,23 @@ export function TopToolbar({
         onSaveCurrentProject={projectFiles.handleSave}
         onProjectCreated={resetRuntimeControlsForNewProject}
       />
-      {!viewer && isMenuVisible(uiProfile, "addData") && deploymentCapabilities.has("data:add") && (
-        <AddDataMenu
-          disabled={!addDataReady}
-          chrome={chrome}
-          addLayer={addLayer}
-          osmPbfBusy={osmPbf.busy}
-          cesiumPrimary={cesiumPrimary}
-          onSetAddDataKind={openAddDataKind}
-          onAddGltfModel={() => {
-            setAddDataDeckVizKind("scenegraph");
-            openAddDataKind("deckgl-viz");
-          }}
-          onOpenOsmPbfDialog={() => osmPbf.setDialogOpen(true)}
-        />
-      )}
+      {!viewer &&
+        isMenuVisible(uiProfile, "addData") &&
+        deploymentCapabilities.has("data:add") && (
+          <AddDataMenu
+            disabled={!addDataReady}
+            chrome={chrome}
+            addLayer={addLayer}
+            osmPbfBusy={osmPbf.busy}
+            cesiumPrimary={cesiumPrimary}
+            onSetAddDataKind={openAddDataKind}
+            onAddGltfModel={() => {
+              setAddDataDeckVizKind("scenegraph");
+              openAddDataKind("deckgl-viz");
+            }}
+            onOpenOsmPbfDialog={() => osmPbf.setDialogOpen(true)}
+          />
+        )}
       {!viewer &&
         isMenuVisible(uiProfile, "processing") &&
         deploymentCapabilities.has("processing:run") && (
@@ -2556,8 +2666,11 @@ export function TopToolbar({
         getProject={async (title) => {
           // Shared projects are opened on another machine where the local files
           // don't exist, so always embed the vector data (never file references).
-          const { project, defaultProjectName } = await projectFiles.buildEmbeddedProject(title);
-          const redacted = redactProjectCredentials(excludeHiddenFieldsFromProject(project));
+          const { project, defaultProjectName } =
+            await projectFiles.buildEmbeddedProject(title);
+          const redacted = redactProjectCredentials(
+            excludeHiddenFieldsFromProject(project)
+          );
           // Strip path separators, control chars, and other characters that are
           // illegal in filenames so the server gets a predictable name.
           const safeName = defaultProjectName.replace(
@@ -2565,7 +2678,7 @@ export function TopToolbar({
             // non-printing and rejected by some filesystems and HTTP servers.
             // eslint-disable-next-line no-control-regex
             /[\u0000-\u001f\u007f/\\:*?"<>|]/g,
-            "_",
+            "_"
           );
           return {
             content: serializeProject(redacted.project),
@@ -2606,15 +2719,23 @@ export function TopToolbar({
         mapControllerRef={mapControllerRef}
         initialDeckVizKind={addDataDeckVizKind}
         initialPostgres={addDataPostgres}
-        initialUrl={addDataKind === initialService?.kind ? initialService.url : undefined}
+        initialUrl={
+          addDataKind === initialService?.kind ? initialService.url : undefined
+        }
         initialLayer={
-          addDataKind === initialService?.kind ? (initialService.layer ?? undefined) : undefined
+          addDataKind === initialService?.kind
+            ? initialService.layer ?? undefined
+            : undefined
         }
         initialStyleUrl={
-          addDataKind === initialService?.kind ? (initialService.styleUrl ?? undefined) : undefined
+          addDataKind === initialService?.kind
+            ? initialService.styleUrl ?? undefined
+            : undefined
         }
         initialKeyword={
-          addDataKind === initialService?.kind ? (initialService.keyword ?? undefined) : undefined
+          addDataKind === initialService?.kind
+            ? initialService.keyword ?? undefined
+            : undefined
         }
         targetGroupId={addDataTargetGroupId}
         onOpenChange={(open: boolean) => {
@@ -2622,7 +2743,9 @@ export function TopToolbar({
             if (addDataTargetGroupId) {
               const state = useAppStore.getState();
               const addedIds = state.layers
-                .filter((layer) => !addDataInitialLayerIdsRef.current.has(layer.id))
+                .filter(
+                  (layer) => !addDataInitialLayerIdsRef.current.has(layer.id)
+                )
                 .map((layer) => layer.id);
               if (addedIds.length > 0) {
                 state.moveLayersToGroup(addedIds, addDataTargetGroupId);
@@ -2636,7 +2759,11 @@ export function TopToolbar({
           }
         }}
       />
-      <AddNetcdfDialog open={netcdfDialogOpen} appApi={appApi} onOpenChange={setNetcdfDialogOpen} />
+      <AddNetcdfDialog
+        open={netcdfDialogOpen}
+        appApi={appApi}
+        onOpenChange={setNetcdfDialogOpen}
+      />
       <ProjectFileDialogs projectFiles={projectFiles} />
       <ConsentNoticeDialogs consent={consent} />
       <OsmPbfDialogs osmPbf={osmPbf} />

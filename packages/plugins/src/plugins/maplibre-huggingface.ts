@@ -14,7 +14,8 @@
  *  - **Upload** — with a user access token, create a dataset repo and push
  *    files into it. This is the one panel in the Web Services menu that writes,
  *    which is why the token handling here is deliberately conservative: the
- *    token lives in `localStorage` under the user's control, is sent only as a
+ *    token is kept through `app.credentials` (the OS keychain on desktop,
+ *    `localStorage` on the web), is sent only as a
  *    bearer header by `huggingface-api.ts`, and is never written into a layer's
  *    URL or a saved project.
  *
@@ -74,8 +75,8 @@ import {
 
 export const HUGGINGFACE_PLUGIN_ID = "maplibre-gl-huggingface";
 
-/** Where the user's access token is kept. Mirrors the Mapillary plugin's key. */
-const TOKEN_STORAGE_KEY = "geolibre:huggingface-token";
+/** The `app.credentials` name the user's access token is saved under. */
+const TOKEN_CREDENTIAL_NAME = "token";
 
 /** Where the panel sends a user who has no token yet. */
 const TOKEN_SETTINGS_URL = `${HF_SITE}/settings/tokens`;
@@ -125,18 +126,28 @@ const BUILT_IN_RASTER_DEFAULTS: HuggingFaceRasterDefaults = {
  * panel.
  */
 function readRasterDefaults(): HuggingFaceRasterDefaults {
-  if (typeof localStorage === "undefined") return { ...BUILT_IN_RASTER_DEFAULTS };
+  if (typeof localStorage === "undefined")
+    return { ...BUILT_IN_RASTER_DEFAULTS };
   try {
     const raw = localStorage.getItem(RASTER_DEFAULTS_STORAGE_KEY);
     if (!raw) return { ...BUILT_IN_RASTER_DEFAULTS };
     const parsed: unknown = JSON.parse(raw);
-    const record = parsed && typeof parsed === "object" ? (parsed as Record<string, unknown>) : {};
+    const record =
+      parsed && typeof parsed === "object"
+        ? (parsed as Record<string, unknown>)
+        : {};
     const bands = Array.isArray(record.rgbBands) ? record.rgbBands : [];
-    const rgbBands = BUILT_IN_RASTER_DEFAULTS.rgbBands.map((fallback, index) => {
-      const value = Number(bands[index]);
-      return Number.isFinite(value) && value >= 1 ? Math.round(value) : fallback;
-    }) as [number, number, number];
-    const engine = RENDER_ENGINES.some((option) => option.value === record.engine)
+    const rgbBands = BUILT_IN_RASTER_DEFAULTS.rgbBands.map(
+      (fallback, index) => {
+        const value = Number(bands[index]);
+        return Number.isFinite(value) && value >= 1
+          ? Math.round(value)
+          : fallback;
+      }
+    ) as [number, number, number];
+    const engine = RENDER_ENGINES.some(
+      (option) => option.value === record.engine
+    )
       ? (record.engine as RasterRenderEngine)
       : undefined;
     return {
@@ -230,6 +241,7 @@ export interface HuggingFaceLabels {
   /** Upload half. */
   tokenLabel: string;
   tokenHint: string;
+  tokenHintKeychain: string;
   tokenPlaceholder: string;
   tokenSave: string;
   tokenClear: string;
@@ -302,7 +314,8 @@ export const DEFAULT_HUGGINGFACE_LABELS: HuggingFaceLabels = {
   searchPlaceholder: "Search datasets, account, or owner/dataset",
   search: "Search",
   searching: "Searching…",
-  loadError: (message) => `Could not reach Hugging Face: ${message}. Please try again.`,
+  loadError: (message) =>
+    `Could not reach Hugging Face: ${message}. Please try again.`,
   noResults: "No matching datasets.",
   retry: "Retry",
   suggestions: "Suggested datasets",
@@ -352,6 +365,9 @@ export const DEFAULT_HUGGINGFACE_LABELS: HuggingFaceLabels = {
   tokenHint:
     "Creating a dataset repo and uploading files needs a Hugging Face access token with write access. " +
     "It is stored in this browser only and sent to huggingface.co alone.",
+  tokenHintKeychain:
+    "Creating a dataset repo and uploading files needs a Hugging Face access token with write access. " +
+    "It is stored in your system keychain and sent to huggingface.co alone.",
   tokenPlaceholder: "hf_…",
   tokenSave: "Save token",
   tokenClear: "Clear",
@@ -359,7 +375,8 @@ export const DEFAULT_HUGGINGFACE_LABELS: HuggingFaceLabels = {
   tokenChecking: "Checking token…",
   tokenError: (message) => `Could not verify this token: ${message}`,
   signedInAs: (name) => `Signed in as ${name}`,
-  readOnlyToken: "This token is read-only. Create a token with write access to upload.",
+  readOnlyToken:
+    "This token is read-only. Create a token with write access to upload.",
   createHeading: "Create a dataset repo",
   ownerLabel: "Owner",
   datasetNameLabel: "Dataset name",
@@ -387,17 +404,20 @@ export const DEFAULT_HUGGINGFACE_LABELS: HuggingFaceLabels = {
   noUploadableLayers:
     "No layer on the map holds features that can be uploaded. Add a vector layer first.",
   clearSelection: "Clear",
-  selectedFiles: (count, size) => `${count} file${count === 1 ? "" : "s"} selected (${size}).`,
+  selectedFiles: (count, size) =>
+    `${count} file${count === 1 ? "" : "s"} selected (${size}).`,
   commitMessageLabel: "Commit message (optional)",
   commitMessagePlaceholder: "Upload with GeoLibre",
   upload: "Upload",
   uploadPreparing: "Preparing upload…",
   uploadHashing: (name, index, total) => `Hashing ${name} (${index}/${total})…`,
-  uploadSending: (name, index, total) => `Uploading ${name} (${index}/${total})…`,
+  uploadSending: (name, index, total) =>
+    `Uploading ${name} (${index}/${total})…`,
   uploadCommitting: "Committing…",
   uploadDone: (count) => `Uploaded ${count} file${count === 1 ? "" : "s"}.`,
   uploadError: (message) => `Upload failed: ${message}`,
-  fileTooLarge: (name, limit) => `${name} is larger than the ${limit} upload limit.`,
+  fileTooLarge: (name, limit) =>
+    `${name} is larger than the ${limit} upload limit.`,
   selectionTooLarge: (size, limit) =>
     `The selected files total ${size}, over the ${limit} limit for one upload. ` +
     `Upload them in smaller batches.`,
@@ -462,11 +482,14 @@ const CSS = {
     "border:1px solid hsl(var(--border));background:hsl(var(--background));" +
     "color:hsl(var(--foreground));font-size:12px;cursor:pointer;",
   status: "font-size:11px;color:hsl(var(--muted-foreground));line-height:1.4;",
-  error: "font-size:11px;color:hsl(var(--destructive));line-height:1.4;word-break:break-word;",
+  error:
+    "font-size:11px;color:hsl(var(--destructive));line-height:1.4;word-break:break-word;",
   list:
-    "display:flex;flex-direction:column;gap:6px;flex:1 1 auto;min-height:0;" + "overflow-y:auto;",
+    "display:flex;flex-direction:column;gap:6px;flex:1 1 auto;min-height:0;" +
+    "overflow-y:auto;",
   form:
-    "display:flex;flex-direction:column;gap:8px;flex:1 1 auto;min-height:0;" + "overflow-y:auto;",
+    "display:flex;flex-direction:column;gap:8px;flex:1 1 auto;min-height:0;" +
+    "overflow-y:auto;",
   card:
     "display:flex;flex-direction:column;gap:4px;padding:6px;border-radius:6px;" +
     "border:1px solid hsl(var(--border));background:hsl(var(--muted));",
@@ -510,7 +533,8 @@ const CSS = {
     "border:1px solid hsl(var(--primary));background:hsl(var(--primary));" +
     "color:hsl(var(--primary-foreground));",
   header: "display:flex;flex-direction:column;gap:4px;",
-  crumbs: "font-size:10px;color:hsl(var(--muted-foreground));word-break:break-all;",
+  crumbs:
+    "font-size:10px;color:hsl(var(--muted-foreground));word-break:break-all;",
   success: "font-size:11px;color:hsl(var(--foreground));line-height:1.4;",
 } as const;
 
@@ -524,31 +548,6 @@ const mountedPanels = new Set<() => void>();
 // Access token
 // ---------------------------------------------------------------------------
 
-/**
- * Reads the saved token. Wrapped in try/catch because `localStorage` throws
- * outright in a partitioned or storage-blocked context rather than returning
- * null, which would take the whole panel down on mount.
- */
-function readToken(): string {
-  if (typeof localStorage === "undefined") return "";
-  try {
-    return localStorage.getItem(TOKEN_STORAGE_KEY)?.trim() ?? "";
-  } catch {
-    return "";
-  }
-}
-
-function writeToken(token: string): void {
-  if (typeof localStorage === "undefined") return;
-  try {
-    if (token) localStorage.setItem(TOKEN_STORAGE_KEY, token);
-    else localStorage.removeItem(TOKEN_STORAGE_KEY);
-  } catch {
-    // Storage unavailable: the token still works for this session, held in the
-    // panel's own state, so a failure to persist is not worth surfacing.
-  }
-}
-
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
@@ -561,7 +560,7 @@ function isAbort(error: unknown): boolean {
 function el<K extends keyof HTMLElementTagNameMap>(
   tag: K,
   style: string,
-  text?: string,
+  text?: string
 ): HTMLElementTagNameMap[K] {
   const node = document.createElement(tag);
   node.style.cssText = style;
@@ -569,7 +568,11 @@ function el<K extends keyof HTMLElementTagNameMap>(
   return node;
 }
 
-function button(text: string, style: string, title?: string): HTMLButtonElement {
+function button(
+  text: string,
+  style: string,
+  title?: string
+): HTMLButtonElement {
   const node = el("button", style, text);
   node.type = "button";
   if (title) node.title = title;
@@ -607,7 +610,7 @@ function labelControl(label: HTMLLabelElement, control: HTMLElement): void {
 /** A labelled text input, the shape every field in the upload view takes. */
 function field(
   labelText: string,
-  options: { value?: string; placeholder?: string; type?: string } = {},
+  options: { value?: string; placeholder?: string; type?: string } = {}
 ): { row: HTMLDivElement; input: HTMLInputElement } {
   const row = el("div", CSS.field);
   const label = el("label", CSS.fieldLabel, labelText);
@@ -632,7 +635,10 @@ function field(
  * @param list - The scrolling container
  * @param paint - Fills it with the new children
  */
-export function repaintPreservingScroll(list: HTMLElement, paint: () => void): void {
+export function repaintPreservingScroll(
+  list: HTMLElement,
+  paint: () => void
+): void {
   const { scrollTop } = list;
   paint();
   // The rebuilt content is the same listing with one card restyled, so the
@@ -647,7 +653,9 @@ export function repaintPreservingScroll(list: HTMLElement, paint: () => void): v
  * layer from the Layers panel.
  */
 function findAddedLayer(file: HfFile) {
-  return useAppStore.getState().layers.find((layer) => layer.sourcePath === file.url);
+  return useAppStore
+    .getState()
+    .layers.find((layer) => layer.sourcePath === file.url);
 }
 
 /**
@@ -656,7 +664,9 @@ function findAddedLayer(file: HfFile) {
  * whenever a file cannot be streamed, so this reports what happened rather than
  * what was asked for.
  */
-function ingestModeOf(layer: ReturnType<typeof findAddedLayer>): RemoteIngestMode | undefined {
+function ingestModeOf(
+  layer: ReturnType<typeof findAddedLayer>
+): RemoteIngestMode | undefined {
   const vectorState = layer?.metadata.vectorState;
   if (typeof vectorState !== "object" || vectorState === null) return undefined;
   const mode = (vectorState as { ingestMode?: unknown }).ingestMode;
@@ -672,7 +682,7 @@ async function addFileToMap(
   app: GeoLibreAppAPI | null,
   file: HfFile,
   ingestMode: RemoteIngestMode = "table",
-  rasterDefaults?: RasterVisualizationDefaults,
+  rasterDefaults?: RasterVisualizationDefaults
 ): Promise<boolean> {
   // The URL is built by buildResolveUrl from an https base, but re-check at the
   // point it becomes a map source so this security-sensitive step stands alone.
@@ -685,7 +695,10 @@ async function addFileToMap(
       // The Add Raster Layer control (the same one `app.addCogLayer` uses), so
       // the layer syncs through raster-layer-sync and gets the full Raster
       // symbology section (band pickers, colormap, classification).
-      await addRasterToMap(app, file.url, { name: file.name, defaults: rasterDefaults });
+      await addRasterToMap(app, file.url, {
+        name: file.name,
+        defaults: rasterDefaults,
+      });
       return true;
     case "mosaic": {
       // The extension made this a candidate; the body decides. Without this a
@@ -697,12 +710,18 @@ async function addFileToMap(
       if (!isRasterIndexJson(body)) throw new Error(labels.notRasterIndex);
       // The same control takes the sidecar's URL directly and stitches the
       // scenes it points at at read time.
-      await addRasterToMap(app, file.url, { name: file.name, defaults: rasterDefaults });
+      await addRasterToMap(app, file.url, {
+        name: file.name,
+        defaults: rasterDefaults,
+      });
       return true;
     }
     default:
       if (!usesDuckDB(file.format)) return false;
-      return addVectorLayerFromUrl(app, file.url, { name: file.name, ingestMode });
+      return addVectorLayerFromUrl(app, file.url, {
+        name: file.name,
+        ingestMode,
+      });
   }
 }
 
@@ -737,7 +756,10 @@ function formatLabel(format: RemoteFileFormat): string {
  * beside it, and both of these notes describe something the card may have
  * already moved past.
  */
-function noteText(file: HfFile, state: { added: boolean; pending: boolean }): string {
+function noteText(
+  file: HfFile,
+  state: { added: boolean; pending: boolean }
+): string {
   const size = formatBytes(file.size);
   switch (fileNote(file.format, file.size)) {
     case "streams":
@@ -751,7 +773,9 @@ function noteText(file: HfFile, state: { added: boolean; pending: boolean }): st
     case "tooLarge":
       // A file already on the map is demonstrably openable, and its Remove
       // button works — claiming it is too large would contradict that button.
-      return state.added ? "" : labels.tooLargeToOpen(size, formatBytes(MAX_VECTOR_BYTES));
+      return state.added
+        ? ""
+        : labels.tooLargeToOpen(size, formatBytes(MAX_VECTOR_BYTES));
     default:
       return "";
   }
@@ -796,7 +820,10 @@ interface UploadableLayer {
  *
  * @returns The uploadable layers, and how many remote rasters were skipped
  */
-function listUploadableLayers(): { layers: UploadableLayer[]; skippedRemote: number } {
+function listUploadableLayers(): {
+  layers: UploadableLayer[];
+  skippedRemote: number;
+} {
   const layers: UploadableLayer[] = [];
   let skippedRemote = 0;
 
@@ -909,9 +936,12 @@ async function layerToUploadFile(entry: UploadableLayer): Promise<File | null> {
     }
   }
 
-  const layer = useAppStore.getState().layers.find((candidate) => candidate.id === entry.id);
+  const layer = useAppStore
+    .getState()
+    .layers.find((candidate) => candidate.id === entry.id);
   const features = layer?.geojson?.features;
-  if (!layer?.geojson || !Array.isArray(features) || features.length === 0) return null;
+  if (!layer?.geojson || !Array.isArray(features) || features.length === 0)
+    return null;
   return new File([JSON.stringify(layer.geojson)], entry.fileName, {
     type: "application/geo+json",
   });
@@ -934,7 +964,10 @@ function mergeDatasets(...groups: HfDataset[][]): HfDataset[] {
  * All view state lives in this closure, so the panel is self-contained and
  * `mountPanel` can rebuild it wholesale on a language change.
  */
-function buildPanel(container: HTMLElement, app: GeoLibreAppAPI | null): () => void {
+function buildPanel(
+  container: HTMLElement,
+  app: GeoLibreAppAPI | null
+): () => void {
   type View =
     | { kind: "browse" }
     | { kind: "dataset"; dataset: HfDataset; path: string }
@@ -957,7 +990,7 @@ function buildPanel(container: HTMLElement, app: GeoLibreAppAPI | null): () => v
   let filesLoading = false;
 
   // Upload state.
-  let token = readToken();
+  let token = app?.credentials?.get(TOKEN_CREDENTIAL_NAME).trim() ?? "";
   let identity: HfIdentity | null = null;
   let tokenBusy = false;
   let tokenError = "";
@@ -1020,7 +1053,10 @@ function buildPanel(container: HTMLElement, app: GeoLibreAppAPI | null): () => v
     try {
       const ref = parseRepoId(trimmed);
       if (ref) {
-        const dataset = await fetchDataset(`${ref.owner}/${ref.name}`, readOptions(signal));
+        const dataset = await fetchDataset(
+          `${ref.owner}/${ref.name}`,
+          readOptions(signal)
+        );
         if (requestToken !== generation) return;
         if (dataset) {
           openDataset(dataset);
@@ -1046,7 +1082,7 @@ function buildPanel(container: HTMLElement, app: GeoLibreAppAPI | null): () => v
       }
       results = mergeDatasets(
         owned.status === "fulfilled" ? owned.value : [],
-        matched.status === "fulfilled" ? matched.value : [],
+        matched.status === "fulfilled" ? matched.value : []
       );
       showingSuggestions = false;
       status = "";
@@ -1081,12 +1117,14 @@ function buildPanel(container: HTMLElement, app: GeoLibreAppAPI | null): () => v
         SUGGESTED_DATASET_IDS.map((id) =>
           fetchDataset(id, readOptions(signal)).then(
             (dataset) => dataset ?? synthesizeDataset(id),
-            () => synthesizeDataset(id),
-          ),
-        ),
+            () => synthesizeDataset(id)
+          )
+        )
       );
       if (requestToken !== generation) return;
-      results = fetched.filter((dataset): dataset is HfDataset => dataset !== null);
+      results = fetched.filter(
+        (dataset): dataset is HfDataset => dataset !== null
+      );
       showingSuggestions = true;
       status = "";
     } catch (caught) {
@@ -1140,7 +1178,7 @@ function buildPanel(container: HTMLElement, app: GeoLibreAppAPI | null): () => v
     try {
       const listing = await listDatasetTree(
         { repoId: dataset.id, path, cursor: append ? nextCursor : null },
-        readOptions(signal),
+        readOptions(signal)
       );
       if (requestToken !== generation) return;
       files = append ? [...files, ...listing.files] : listing.files;
@@ -1178,7 +1216,10 @@ function buildPanel(container: HTMLElement, app: GeoLibreAppAPI | null): () => v
     render();
   }
 
-  async function handleAdd(file: HfFile, mode: RemoteIngestMode = "table"): Promise<void> {
+  async function handleAdd(
+    file: HfFile,
+    mode: RemoteIngestMode = "table"
+  ): Promise<void> {
     const existing = findAddedLayer(file);
     if (existing) {
       useAppStore.getState().removeLayer(existing.id);
@@ -1221,19 +1262,26 @@ function buildPanel(container: HTMLElement, app: GeoLibreAppAPI | null): () => v
     name.style.textOverflow = "ellipsis";
     name.style.whiteSpace = "nowrap";
     titleRow.appendChild(name);
-    if (dataset.private) titleRow.appendChild(el("span", CSS.badge, labels.private));
-    else if (dataset.gated) titleRow.appendChild(el("span", CSS.badge, labels.gated));
+    if (dataset.private)
+      titleRow.appendChild(el("span", CSS.badge, labels.private));
+    else if (dataset.gated)
+      titleRow.appendChild(el("span", CSS.badge, labels.gated));
     card.appendChild(titleRow);
     card.appendChild(el("div", CSS.sub, dataset.id));
-    card.appendChild(el("div", CSS.sub, labels.stats(dataset.likes, dataset.downloads)));
+    card.appendChild(
+      el("div", CSS.sub, labels.stats(dataset.likes, dataset.downloads))
+    );
 
     // Hub tags are mostly machine-generated bookkeeping (`region:us`,
     // `library:datasets`); the `format:` and `modality:` ones are the two that
     // tell a user something about the data, so only those are surfaced.
-    const interesting = dataset.tags.filter((tag) => /^(format|modality|license):/.test(tag));
+    const interesting = dataset.tags.filter((tag) =>
+      /^(format|modality|license):/.test(tag)
+    );
     if (interesting.length > 0) {
       const tagRow = el("div", CSS.tagRow);
-      for (const tag of interesting.slice(0, 6)) tagRow.appendChild(el("span", CSS.tag, tag));
+      for (const tag of interesting.slice(0, 6))
+        tagRow.appendChild(el("span", CSS.tag, tag));
       card.appendChild(tagRow);
     }
     return card;
@@ -1276,17 +1324,17 @@ function buildPanel(container: HTMLElement, app: GeoLibreAppAPI | null): () => v
       statusNode.textContent = busy
         ? status || labels.searching
         : results.length === 0
-          ? ""
-          : showingSuggestions
-            ? labels.suggestions
-            : labels.showing(results.length);
+        ? ""
+        : showingSuggestions
+        ? labels.suggestions
+        : labels.showing(results.length);
       errorNode.textContent = error;
       errorNode.style.display = error ? "" : "none";
 
       if (error && results.length === 0) {
         const retry = button(labels.retry, CSS.secondaryButton);
         retry.addEventListener("click", () =>
-          query.trim() ? void runSearch(query) : void loadSuggested(),
+          query.trim() ? void runSearch(query) : void loadSuggested()
         );
         list.appendChild(retry);
         return;
@@ -1295,7 +1343,8 @@ function buildPanel(container: HTMLElement, app: GeoLibreAppAPI | null): () => v
       if (results.length === 0) {
         list.appendChild(el("div", CSS.status, labels.noResults));
       }
-      for (const dataset of results) list.appendChild(renderDatasetCard(dataset));
+      for (const dataset of results)
+        list.appendChild(renderDatasetCard(dataset));
 
       // A keyword query that also reads as an account name gets a shortcut to
       // that account's full repo list — the one bulk listing the API offers.
@@ -1350,15 +1399,22 @@ function buildPanel(container: HTMLElement, app: GeoLibreAppAPI | null): () => v
       const tooLarge = isTooLargeToOpen(file.format, file.size);
 
       const addButton = button(
-        pendingMode === "table" ? labels.adding : added ? labels.remove : labels.add,
+        pendingMode === "table"
+          ? labels.adding
+          : added
+          ? labels.remove
+          : labels.add,
         added ? CSS.actionActive : CSS.action,
         // `added` wins over `tooLarge`: the button reads Remove and removal
         // works, so the title has to describe that rather than the size gate.
         added
           ? labels.removeTitle
           : tooLarge
-            ? labels.tooLargeToOpen(formatBytes(file.size), formatBytes(MAX_VECTOR_BYTES))
-            : labels.addTitle,
+          ? labels.tooLargeToOpen(
+              formatBytes(file.size),
+              formatBytes(MAX_VECTOR_BYTES)
+            )
+          : labels.addTitle
       );
       addButton.disabled = pending || (tooLarge && !added);
       addButton.addEventListener("click", () => void handleAdd(file, "table"));
@@ -1370,10 +1426,13 @@ function buildPanel(container: HTMLElement, app: GeoLibreAppAPI | null): () => v
         const streamButton = button(
           pendingMode === "stream" ? labels.adding : labels.stream,
           CSS.action,
-          labels.streamTitle,
+          labels.streamTitle
         );
         streamButton.disabled = pending;
-        streamButton.addEventListener("click", () => void handleAdd(file, "stream"));
+        streamButton.addEventListener(
+          "click",
+          () => void handleAdd(file, "stream")
+        );
         actions.appendChild(streamButton);
       }
     }
@@ -1382,12 +1441,16 @@ function buildPanel(container: HTMLElement, app: GeoLibreAppAPI | null): () => v
       const downloadButton = button(
         labels.download,
         CSS.action,
-        isAddable(file.format) ? labels.downloadTitle : labels.unsupportedTitle,
+        isAddable(file.format) ? labels.downloadTitle : labels.unsupportedTitle
       );
       downloadButton.addEventListener("click", () => downloadFile(file));
       actions.appendChild(downloadButton);
 
-      const copyButton = button(labels.copyUrl, CSS.action, labels.copyUrlTitle);
+      const copyButton = button(
+        labels.copyUrl,
+        CSS.action,
+        labels.copyUrlTitle
+      );
       copyButton.addEventListener("click", () => {
         void navigator.clipboard
           ?.writeText(file.url)
@@ -1425,14 +1488,23 @@ function buildPanel(container: HTMLElement, app: GeoLibreAppAPI | null): () => v
 
     const titleRow = el("div", CSS.titleRow);
     titleRow.appendChild(el("span", CSS.title, dataset.name));
-    if (dataset.private) titleRow.appendChild(el("span", CSS.badge, labels.private));
-    else if (dataset.gated) titleRow.appendChild(el("span", CSS.badge, labels.gated));
+    if (dataset.private)
+      titleRow.appendChild(el("span", CSS.badge, labels.private));
+    else if (dataset.gated)
+      titleRow.appendChild(el("span", CSS.badge, labels.gated));
     header.appendChild(titleRow);
     header.appendChild(el("div", CSS.sub, dataset.id));
-    header.appendChild(el("div", CSS.sub, labels.stats(dataset.likes, dataset.downloads)));
-    if (!renderable) header.appendChild(el("div", CSS.note, labels.privateHint));
+    header.appendChild(
+      el("div", CSS.sub, labels.stats(dataset.likes, dataset.downloads))
+    );
+    if (!renderable)
+      header.appendChild(el("div", CSS.note, labels.privateHint));
 
-    const open = button(labels.openDataset, CSS.action, labels.openDatasetTitle);
+    const open = button(
+      labels.openDataset,
+      CSS.action,
+      labels.openDatasetTitle
+    );
     open.addEventListener("click", () => {
       window.open(dataset.url, "_blank", "noopener");
     });
@@ -1477,7 +1549,8 @@ function buildPanel(container: HTMLElement, app: GeoLibreAppAPI | null): () => v
         list.appendChild(card);
       }
 
-      for (const file of files) list.appendChild(renderFileCard(file, renderable));
+      for (const file of files)
+        list.appendChild(renderFileCard(file, renderable));
 
       if (filesLoading) {
         list.appendChild(el("div", CSS.status, labels.loadingFiles));
@@ -1502,7 +1575,9 @@ function buildPanel(container: HTMLElement, app: GeoLibreAppAPI | null): () => v
 
   async function verifyToken(next: string): Promise<void> {
     token = next.trim();
-    writeToken(token);
+    // The result is ignored: on a failed write the host keeps the token for
+    // this session and raises the credential-storage warning on desktop.
+    app?.credentials?.set(TOKEN_CREDENTIAL_NAME, token);
     identity = null;
     tokenError = "";
     if (!token) {
@@ -1537,10 +1612,12 @@ function buildPanel(container: HTMLElement, app: GeoLibreAppAPI | null): () => v
           name: createName,
           // The token's own account is the implicit namespace, so it is sent
           // only when the user picked an organization instead.
-          ...(createOwner && createOwner !== identity?.name ? { owner: createOwner } : {}),
+          ...(createOwner && createOwner !== identity?.name
+            ? { owner: createOwner }
+            : {}),
           private: createPrivate,
         },
-        { token },
+        { token }
       );
       createMessage = labels.createdRepo(repoId);
       // Point the upload form at what was just created — creating a repo and
@@ -1560,9 +1637,17 @@ function buildPanel(container: HTMLElement, app: GeoLibreAppAPI | null): () => v
       case "preparing":
         return labels.uploadPreparing;
       case "hashing":
-        return labels.uploadHashing(progress.path, progress.index, progress.total);
+        return labels.uploadHashing(
+          progress.path,
+          progress.index,
+          progress.total
+        );
       case "uploading":
-        return labels.uploadSending(progress.path, progress.index, progress.total);
+        return labels.uploadSending(
+          progress.path,
+          progress.index,
+          progress.total
+        );
       case "committing":
         return labels.uploadCommitting;
     }
@@ -1590,9 +1675,14 @@ function buildPanel(container: HTMLElement, app: GeoLibreAppAPI | null): () => v
       render();
       return;
     }
-    const oversized = selectedFiles.find((file) => file.size > HF_MAX_UPLOAD_BYTES);
+    const oversized = selectedFiles.find(
+      (file) => file.size > HF_MAX_UPLOAD_BYTES
+    );
     if (oversized) {
-      tokenError = labels.fileTooLarge(oversized.name, formatBytes(HF_MAX_UPLOAD_BYTES));
+      tokenError = labels.fileTooLarge(
+        oversized.name,
+        formatBytes(HF_MAX_UPLOAD_BYTES)
+      );
       render();
       return;
     }
@@ -1604,7 +1694,7 @@ function buildPanel(container: HTMLElement, app: GeoLibreAppAPI | null): () => v
     if (totalBytes > HF_MAX_UPLOAD_TOTAL_BYTES) {
       tokenError = labels.selectionTooLarge(
         formatBytes(totalBytes),
-        formatBytes(HF_MAX_UPLOAD_TOTAL_BYTES),
+        formatBytes(HF_MAX_UPLOAD_TOTAL_BYTES)
       );
       render();
       return;
@@ -1624,7 +1714,7 @@ function buildPanel(container: HTMLElement, app: GeoLibreAppAPI | null): () => v
         selectedFiles.map(async (file) => ({
           path: prefix ? `${prefix}/${file.name}` : file.name,
           content: new Uint8Array(await file.arrayBuffer()),
-        })),
+        }))
       );
       const repoId = `${ref.owner}/${ref.name}`;
       await uploadDatasetFiles(
@@ -1637,7 +1727,7 @@ function buildPanel(container: HTMLElement, app: GeoLibreAppAPI | null): () => v
             renderCurrentView();
           },
         },
-        { token },
+        { token }
       );
       uploadStatus = labels.uploadDone(payload.length);
       // Land on what was just uploaded, not the repo's front page: a single
@@ -1664,7 +1754,15 @@ function buildPanel(container: HTMLElement, app: GeoLibreAppAPI | null): () => v
     // --- Token ---
     const tokenSection = el("div", CSS.section);
     tokenSection.appendChild(el("div", CSS.sectionTitle, labels.tokenLabel));
-    tokenSection.appendChild(el("div", CSS.hint, labels.tokenHint));
+    tokenSection.appendChild(
+      el(
+        "div",
+        CSS.hint,
+        app?.credentials?.location() === "keychain"
+          ? labels.tokenHintKeychain
+          : labels.tokenHint
+      )
+    );
     // A token is a secret, so the field is masked — a previously saved token
     // reopened in a shared screen share should not be readable.
     const tokenField = field(labels.tokenLabel, {
@@ -1677,7 +1775,10 @@ function buildPanel(container: HTMLElement, app: GeoLibreAppAPI | null): () => v
     const tokenActions = el("div", CSS.actions);
     const saveToken = button(labels.tokenSave, CSS.action);
     saveToken.disabled = tokenBusy;
-    saveToken.addEventListener("click", () => void verifyToken(tokenField.input.value));
+    saveToken.addEventListener(
+      "click",
+      () => void verifyToken(tokenField.input.value)
+    );
     tokenActions.appendChild(saveToken);
 
     const clearToken = button(labels.tokenClear, CSS.action);
@@ -1692,9 +1793,12 @@ function buildPanel(container: HTMLElement, app: GeoLibreAppAPI | null): () => v
     tokenActions.appendChild(help);
     tokenSection.appendChild(tokenActions);
 
-    if (tokenBusy) tokenSection.appendChild(el("div", CSS.status, labels.tokenChecking));
+    if (tokenBusy)
+      tokenSection.appendChild(el("div", CSS.status, labels.tokenChecking));
     else if (identity) {
-      tokenSection.appendChild(el("div", CSS.status, labels.signedInAs(identity.name)));
+      tokenSection.appendChild(
+        el("div", CSS.status, labels.signedInAs(identity.name))
+      );
       if (!identity.canWrite) {
         tokenSection.appendChild(el("div", CSS.error, labels.readOnlyToken));
       }
@@ -1711,7 +1815,9 @@ function buildPanel(container: HTMLElement, app: GeoLibreAppAPI | null): () => v
 
     // --- Create repo ---
     const createSection = el("div", CSS.section);
-    createSection.appendChild(el("div", CSS.sectionTitle, labels.createHeading));
+    createSection.appendChild(
+      el("div", CSS.sectionTitle, labels.createHeading)
+    );
 
     const ownerRow = el("div", CSS.field);
     const ownerLabel = el("label", CSS.fieldLabel, labels.ownerLabel);
@@ -1736,7 +1842,10 @@ function buildPanel(container: HTMLElement, app: GeoLibreAppAPI | null): () => v
     // Built before the field that gates it so the input handler can re-enable
     // it as the user types. Repainting the whole form on each keystroke would
     // be the alternative, and that drops the caret out of the field.
-    const createButton = button(createBusy ? labels.creating : labels.create, CSS.primaryButton);
+    const createButton = button(
+      createBusy ? labels.creating : labels.create,
+      CSS.primaryButton
+    );
     const syncCreateEnabled = () => {
       createButton.disabled = createBusy || !createName.trim();
     };
@@ -1769,12 +1878,15 @@ function buildPanel(container: HTMLElement, app: GeoLibreAppAPI | null): () => v
     syncCreateEnabled();
     createButton.addEventListener("click", () => void handleCreate());
     createSection.appendChild(createButton);
-    if (createMessage) createSection.appendChild(el("div", CSS.success, createMessage));
+    if (createMessage)
+      createSection.appendChild(el("div", CSS.success, createMessage));
     form.appendChild(createSection);
 
     // --- Upload files ---
     const uploadSection = el("div", CSS.section);
-    uploadSection.appendChild(el("div", CSS.sectionTitle, labels.uploadHeading));
+    uploadSection.appendChild(
+      el("div", CSS.sectionTitle, labels.uploadHeading)
+    );
 
     // Built ahead of the fields that gate it, for the same reason as the Create
     // button above: the handlers below re-enable it in place as the user types
@@ -1783,13 +1895,17 @@ function buildPanel(container: HTMLElement, app: GeoLibreAppAPI | null): () => v
     const selectionNode = el("div", CSS.status);
     const syncUploadEnabled = () => {
       uploadButton.disabled =
-        uploadBusy || selectedFiles.length === 0 || parseRepoId(uploadTarget) === null;
+        uploadBusy ||
+        selectedFiles.length === 0 ||
+        parseRepoId(uploadTarget) === null;
       selectionNode.textContent =
         selectedFiles.length === 0
           ? ""
           : labels.selectedFiles(
               selectedFiles.length,
-              formatBytes(selectedFiles.reduce((sum, file) => sum + file.size, 0)),
+              formatBytes(
+                selectedFiles.reduce((sum, file) => sum + file.size, 0)
+              )
             );
     };
 
@@ -1849,7 +1965,7 @@ function buildPanel(container: HTMLElement, app: GeoLibreAppAPI | null): () => v
     const chooseLayerButton = button(
       labels.chooseLayer,
       layerPickerOpen ? CSS.actionActive : CSS.action,
-      labels.chooseLayerTitle,
+      labels.chooseLayerTitle
     );
     chooseLayerButton.disabled = uploadBusy;
     chooseLayerButton.addEventListener("click", () => {
@@ -1977,7 +2093,8 @@ function buildPanel(container: HTMLElement, app: GeoLibreAppAPI | null): () => v
         const value = Number(input.value);
         // A band index is 1-based; anything else would ask the renderer for a
         // band that cannot exist.
-        const next = Number.isFinite(value) && value >= 1 ? Math.round(value) : 1;
+        const next =
+          Number.isFinite(value) && value >= 1 ? Math.round(value) : 1;
         input.value = String(next);
         rasterDefaults.rgbBands[index] = next;
         persist();
@@ -1990,7 +2107,9 @@ function buildPanel(container: HTMLElement, app: GeoLibreAppAPI | null): () => v
 
     // --- Single band: which colormap ---
     const colormapSection = el("div", CSS.section);
-    colormapSection.appendChild(el("div", CSS.sectionTitle, labels.colormapHeading));
+    colormapSection.appendChild(
+      el("div", CSS.sectionTitle, labels.colormapHeading)
+    );
     colormapSection.appendChild(el("div", CSS.hint, labels.colormapHint));
     const colormapRow = el("div", CSS.field);
     const colormapLabel = el("label", CSS.fieldLabel, labels.colormapLabel);
@@ -2017,7 +2136,9 @@ function buildPanel(container: HTMLElement, app: GeoLibreAppAPI | null): () => v
 
     // --- Which renderer decodes the imagery ---
     const engineSection = el("div", CSS.section);
-    engineSection.appendChild(el("div", CSS.sectionTitle, labels.engineHeading));
+    engineSection.appendChild(
+      el("div", CSS.sectionTitle, labels.engineHeading)
+    );
     engineSection.appendChild(el("div", CSS.hint, labels.engineHint));
     const engineRow = el("div", CSS.field);
     const engineLabel = el("label", CSS.fieldLabel, labels.engineLabel);
@@ -2073,7 +2194,10 @@ function buildPanel(container: HTMLElement, app: GeoLibreAppAPI | null): () => v
     // The dataset view is reached from Browse, so it keeps Browse highlighted.
     const onBrowse = view.kind === "browse" || view.kind === "dataset";
 
-    const browseTab = button(labels.browseTab, onBrowse ? CSS.tabActive : CSS.tab);
+    const browseTab = button(
+      labels.browseTab,
+      onBrowse ? CSS.tabActive : CSS.tab
+    );
     browseTab.addEventListener("click", () => {
       if (onBrowse) return;
       view = { kind: "browse" };
@@ -2081,12 +2205,16 @@ function buildPanel(container: HTMLElement, app: GeoLibreAppAPI | null): () => v
     });
     tabs.appendChild(browseTab);
 
-    const uploadTab = button(labels.uploadTab, view.kind === "upload" ? CSS.tabActive : CSS.tab);
+    const uploadTab = button(
+      labels.uploadTab,
+      view.kind === "upload" ? CSS.tabActive : CSS.tab
+    );
     uploadTab.addEventListener("click", () => {
       if (view.kind === "upload") return;
       // Carry the dataset being browsed into the upload form: uploading into
       // the repo you are looking at is the common case.
-      if (view.kind === "dataset" && !uploadTarget) uploadTarget = view.dataset.id;
+      if (view.kind === "dataset" && !uploadTarget)
+        uploadTarget = view.dataset.id;
       view = { kind: "upload" };
       render();
     });
@@ -2094,7 +2222,7 @@ function buildPanel(container: HTMLElement, app: GeoLibreAppAPI | null): () => v
 
     const settingsTab = button(
       labels.settingsTab,
-      view.kind === "settings" ? CSS.tabActive : CSS.tab,
+      view.kind === "settings" ? CSS.tabActive : CSS.tab
     );
     settingsTab.addEventListener("click", () => {
       if (view.kind === "settings") return;

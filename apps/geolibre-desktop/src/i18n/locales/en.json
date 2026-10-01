@@ -2720,16 +2720,19 @@
       "apiKeys": {
         "title": "API keys",
         "description": "Keys are kept in this browser only and are never saved with the project.",
+        "descriptionKeychain": "Keys are kept in your system keychain and are never saved with the project.",
         "tomtom": "TomTom (Street Traffic live flow)",
         "aisstream": "AISStream (Live AIS Vessels)",
         "placeholder": "Paste API key",
         "save": "Save",
         "clear": "Clear",
         "fromPanel": "Saved in this browser",
+        "fromPanelKeychain": "Saved in your system keychain",
         "fromEnvironment": "Using the key from the environment",
         "notSet": "Not set",
         "getKey": "Get a free key",
-        "saveFailed": "Could not save the key in this browser."
+        "saveFailed": "Could not save the key in this browser.",
+        "saveFailedKeychain": "Could not save the key in your system keychain. It works until GeoLibre closes."
       }
     }
   },
@@ -4517,6 +4520,7 @@
     "tooLargeToOpen": "This file is {{size}} — too large for the browser to open ({{limit}} limit). Download it, or use a partitioned version of this dataset.",
     "tokenLabel": "Access token",
     "tokenHint": "Creating a dataset repo and uploading files needs a Hugging Face access token with write access. It is stored in this browser only and sent to huggingface.co alone.",
+    "tokenHintKeychain": "Creating a dataset repo and uploading files needs a Hugging Face access token with write access. It is stored in your system keychain and sent to huggingface.co alone.",
     "tokenPlaceholder": "hf_…",
     "tokenSave": "Save token",
     "tokenClear": "Clear",

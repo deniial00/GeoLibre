@@ -22,7 +22,10 @@ import {
   godsEyeViewPlugin,
   reattachGodsEyeView,
 } from "../packages/plugins/src/plugins/gods-eye-view";
-import { isPluginEngineSupported, type GeoLibreAppAPI } from "../packages/plugins/src/types";
+import {
+  isPluginEngineSupported,
+  type GeoLibreAppAPI,
+} from "../packages/plugins/src/types";
 
 // The plugin's reattach path (issue #2462). `CesiumEngine.getCesiumScene()`
 // mints a brand-new handle object on every call, and the host re-runs the
@@ -56,22 +59,20 @@ function makeGlobe(startingMultiplier = 0) {
     }
   }
   class Cartesian3 {
-    constructor(
-      public x: number,
-      public y: number,
-      public z: number,
-    ) {}
+    constructor(public x: number, public y: number, public z: number) {}
   }
   class NearFarScalar {
     constructor(
       public near: number,
       public nearValue: number,
       public far: number,
-      public farValue: number,
+      public farValue: number
     ) {}
   }
   let moveEndListener: (() => void) | null = null;
-  let viewBounds: [number, number, number, number] = [-122.5, 37.7, -122.4, 37.8];
+  let viewBounds: [number, number, number, number] = [
+    -122.5, 37.7, -122.4, 37.8,
+  ];
   const viewer = {
     id: "viewer",
     camera: {
@@ -106,14 +107,18 @@ function makeGlobe(startingMultiplier = 0) {
     },
     JulianDate: {
       fromDate: (date: Date) => date.getTime(),
-      toDate: (value: number | Date) => (value instanceof Date ? value : new Date(value)),
+      toDate: (value: number | Date) =>
+        value instanceof Date ? value : new Date(value),
       lessThan: (a: number, b: number) => a < b,
       greaterThan: (a: number, b: number) => a > b,
     },
   };
   let handles = 0;
+  const credentialValues = new Map<string, string>();
   // The panel is plain DOM, so it renders only when the host calls `render`.
-  const { document } = parseHTML('<html><body><div id="panel"></div></body></html>');
+  const { document } = parseHTML(
+    '<html><body><div id="panel"></div></body></html>'
+  );
   const panel = document.getElementById("panel") as unknown as HTMLElement;
   const app = {
     getMap: () => null,
@@ -138,7 +143,10 @@ function makeGlobe(startingMultiplier = 0) {
         readView: () => {
           const [west, south, east, north] = viewBounds;
           return {
-            center: [(west + east) / 2, (south + north) / 2] as [number, number],
+            center: [(west + east) / 2, (south + north) / 2] as [
+              number,
+              number
+            ],
             zoom: Math.log2(360 / Math.max(east - west, 1e-6)),
             bearing: 0,
             pitch: 0,
@@ -146,13 +154,24 @@ function makeGlobe(startingMultiplier = 0) {
         },
       };
     },
-    registerRightPanel: (options: { render: (container: HTMLElement) => () => void }) => {
+    registerRightPanel: (options: {
+      render: (container: HTMLElement) => () => void;
+    }) => {
       globalThis.document = document;
       options.render(panel);
       return () => {};
     },
     openRightPanel: () => {},
     onLocaleChange: () => () => {},
+    credentials: {
+      get: (name: string) => credentialValues.get(name) ?? "",
+      set: (name: string, value: string) => {
+        if (value) credentialValues.set(name, value);
+        else credentialValues.delete(name);
+        return true;
+      },
+      location: () => "browser" as const,
+    },
   } as unknown as GeoLibreAppAPI;
   return {
     app,
@@ -160,6 +179,7 @@ function makeGlobe(startingMultiplier = 0) {
     panel,
     points,
     handleCount: () => handles,
+    credentialValues,
     setViewBounds: (bounds: [number, number, number, number]) => {
       viewBounds = bounds;
     },
@@ -216,13 +236,15 @@ function stubFeeds(): { calls: () => string[]; restore: () => void } {
             },
           ],
         }),
-        { status: 200, headers: { "content-type": "application/json" } },
+        { status: 200, headers: { "content-type": "application/json" } }
       );
     }
     if (url.includes("radio-browser.info")) {
       return new Response(
-        JSON.stringify([{ stationuuid: "radio-1", name: "Radio", geo_long: 10, geo_lat: 20 }]),
-        { status: 200 },
+        JSON.stringify([
+          { stationuuid: "radio-1", name: "Radio", geo_long: 10, geo_lat: 20 },
+        ]),
+        { status: 200 }
       );
     }
     if (url.includes("datacenters.geojsonl")) {
@@ -233,7 +255,7 @@ function stubFeeds(): { calls: () => string[]; restore: () => void } {
           geometry: { type: "Point", coordinates: [10, 20] },
           properties: { name: "Datacenter" },
         }),
-        { status: 200 },
+        { status: 200 }
       );
     }
     if (url.includes("/dams/")) {
@@ -249,7 +271,7 @@ function stubFeeds(): { calls: () => string[]; restore: () => void } {
             },
           ],
         }),
-        { status: 200 },
+        { status: 200 }
       );
     }
     if (url.includes("telegeography_submarine_cables")) {
@@ -271,7 +293,7 @@ function stubFeeds(): { calls: () => string[]; restore: () => void } {
             },
           ],
         }),
-        { status: 200 },
+        { status: 200 }
       );
     }
     if (url.includes("tiles.geolibre.app/overpass")) {
@@ -287,14 +309,14 @@ function stubFeeds(): { calls: () => string[]; restore: () => void } {
             },
           ],
         }),
-        { status: 200 },
+        { status: 200 }
       );
     }
     if (url.includes("/firms/viirs/")) {
       return new Response(
         "latitude,longitude,bright_ti4,scan,track,acq_date,acq_time,satellite,confidence,version,bright_ti5,frp,daynight\n" +
           "20.01,10.01,330.1,0.4,0.4,2026-09-22,1406,N20,nominal,2.0NRT,290.1,12.5,D\n",
-        { status: 200 },
+        { status: 200 }
       );
     }
     if (url.includes("launch-library/recent")) {
@@ -308,17 +330,19 @@ function stubFeeds(): { calls: () => string[]; restore: () => void } {
             },
           ],
         }),
-        { status: 200 },
+        { status: 200 }
       );
     }
     if (url.includes("station_information.json")) {
       return new Response(
         JSON.stringify({
           data: {
-            stations: [{ station_id: "station-1", name: "Station", lon: 10, lat: 20 }],
+            stations: [
+              { station_id: "station-1", name: "Station", lon: 10, lat: 20 },
+            ],
           },
         }),
-        { status: 200 },
+        { status: 200 }
       );
     }
     if (url.includes("station_status.json")) {
@@ -328,7 +352,7 @@ function stubFeeds(): { calls: () => string[]; restore: () => void } {
             stations: [{ station_id: "station-1", num_bikes_available: 2 }],
           },
         }),
-        { status: 200 },
+        { status: 200 }
       );
     }
     if (url.includes("opensky/states")) {
@@ -354,7 +378,7 @@ function stubFeeds(): { calls: () => string[]; restore: () => void } {
             ],
           ],
         }),
-        { status: 200 },
+        { status: 200 }
       );
     }
     if (url.includes("adsb-lol/military")) {
@@ -373,7 +397,7 @@ function stubFeeds(): { calls: () => string[]; restore: () => void } {
             },
           ],
         }),
-        { status: 200 },
+        { status: 200 }
       );
     }
     if (url.includes("adsbdb/aircraft")) {
@@ -409,7 +433,11 @@ describe("God's Eye View availability", () => {
     // feeds draw on the globe alone, but a user on a 2D renderer has to be able
     // to open the panel to be told that.
     for (const engine of ["cesium", "maplibre", "mapbox", "arcgis"] as const) {
-      assert.equal(isPluginEngineSupported(godsEyeViewPlugin, engine), true, engine);
+      assert.equal(
+        isPluginEngineSupported(godsEyeViewPlugin, engine),
+        true,
+        engine
+      );
     }
   });
 
@@ -419,17 +447,19 @@ describe("God's Eye View availability", () => {
     try {
       godsEyeViewPlugin.activate?.(globe.app);
       const sections = [
-        ...globe.panel.querySelectorAll<HTMLElement>(".geolibre-gods-eye-view-feed-group"),
+        ...globe.panel.querySelectorAll<HTMLElement>(
+          ".geolibre-gods-eye-view-feed-group"
+        ),
       ];
       assert.deepEqual(
         sections.map((section) => section.dataset.feedGroup),
-        ["movement", "cameras", "infrastructure", "events", "utilities"],
+        ["movement", "cameras", "infrastructure", "events", "utilities"]
       );
       assert.deepEqual(
         sections.map((section) => [
           section.querySelector("h3")?.textContent,
           [...section.querySelectorAll<HTMLElement>("[data-feed-id]")].map(
-            (row) => row.dataset.feedId,
+            (row) => row.dataset.feedId
           ),
         ]),
         [
@@ -446,10 +476,13 @@ describe("God's Eye View availability", () => {
             ],
           ],
           ["Cameras", ["mappedAlpr", "cctv"]],
-          ["Infrastructure", ["osmInfrastructure", "datacenters", "cables", "dams"]],
+          [
+            "Infrastructure",
+            ["osmInfrastructure", "datacenters", "cables", "dams"],
+          ],
           ["Events", ["earthquakes", "spaceMissions", "activeFires"]],
           ["Utilities", ["radio"]],
-        ],
+        ]
       );
     } finally {
       godsEyeViewPlugin.deactivate?.(globe.app);
@@ -505,9 +538,10 @@ describe("God's Eye View feed refresh", () => {
           "militaryFlights",
           "cctv",
           "transit",
-        ].sort(),
+        ].sort()
       );
-      for (const layer of layers) assert.ok(layer.source.attribution, layer.name);
+      for (const layer of layers)
+        assert.ok(layer.source.attribution, layer.name);
       const flags = [
         GODS_EYE_VIEW_RADIO_FLAG,
         GODS_EYE_VIEW_DATACENTERS_FLAG,
@@ -527,7 +561,7 @@ describe("God's Eye View feed refresh", () => {
       for (const flag of flags) {
         assert.ok(
           layers.some((layer) => layer.metadata[flag] === true),
-          flag,
+          flag
         );
       }
       const calls = net.calls().join("\n");
@@ -549,7 +583,9 @@ describe("God's Eye View feed refresh", () => {
       ]) {
         assert.ok(calls.includes(source), source);
       }
-      const cctv = layers.find((layer) => layer.metadata.godsEyeViewFeed === "cctv");
+      const cctv = layers.find(
+        (layer) => layer.metadata.godsEyeViewFeed === "cctv"
+      );
       assert.equal(cctv?.popup?.fields?.[0]?.kind, "image");
     } finally {
       godsEyeViewPlugin.deactivate?.(globe.app);
@@ -565,10 +601,13 @@ describe("God's Eye View feed refresh", () => {
       const url = String(input);
       if (url.includes("earthquake.usgs.gov"))
         return new Response(JSON.stringify({ features: [] }), { status: 200 });
-      return new Response(url.endsWith("/starlink") ? DENSE_TLE_TEXT : TLE_TEXT, {
-        status: 200,
-        headers: { "content-type": "text/plain" },
-      });
+      return new Response(
+        url.endsWith("/starlink") ? DENSE_TLE_TEXT : TLE_TEXT,
+        {
+          status: 200,
+          headers: { "content-type": "text/plain" },
+        }
+      );
     }) as typeof fetch;
     const globe = makeGlobe();
     try {
@@ -583,14 +622,24 @@ describe("God's Eye View feed refresh", () => {
 
       const dense = useAppStore
         .getState()
-        .layers.find((layer) => layer.metadata?.[GODS_EYE_VIEW_DENSE_SATELLITES_FLAG] === true);
+        .layers.find(
+          (layer) =>
+            layer.metadata?.[GODS_EYE_VIEW_DENSE_SATELLITES_FLAG] === true
+        );
       assert.ok(dense, "dense satellites have their own layer-panel entry");
-      assert.equal(dense.geojson?.features.length, 1, "its Attribute Table has one row per point");
-      assert.equal(dense.geojson?.features[0].properties?.catalogNumber, "44713");
+      assert.equal(
+        dense.geojson?.features.length,
+        1,
+        "its Attribute Table has one row per point"
+      );
+      assert.equal(
+        dense.geojson?.features[0].properties?.catalogNumber,
+        "44713"
+      );
       assert.equal(
         (globe.points[0]?.id as { geolibreLayerId?: string }).geolibreLayerId,
         dense.id,
-        "the moving primitive picks back to the queryable layer",
+        "the moving primitive picks back to the queryable layer"
       );
     } finally {
       godsEyeViewPlugin.deactivate?.(globe.app);
@@ -640,10 +689,14 @@ describe("God's Eye View feed refresh", () => {
       for (let i = 0; i < 8; i++) await flush();
 
       const after = useAppStore.getState().layers;
-      assert.equal(after.length, 2, "the project's own layers are adopted, not duplicated");
+      assert.equal(
+        after.length,
+        2,
+        "the project's own layers are adopted, not duplicated"
+      );
       assert.deepEqual(
         after.map((layer) => layer.id).sort(),
-        carried.map((layer) => layer.id).sort(),
+        carried.map((layer) => layer.id).sort()
       );
     } finally {
       godsEyeViewPlugin.deactivate?.(globe.app);
@@ -696,15 +749,19 @@ describe("God's Eye View feed refresh", () => {
       // An instant that ran off the end of the old window is reclaimed.
       globe.viewer.clock.currentTime = (stopTime as number) + 60_000;
       const checkbox = globe.panel.querySelector(
-        '[data-feed-id="satellites"] input[type=checkbox]',
+        '[data-feed-id="satellites"] input[type=checkbox]'
       ) as HTMLInputElement;
       checkbox.checked = false;
-      checkbox.dispatchEvent(new (globe.panel.ownerDocument.defaultView as Window).Event("change"));
+      checkbox.dispatchEvent(
+        new (globe.panel.ownerDocument.defaultView as Window).Event("change")
+      );
       const back = globe.panel.querySelector(
-        '[data-feed-id="satellites"] input[type=checkbox]',
+        '[data-feed-id="satellites"] input[type=checkbox]'
       ) as HTMLInputElement;
       back.checked = true;
-      back.dispatchEvent(new (globe.panel.ownerDocument.defaultView as Window).Event("change"));
+      back.dispatchEvent(
+        new (globe.panel.ownerDocument.defaultView as Window).Event("change")
+      );
       for (let i = 0; i < 8; i++) await flush();
       const clock = globe.viewer.clock;
       assert.ok((clock.currentTime as number) <= (clock.stopTime as number));
@@ -758,7 +815,9 @@ describe("God's Eye View feed refresh", () => {
       // refresh interval must not spare the fetch that rebuilds them.
       const calls = net.calls().length;
       useAppStore.setState({
-        layers: useAppStore.getState().layers.map(({ geojson: _dropped, ...rest }) => rest),
+        layers: useAppStore
+          .getState()
+          .layers.map(({ geojson: _dropped, ...rest }) => rest),
       });
       godsEyeViewPlugin.applyProjectState?.(globe.app, {
         earthquakes: true,
@@ -766,7 +825,8 @@ describe("God's Eye View feed refresh", () => {
       });
       for (let i = 0; i < 8; i++) await flush();
       assert.ok(net.calls().length > calls, "a stripped layer refetches");
-      for (const layer of useAppStore.getState().layers) assert.ok(layer.geojson);
+      for (const layer of useAppStore.getState().layers)
+        assert.ok(layer.geojson);
     } finally {
       godsEyeViewPlugin.deactivate?.(globe.app);
       useAppStore.setState({ layers: [] });
@@ -803,7 +863,8 @@ describe("God's Eye View feed refresh", () => {
     const originalFetch = globalThis.fetch;
     let overpassCalls = 0;
     globalThis.fetch = (async (input: string | URL | Request) => {
-      if (String(input).includes("tiles.geolibre.app/overpass")) overpassCalls += 1;
+      if (String(input).includes("tiles.geolibre.app/overpass"))
+        overpassCalls += 1;
       return new Response(JSON.stringify({ elements: [] }), { status: 200 });
     }) as typeof fetch;
     const globe = makeGlobe();
@@ -821,7 +882,11 @@ describe("God's Eye View feed refresh", () => {
       globe.setViewBounds([-122.49, 37.71, -122.41, 37.79]);
       globe.fireMoveEnd();
       await new Promise((resolve) => setTimeout(resolve, 450));
-      assert.equal(overpassCalls, 1, "a move inside the snapped query cell reuses its result");
+      assert.equal(
+        overpassCalls,
+        1,
+        "a move inside the snapped query cell reuses its result"
+      );
 
       globe.setViewBounds([-122.3, 37.7, -122.2, 37.8]);
       globe.fireMoveEnd();
@@ -871,8 +936,14 @@ describe("God's Eye View feed refresh", () => {
       globe.setViewBounds([-122.5, 37.7, -122.4, 37.8]);
       globe.fireMoveEnd();
       await new Promise((resolve) => setTimeout(resolve, 450));
-      assert.equal(overpassCalls, 3, "returning to A supersedes the pending B request");
-      resolveSecond?.(new Response(JSON.stringify({ elements: [] }), { status: 200 }));
+      assert.equal(
+        overpassCalls,
+        3,
+        "returning to A supersedes the pending B request"
+      );
+      resolveSecond?.(
+        new Response(JSON.stringify({ elements: [] }), { status: 200 })
+      );
       await flush();
     } finally {
       godsEyeViewPlugin.deactivate?.(globe.app);
@@ -918,29 +989,41 @@ describe("God's Eye View clock speed", () => {
       for (let i = 0; i < 4; i++) await flush();
       assert.equal(globe.viewer.clock.multiplier, 1);
       assert.equal(
-        globe.panel.querySelector('button[aria-label="Dense satellite catalog"]')?.textContent,
-        "DENSE",
+        globe.panel.querySelector(
+          'button[aria-label="Dense satellite catalog"]'
+        )?.textContent,
+        "DENSE"
       );
 
       // The panel's select re-times the live globe without reloading a feed.
       const select = globe.panel.querySelector("select") as HTMLSelectElement;
       assert.deepEqual(
         [...select.options].map((option) => option.value),
-        ["1", "10", "60", "600"],
+        ["1", "10", "60", "600"]
       );
       assert.equal(select.value, "1");
       const afterActivate = net.calls();
       // linkedom's `select.value` is read-only, so pick the way a user does:
       // clear the current choice, then select the new one.
-      for (const option of select.options) if (option.selected) option.selected = false;
+      for (const option of select.options)
+        if (option.selected) option.selected = false;
       const sixty = [...select.options].find((option) => option.value === "60");
       assert.ok(sixty);
       sixty.selected = true;
-      select.dispatchEvent(new (globe.panel.ownerDocument.defaultView as Window).Event("change"));
+      select.dispatchEvent(
+        new (globe.panel.ownerDocument.defaultView as Window).Event("change")
+      );
       // The panel re-renders on a setting change; the fresh select shows it.
-      assert.equal((globe.panel.querySelector("select") as HTMLSelectElement).value, "60");
+      assert.equal(
+        (globe.panel.querySelector("select") as HTMLSelectElement).value,
+        "60"
+      );
       assert.equal(globe.viewer.clock.multiplier, 60);
-      assert.equal(net.calls(), afterActivate, "changing speed refetches nothing");
+      assert.equal(
+        net.calls(),
+        afterActivate,
+        "changing speed refetches nothing"
+      );
       assert.equal(godsEyeViewPlugin.getProjectState?.().speed, 60);
 
       // A project carrying a speed re-times a globe that is already running;
@@ -969,7 +1052,10 @@ describe("God's Eye View reattach", () => {
       godsEyeViewPlugin.activate?.(first.app);
       for (let i = 0; i < 4; i++) await flush();
       const afterActivate = net.calls();
-      assert.ok(afterActivate > 0, "activating on the globe loads the enabled feeds");
+      assert.ok(
+        afterActivate > 0,
+        "activating on the globe loads the enabled feeds"
+      );
       assert.equal(first.viewer.clock.shouldAnimate, true);
 
       // The user paused the clock, then loaded a project: the handle is a new
@@ -977,9 +1063,20 @@ describe("God's Eye View reattach", () => {
       first.viewer.clock.shouldAnimate = false;
       reattachGodsEyeView(first.app);
       for (let i = 0; i < 4; i++) await flush();
-      assert.equal(net.calls(), afterActivate, "an unchanged viewer re-fetches nothing");
-      assert.equal(first.viewer.clock.shouldAnimate, false, "and does not override the pause");
-      assert.ok(first.handleCount() > 1, "the fake mints a fresh handle per call, as Cesium does");
+      assert.equal(
+        net.calls(),
+        afterActivate,
+        "an unchanged viewer re-fetches nothing"
+      );
+      assert.equal(
+        first.viewer.clock.shouldAnimate,
+        false,
+        "and does not override the pause"
+      );
+      assert.ok(
+        first.handleCount() > 1,
+        "the fake mints a fresh handle per call, as Cesium does"
+      );
 
       // A renderer swap hands over a different viewer: that is a real rebind.
       const second = makeGlobe();
@@ -999,16 +1096,6 @@ describe("God's Eye View reattach", () => {
 
 describe("God's Eye View keyed feeds", () => {
   it("streams AIS vessels only once a key is saved in the panel, never into the project", async () => {
-    const values = new Map<string, string>();
-    const storageDescriptor = Object.getOwnPropertyDescriptor(globalThis, "localStorage");
-    Object.defineProperty(globalThis, "localStorage", {
-      configurable: true,
-      value: {
-        getItem: (key: string) => values.get(key) ?? null,
-        setItem: (key: string, value: string) => void values.set(key, value),
-        removeItem: (key: string) => void values.delete(key),
-      },
-    });
     const sockets: Array<{
       url: string;
       readyState: number;
@@ -1051,41 +1138,51 @@ describe("God's Eye View keyed feeds", () => {
       godsEyeViewPlugin.activate?.(globe.app);
       for (let i = 0; i < 4; i++) await flush();
 
-      const row = () => globe.panel.querySelector<HTMLElement>('[data-feed-id="vessels"]');
+      const row = () =>
+        globe.panel.querySelector<HTMLElement>('[data-feed-id="vessels"]');
       assert.match(row()?.textContent ?? "", /Add an AISStream API key/);
       assert.equal(sockets.length, 0, "no key, no connection");
-      assert.ok(!useAppStore.getState().layers.some((l) => l.metadata[GODS_EYE_VIEW_VESSELS_FLAG]));
+      assert.ok(
+        !useAppStore
+          .getState()
+          .layers.some((l) => l.metadata[GODS_EYE_VIEW_VESSELS_FLAG])
+      );
 
-      const input = globe.panel.querySelector<HTMLInputElement>("#gods-eye-view-key-aisstream");
+      const input = globe.panel.querySelector<HTMLInputElement>(
+        "#gods-eye-view-key-aisstream"
+      );
       assert.ok(input);
       assert.equal(input.type, "password");
       input.value = "secret-ais-key";
       const save = [
         ...globe.panel.querySelectorAll<HTMLButtonElement>(
-          '[data-key-provider="aisstream"] button',
+          '[data-key-provider="aisstream"] button'
         ),
       ].find((button) => button.textContent === "Save");
       save?.dispatchEvent(new (Event())("click"));
       for (let i = 0; i < 4; i++) await flush();
 
-      assert.equal(values.get("geolibre.godsEyeView.apiKey.aisstream"), "secret-ais-key");
+      assert.equal(globe.credentialValues.get("aisstream"), "secret-ais-key");
       assert.equal(sockets.length, 1);
       assert.equal(sockets[0].url, "wss://stream.aisstream.io/v0/stream");
       assert.match(row()?.textContent ?? "", /Connecting to AISStream/);
       // Saving one key leaves unsaved text in the other field alone.
-      const tomtomInput = globe.panel.querySelector<HTMLInputElement>("#gods-eye-view-key-tomtom");
+      const tomtomInput = globe.panel.querySelector<HTMLInputElement>(
+        "#gods-eye-view-key-tomtom"
+      );
       assert.ok(tomtomInput);
       tomtomInput.value = "half-typed";
       const saveAgain = [
         ...globe.panel.querySelectorAll<HTMLButtonElement>(
-          '[data-key-provider="aisstream"] button',
+          '[data-key-provider="aisstream"] button'
         ),
       ].find((button) => button.textContent === "Save");
       saveAgain?.dispatchEvent(new (Event())("click"));
       for (let i = 0; i < 4; i++) await flush();
       assert.equal(
-        globe.panel.querySelector<HTMLInputElement>("#gods-eye-view-key-tomtom")?.value,
-        "half-typed",
+        globe.panel.querySelector<HTMLInputElement>("#gods-eye-view-key-tomtom")
+          ?.value,
+        "half-typed"
       );
       // Saving the same key again starts a fresh connection, the retry path
       // after a rejection that was really a network failure.
@@ -1093,7 +1190,9 @@ describe("God's Eye View keyed feeds", () => {
       assert.equal(sockets[0].readyState, 3);
       sockets.shift();
       const keyInput = () =>
-        globe.panel.querySelector<HTMLInputElement>("#gods-eye-view-key-aisstream");
+        globe.panel.querySelector<HTMLInputElement>(
+          "#gods-eye-view-key-aisstream"
+        );
       const savedInput = keyInput();
 
       sockets[0].readyState = 1;
@@ -1107,21 +1206,38 @@ describe("God's Eye View keyed feeds", () => {
             time_utc: new Date().toISOString().replace("T", " "),
           },
           Message: {
-            PositionReport: { UserID: 123456789, Latitude: 40.7, Longitude: -74, Sog: 5, Cog: 90 },
+            PositionReport: {
+              UserID: 123456789,
+              Latitude: 40.7,
+              Longitude: -74,
+              Sog: 5,
+              Cog: 90,
+            },
           },
         }),
       });
       // Going live re-renders the feed rows, but not the key input beside them,
       // which would otherwise lose a half-typed key and its focus. (A boolean
       // assert: printing a mismatched DOM node would take minutes.)
-      assert.ok(keyInput() === savedInput, "the key input survives a feed re-render");
+      assert.ok(
+        keyInput() === savedInput,
+        "the key input survives a feed re-render"
+      );
       // Pick the snapshot up now rather than on the next scheduled refresh.
-      const checkbox = row()?.querySelector<HTMLInputElement>("input[type=checkbox]");
+      const checkbox = row()?.querySelector<HTMLInputElement>(
+        "input[type=checkbox]"
+      );
       assert.ok(checkbox);
       checkbox.checked = false;
       checkbox.dispatchEvent(new (Event())("change"));
-      assert.equal(sockets[0].readyState, 3, "turning the layer off closes the socket");
-      const reopened = row()?.querySelector<HTMLInputElement>("input[type=checkbox]");
+      assert.equal(
+        sockets[0].readyState,
+        3,
+        "turning the layer off closes the socket"
+      );
+      const reopened = row()?.querySelector<HTMLInputElement>(
+        "input[type=checkbox]"
+      );
       assert.ok(reopened);
       reopened.checked = true;
       reopened.dispatchEvent(new (Event())("change"));
@@ -1132,14 +1248,14 @@ describe("God's Eye View keyed feeds", () => {
       assert.equal((state as Record<string, unknown>).vessels, true);
       assert.doesNotMatch(JSON.stringify(state), /secret-ais-key/);
       assert.ok(
-        useAppStore.getState().layers.some((layer) => layer.metadata[GODS_EYE_VIEW_VESSELS_FLAG]),
+        useAppStore
+          .getState()
+          .layers.some((layer) => layer.metadata[GODS_EYE_VIEW_VESSELS_FLAG])
       );
     } finally {
       godsEyeViewPlugin.deactivate?.(globe.app);
       net.restore();
       globalThis.WebSocket = originalWebSocket;
-      if (storageDescriptor) Object.defineProperty(globalThis, "localStorage", storageDescriptor);
-      else delete (globalThis as { localStorage?: unknown }).localStorage;
     }
   });
 });

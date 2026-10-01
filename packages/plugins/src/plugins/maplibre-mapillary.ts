@@ -50,12 +50,14 @@ const COVERAGE_COLOR = "#05cb63";
 const SELECTED_COLOR = "#f5811f";
 const SEQUENCE_HIGHLIGHT_COLOR = "#e91e63";
 
-const TOKEN_STORAGE_KEY = "geolibre:mapillary-access-token";
+/** The `app.credentials` name the user's access token is saved under. */
+const TOKEN_CREDENTIAL_NAME = "access-token";
 const ATTRIBUTION =
   '<a href="https://www.mapillary.com/" target="_blank" rel="noopener noreferrer">© Mapillary</a>';
 
 // The public vector-tile coverage set. The access token is appended per request.
-const COVERAGE_TILE_BASE = "https://tiles.mapillary.com/maps/vtp/mly1_public/2/{z}/{x}/{y}";
+const COVERAGE_TILE_BASE =
+  "https://tiles.mapillary.com/maps/vtp/mly1_public/2/{z}/{x}/{y}";
 
 // ---------------------------------------------------------------------------
 // Translatable strings (host injects localized copies via setMapillaryLabels)
@@ -113,20 +115,18 @@ function updatePanelText(): void {
 // ---------------------------------------------------------------------------
 
 function readEnvToken(): string | undefined {
-  const buildEnv = (import.meta as ImportMeta & { env?: Record<string, string | undefined> }).env;
-  const runtimeEnv = typeof window === "undefined" ? undefined : window.__GEOLIBRE_RUNTIME_ENV__;
+  const buildEnv = (
+    import.meta as ImportMeta & { env?: Record<string, string | undefined> }
+  ).env;
+  const runtimeEnv =
+    typeof window === "undefined" ? undefined : window.__GEOLIBRE_RUNTIME_ENV__;
   const env = { ...(buildEnv ?? {}), ...(runtimeEnv ?? {}) };
   return env.VITE_MAPILLARY_ACCESS_TOKEN?.trim() || undefined;
 }
 
 /** A token the user pasted into the panel overrides the build/runtime default. */
 function readUserToken(): string | undefined {
-  if (typeof localStorage === "undefined") return undefined;
-  try {
-    return localStorage.getItem(TOKEN_STORAGE_KEY)?.trim() || undefined;
-  } catch {
-    return undefined;
-  }
+  return appRef?.credentials?.get(TOKEN_CREDENTIAL_NAME).trim() || undefined;
 }
 
 function activeToken(): string | undefined {
@@ -134,13 +134,9 @@ function activeToken(): string | undefined {
 }
 
 function saveUserToken(token: string): void {
-  if (typeof localStorage === "undefined") return;
-  try {
-    if (token) localStorage.setItem(TOKEN_STORAGE_KEY, token);
-    else localStorage.removeItem(TOKEN_STORAGE_KEY);
-  } catch {
-    /* storage may be unavailable (private mode); ignore */
-  }
+  // The result is ignored: on a failed write the host keeps the token for this
+  // session and raises the credential-storage warning on desktop.
+  appRef?.credentials?.set(TOKEN_CREDENTIAL_NAME, token);
 }
 
 // ---------------------------------------------------------------------------
@@ -191,7 +187,9 @@ function addCoverage(activeMap: MapLibreMap): void {
   if (!activeMap.getSource(SOURCE_ID)) {
     activeMap.addSource(SOURCE_ID, {
       type: "vector",
-      tiles: [`${COVERAGE_TILE_BASE}?access_token=${encodeURIComponent(token)}`],
+      tiles: [
+        `${COVERAGE_TILE_BASE}?access_token=${encodeURIComponent(token)}`,
+      ],
       // No `minzoom` floor: the coverage renders at every zoom level (the tile
       // server serves the sequence overview at low zooms), instead of vanishing
       // below z6.
@@ -337,7 +335,8 @@ function removeCoverage(activeMap: MapLibreMap): void {
   ]) {
     if (activeMap.getLayer(id)) activeMap.removeLayer(id);
   }
-  if (activeMap.getSource(SELECTED_SOURCE_ID)) activeMap.removeSource(SELECTED_SOURCE_ID);
+  if (activeMap.getSource(SELECTED_SOURCE_ID))
+    activeMap.removeSource(SELECTED_SOURCE_ID);
   if (activeMap.getSource(SOURCE_ID)) activeMap.removeSource(SOURCE_ID);
 }
 
@@ -360,12 +359,15 @@ function setSelectedMarker(lngLat: { lng: number; lat: number } | null): void {
           features: [
             {
               type: "Feature",
-              geometry: { type: "Point", coordinates: [lngLat.lng, lngLat.lat] },
+              geometry: {
+                type: "Point",
+                coordinates: [lngLat.lng, lngLat.lat],
+              },
               properties: {},
             },
           ],
         }
-      : emptyCollection(),
+      : emptyCollection()
   );
   raiseSelectionLayers();
 }
@@ -373,7 +375,11 @@ function setSelectedMarker(lngLat: { lng: number; lat: number } | null): void {
 /** Light up the selected image's whole sequence (or clear it with null). */
 function highlightSequence(sequenceId: string | null): void {
   if (!map || !map.getLayer(SEQUENCE_HIGHLIGHT_LAYER_ID)) return;
-  map.setFilter(SEQUENCE_HIGHLIGHT_LAYER_ID, ["==", ["get", "id"], sequenceId ?? "__none__"]);
+  map.setFilter(SEQUENCE_HIGHLIGHT_LAYER_ID, [
+    "==",
+    ["get", "id"],
+    sequenceId ?? "__none__",
+  ]);
   raiseSelectionLayers();
 }
 
@@ -384,7 +390,8 @@ function highlightSequence(sequenceId: string | null): void {
  */
 function raiseSelectionLayers(): void {
   if (!map) return;
-  if (map.getLayer(SEQUENCE_HIGHLIGHT_LAYER_ID)) map.moveLayer(SEQUENCE_HIGHLIGHT_LAYER_ID);
+  if (map.getLayer(SEQUENCE_HIGHLIGHT_LAYER_ID))
+    map.moveLayer(SEQUENCE_HIGHLIGHT_LAYER_ID);
   if (map.getLayer(SELECTED_LAYER_ID)) map.moveLayer(SELECTED_LAYER_ID);
 }
 
@@ -392,23 +399,30 @@ function raiseSelectionLayers(): void {
 // Click handling
 // ---------------------------------------------------------------------------
 
-function imageIdFromFeature(feature: MapGeoJSONFeature | undefined): string | null {
+function imageIdFromFeature(
+  feature: MapGeoJSONFeature | undefined
+): string | null {
   const raw = feature?.properties?.id ?? feature?.properties?.image_id;
   return raw == null ? null : String(raw);
 }
 
 /** The point geometry of a clicked coverage feature, so the marker lands on it. */
 function pointFromFeature(
-  feature: MapGeoJSONFeature | undefined,
+  feature: MapGeoJSONFeature | undefined
 ): { lng: number; lat: number } | null {
   if (feature?.geometry?.type !== "Point") return null;
   const [lng, lat] = feature.geometry.coordinates;
-  return typeof lng === "number" && typeof lat === "number" ? { lng, lat } : null;
+  return typeof lng === "number" && typeof lat === "number"
+    ? { lng, lat }
+    : null;
 }
 
 /** The sequence id a clicked coverage feature belongs to (vector-tile property). */
-function sequenceIdFromFeature(feature: MapGeoJSONFeature | undefined): string | null {
-  const raw = feature?.properties?.sequence_id ?? feature?.properties?.sequenceId;
+function sequenceIdFromFeature(
+  feature: MapGeoJSONFeature | undefined
+): string | null {
+  const raw =
+    feature?.properties?.sequence_id ?? feature?.properties?.sequenceId;
   return raw == null ? null : String(raw);
 }
 
@@ -677,7 +691,8 @@ async function doMountViewer(): Promise<void> {
       viewerContainer.innerHTML = "";
       const err = document.createElement("div");
       err.textContent = labels.loadError;
-      err.style.cssText = "color:#fff;padding:16px;font-size:12px;text-align:center;";
+      err.style.cssText =
+        "color:#fff;padding:16px;font-size:12px;text-align:center;";
       viewerContainer.appendChild(err);
     }
   }
@@ -777,18 +792,23 @@ export const maplibreMapillaryPlugin: GeoLibrePlugin = {
     });
 
     floatingPanelRegistration.position = panelPosition;
-    unregisterPanel = app.registerFloatingPanel?.(floatingPanelRegistration) ?? null;
+    unregisterPanel =
+      app.registerFloatingPanel?.(floatingPanelRegistration) ?? null;
 
     app.openFloatingPanel?.(PANEL_ID);
   },
   getMapControlPosition: () => panelPosition,
-  setMapControlPosition: (app: GeoLibreAppAPI, position: GeoLibreMapControlPosition) => {
+  setMapControlPosition: (
+    app: GeoLibreAppAPI,
+    position: GeoLibreMapControlPosition
+  ) => {
     panelPosition = position;
     floatingPanelRegistration.position = position;
     // Re-register the same object so the host re-reads its position and moves the
     // card. Identity is preserved, so the open panel's viewer is not rebuilt.
     if (unregisterPanel) {
-      unregisterPanel = app.registerFloatingPanel?.(floatingPanelRegistration) ?? null;
+      unregisterPanel =
+        app.registerFloatingPanel?.(floatingPanelRegistration) ?? null;
     }
   },
   deactivate: (app: GeoLibreAppAPI) => {

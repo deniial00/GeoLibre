@@ -16,8 +16,9 @@ let failWrites = false;
   },
 };
 
-const { pluginCredentialHost } =
-  await import("../apps/geolibre-desktop/src/lib/plugin-credentials");
+const { pluginCredentialHost } = await import(
+  "../apps/geolibre-desktop/src/lib/plugin-credentials"
+);
 
 describe("app.credentials on the web build", () => {
   it("stores per plugin in localStorage and deletes on an empty value", () => {
@@ -29,7 +30,10 @@ describe("app.credentials on the web build", () => {
     assert.equal(pluginCredentialHost.get("token", "plugin-b"), "b");
 
     assert.equal(pluginCredentialHost.set("token", "", "plugin-a"), true);
-    assert.equal(storage.has("geolibre.pluginCredential.plugin-a.token"), false);
+    assert.equal(
+      storage.has("geolibre.pluginCredential.plugin-a.token"),
+      false
+    );
     assert.equal(pluginCredentialHost.get("token", "plugin-a"), "");
   });
 
@@ -40,5 +44,24 @@ describe("app.credentials on the web build", () => {
     failWrites = false;
     assert.equal(pluginCredentialHost.set("token", "saved", "plugin-c"), true);
     assert.equal(pluginCredentialHost.get("token", "plugin-c"), "saved");
+  });
+
+  it("moves a built-in plugin's pre-app.credentials key on first read", () => {
+    storage.set("geolibre:huggingface-token", " hf_web ");
+    assert.equal(
+      pluginCredentialHost.get("token", "maplibre-gl-huggingface"),
+      "hf_web"
+    );
+    assert.equal(
+      storage.get("geolibre.pluginCredential.maplibre-gl-huggingface.token"),
+      "hf_web"
+    );
+    assert.equal(storage.has("geolibre:huggingface-token"), false);
+  });
+
+  it("does not resurrect a legacy key after the token is cleared", () => {
+    storage.set("geolibre.godsEyeView.apiKey.tomtom", "old");
+    assert.equal(pluginCredentialHost.set("tomtom", "", "gods-eye-view"), true);
+    assert.equal(pluginCredentialHost.get("tomtom", "gods-eye-view"), "");
   });
 });

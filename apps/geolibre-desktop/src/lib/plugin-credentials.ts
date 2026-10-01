@@ -9,7 +9,9 @@
  * cannot be enumerated, so the accounts that have an entry are indexed in
  * localStorage (non-secret). As with project credentials, the index is written
  * before the credential so a crash cannot leave an unindexed entry behind, and
- * a malformed index fails hydration rather than being partially read.
+ * a malformed index fails hydration rather than being partially read. The
+ * built-in plugins' pre-#2729 keys are migrated here: on desktop during startup
+ * hydration, on the web on first read.
  *
  * The plugin id is injected by `PluginManager`'s scoped app; a plugin passes
  * only `name`. Failures never fall back to plaintext on desktop: the value
@@ -23,17 +25,48 @@ import {
   queueCredentialChanges,
   reportCredentialStorageError,
   useCredentialStorageStatus,
+  writeSecureCredential,
 } from "./credential-store";
 
 /** Desktop: non-secret JSON array of accounts that have a stored value. */
-export const PLUGIN_CREDENTIAL_ACCOUNTS_STORAGE_KEY = "geolibre.pluginCredentials.accounts";
+export const PLUGIN_CREDENTIAL_ACCOUNTS_STORAGE_KEY =
+  "geolibre.pluginCredentials.accounts";
 /** Web/embed/mobile: the localStorage key is `${prefix}${pluginId}.${name}`. */
-export const PLUGIN_CREDENTIAL_BROWSER_KEY_PREFIX = "geolibre.pluginCredential.";
+export const PLUGIN_CREDENTIAL_BROWSER_KEY_PREFIX =
+  "geolibre.pluginCredential.";
 
 const NAME_PATTERN = /^[A-Za-z0-9_-]{1,64}$/;
 
+/** Plaintext localStorage keys the built-in plugins used before app.credentials (issue #2729), by account. */
+const LEGACY_PLUGIN_CREDENTIAL_KEYS: Readonly<Record<string, string>> = {
+  "plugin.maplibre-gl-huggingface.token": "geolibre:huggingface-token",
+  "plugin.maplibre-gl-mapillary.access-token":
+    "geolibre:mapillary-access-token",
+  "plugin.gods-eye-view.tomtom": "geolibre.godsEyeView.apiKey.tomtom",
+  "plugin.gods-eye-view.aisstream": "geolibre.godsEyeView.apiKey.aisstream",
+};
+
+function readLegacyPluginCredentials(): Record<
+  string,
+  { key: string; value: string }
+> {
+  const found: Record<string, { key: string; value: string }> = {};
+  for (const [account, key] of Object.entries(LEGACY_PLUGIN_CREDENTIAL_KEYS)) {
+    try {
+      const value = window.localStorage.getItem(key)?.trim();
+      if (value) found[account] = { key, value };
+    } catch {
+      // Unreadable: nothing to migrate for this entry.
+    }
+  }
+  return found;
+}
+
 /** Names cannot contain ".", so the last segment of an account is unambiguous. */
-export function pluginCredentialAccount(pluginId: string, name: string): string {
+export function pluginCredentialAccount(
+  pluginId: string,
+  name: string
+): string {
   return `plugin.${pluginId}.${name}`;
 }
 
@@ -51,7 +84,9 @@ const sessionOverrides = new Map<string, string>();
  * index rather than returning a partial list, which would orphan entries.
  */
 export function readPluginCredentialIndex(): string[] {
-  const value = window.localStorage.getItem(PLUGIN_CREDENTIAL_ACCOUNTS_STORAGE_KEY);
+  const value = window.localStorage.getItem(
+    PLUGIN_CREDENTIAL_ACCOUNTS_STORAGE_KEY
+  );
   if (value === null) return [];
   const parsed: unknown = JSON.parse(value);
   if (
@@ -61,7 +96,7 @@ export function readPluginCredentialIndex(): string[] {
       (account) =>
         typeof account === "string" &&
         account.startsWith("plugin.") &&
-        isStorableCredentialAccount(account),
+        isStorableCredentialAccount(account)
     )
   ) {
     throw new Error("The saved plugin credential index is malformed.");
@@ -70,30 +105,56 @@ export function readPluginCredentialIndex(): string[] {
 }
 
 /**
- * Loads the indexed plugin credentials from the startup keychain read.
+ * Loads the indexed plugin credentials from the startup keychain read, and
+ * moves the built-in plugins' pre-#2729 localStorage values into the keychain.
  * `index` or `stored` is `null` when reading it failed (the caller reported
- * it): plugin credentials then stay in memory for the session.
+ * it): plugin credentials then stay in memory for the session, and legacy
+ * values stay where they are.
  */
-export function hydratePluginCredentials(
+export async function hydratePluginCredentials(
   index: readonly string[] | null,
-  stored: Readonly<Record<string, string>> | null,
-): void {
+  stored: Readonly<Record<string, string>> | null
+): Promise<void> {
   if (credentialStorageLocation() !== "keychain") return;
+  const legacy = readLegacyPluginCredentials();
   if (index === null || stored === null) {
+    values = Object.fromEntries(
+      Object.entries(legacy).map(([account, { value }]) => [account, value])
+    );
+    persisted = {};
     writable = false;
     return;
   }
   const present = index.filter((account) => stored[account] !== undefined);
-  values = Object.fromEntries(present.map((account) => [account, stored[account]]));
-  if (present.length !== index.length) {
-    // An indexed write that never landed (crash, failed write): drop it.
-    try {
-      window.localStorage.setItem(PLUGIN_CREDENTIAL_ACCOUNTS_STORAGE_KEY, JSON.stringify(present));
-    } catch (error) {
-      reportCredentialStorageError(error);
-      writable = false;
-      return;
+  values = Object.fromEntries(
+    present.map((account) => [account, stored[account]])
+  );
+  // Legacy wins over the keychain: it is what the user last saw (same rule as Settings).
+  for (const [account, { value }] of Object.entries(legacy))
+    values[account] = value;
+  const nextIndex = [...new Set([...present, ...Object.keys(legacy)])];
+  try {
+    // Index first, so a crash cannot leave an unindexed keychain entry. This
+    // also drops an indexed write that never landed (crash, failed write).
+    if (
+      nextIndex.length !== index.length ||
+      nextIndex.some((account, i) => account !== index[i])
+    ) {
+      window.localStorage.setItem(
+        PLUGIN_CREDENTIAL_ACCOUNTS_STORAGE_KEY,
+        JSON.stringify(nextIndex)
+      );
     }
+    for (const [account, { value }] of Object.entries(legacy)) {
+      if (stored[account] !== value)
+        await writeSecureCredential(account, value);
+    }
+    for (const { key } of Object.values(legacy))
+      window.localStorage.removeItem(key);
+  } catch (error) {
+    reportCredentialStorageError(error);
+    writable = false;
+    return;
   }
   persisted = { ...values };
   writable = true;
@@ -106,10 +167,14 @@ export function hydratePluginCredentials(
  */
 function validate(name: string, ownerPluginId: string | undefined): string {
   if (typeof ownerPluginId !== "string" || ownerPluginId === "") {
-    throw new Error("app.credentials must be called through the app API a plugin receives.");
+    throw new Error(
+      "app.credentials must be called through the app API a plugin receives."
+    );
   }
   if (typeof name !== "string" || !NAME_PATTERN.test(name)) {
-    throw new TypeError("Credential names must be 1-64 letters, digits, underscores or hyphens.");
+    throw new TypeError(
+      "Credential names must be 1-64 letters, digits, underscores or hyphens."
+    );
   }
   return pluginCredentialAccount(ownerPluginId, name);
 }
@@ -143,25 +208,34 @@ function setDesktop(account: string, value: string): boolean {
       index.add(account);
       window.localStorage.setItem(
         PLUGIN_CREDENTIAL_ACCOUNTS_STORAGE_KEY,
-        JSON.stringify([...index]),
+        JSON.stringify([...index])
       );
     } catch (error) {
       reportCredentialStorageError(error);
       return false;
     }
   }
-  const failedBefore = useCredentialStorageStatus.getState().failedAccounts[account] === true;
+  const failedBefore =
+    useCredentialStorageStatus.getState().failedAccounts[account] === true;
   const previous = persisted[account] ?? "";
   if (value) persisted[account] = value;
   else delete persisted[account];
-  const drained = queueCredentialChanges({ [account]: previous }, { [account]: value });
+  const drained = queueCredentialChanges(
+    { [account]: previous },
+    { [account]: value }
+  );
   if (!value) {
     void drained.then(() => {
       // A newer value, or a delete that has not landed, keeps the entry.
       if (account in values || hasPendingCredential(account)) return;
       try {
-        const index = readPluginCredentialIndex().filter((entry) => entry !== account);
-        window.localStorage.setItem(PLUGIN_CREDENTIAL_ACCOUNTS_STORAGE_KEY, JSON.stringify(index));
+        const index = readPluginCredentialIndex().filter(
+          (entry) => entry !== account
+        );
+        window.localStorage.setItem(
+          PLUGIN_CREDENTIAL_ACCOUNTS_STORAGE_KEY,
+          JSON.stringify(index)
+        );
       } catch (error) {
         reportCredentialStorageError(error);
       }
@@ -174,16 +248,37 @@ function getBrowser(account: string, key: string): string {
   const override = sessionOverrides.get(account);
   if (override !== undefined) return override;
   try {
-    return window.localStorage.getItem(key) ?? "";
+    return (
+      window.localStorage.getItem(key) ??
+      migrateLegacyBrowserCredential(account, key)
+    );
   } catch {
     return "";
   }
+}
+
+/** Web: moves a built-in plugin's pre-#2729 key to its app.credentials key on first read. */
+function migrateLegacyBrowserCredential(account: string, key: string): string {
+  const legacyKey = LEGACY_PLUGIN_CREDENTIAL_KEYS[account];
+  if (!legacyKey) return "";
+  const value = window.localStorage.getItem(legacyKey)?.trim() ?? "";
+  if (!value) return "";
+  try {
+    window.localStorage.setItem(key, value);
+    window.localStorage.removeItem(legacyKey);
+  } catch {
+    // Write failed: the legacy key stays and the next read retries.
+  }
+  return value;
 }
 
 function setBrowser(account: string, key: string, value: string): boolean {
   try {
     if (value) window.localStorage.setItem(key, value);
     else window.localStorage.removeItem(key);
+    // A cleared or replaced token must not resurface from its pre-#2729 key.
+    const legacyKey = LEGACY_PLUGIN_CREDENTIAL_KEYS[account];
+    if (legacyKey) window.localStorage.removeItem(legacyKey);
   } catch {
     sessionOverrides.set(account, value);
     return false;
@@ -210,7 +305,8 @@ export const pluginCredentialHost: {
   },
   set: (name, value, ownerPluginId) => {
     const account = validate(name, ownerPluginId);
-    if (typeof value !== "string") throw new TypeError("Credential values must be strings.");
+    if (typeof value !== "string")
+      throw new TypeError("Credential values must be strings.");
     return credentialStorageLocation() === "keychain"
       ? setDesktop(account, value)
       : setBrowser(account, browserKey(ownerPluginId as string, name), value);
