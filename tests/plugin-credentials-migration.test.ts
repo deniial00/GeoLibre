@@ -17,9 +17,7 @@ let failSets = false;
       if (cmd === "secure_store_get_many") {
         const accounts = args.accounts as string[];
         return Object.fromEntries(
-          accounts
-            .filter((a) => keychain.has(a))
-            .map((a) => [a, keychain.get(a)])
+          accounts.filter((a) => keychain.has(a)).map((a) => [a, keychain.get(a)]),
         );
       }
       if (cmd === "secure_store_set") {
@@ -38,18 +36,14 @@ let failSets = false;
   addEventListener: () => {},
 };
 
-const { hydrateDesktopCredentials } = await import(
-  "../apps/geolibre-desktop/src/lib/credential-hydration"
-);
-const { pluginCredentialHost } = await import(
-  "../apps/geolibre-desktop/src/lib/plugin-credentials"
-);
-const { useCredentialStorageStatus } = await import(
-  "../apps/geolibre-desktop/src/lib/credential-store"
-);
+const { hydrateDesktopCredentials } =
+  await import("../apps/geolibre-desktop/src/lib/credential-hydration");
+const { pluginCredentialHost } =
+  await import("../apps/geolibre-desktop/src/lib/plugin-credentials");
+const { useCredentialStorageStatus } =
+  await import("../apps/geolibre-desktop/src/lib/credential-store");
 
-const index = () =>
-  JSON.parse(storage.get("geolibre.pluginCredentials.accounts") ?? "[]");
+const index = () => JSON.parse(storage.get("geolibre.pluginCredentials.accounts") ?? "[]");
 
 describe("built-in plugin token migration on desktop", () => {
   it("moves legacy localStorage values into the keychain, legacy winning, and removes them", async () => {
@@ -57,16 +51,13 @@ describe("built-in plugin token migration on desktop", () => {
     storage.set("geolibre.godsEyeView.apiKey.tomtom", "tt_new");
     storage.set(
       "geolibre.pluginCredentials.accounts",
-      JSON.stringify(["plugin.gods-eye-view.tomtom"])
+      JSON.stringify(["plugin.gods-eye-view.tomtom"]),
     );
     keychain.set("plugin.gods-eye-view.tomtom", "tt_old");
 
     await hydrateDesktopCredentials();
 
-    assert.equal(
-      keychain.get("plugin.maplibre-gl-huggingface.token"),
-      "hf_legacy"
-    );
+    assert.equal(keychain.get("plugin.maplibre-gl-huggingface.token"), "hf_legacy");
     assert.equal(keychain.get("plugin.gods-eye-view.tomtom"), "tt_new");
     assert.equal(storage.has("geolibre:huggingface-token"), false);
     assert.equal(storage.has("geolibre.godsEyeView.apiKey.tomtom"), false);
@@ -74,13 +65,8 @@ describe("built-in plugin token migration on desktop", () => {
       "plugin.gods-eye-view.tomtom",
       "plugin.maplibre-gl-huggingface.token",
     ]);
-    assert.equal(
-      pluginCredentialHost.get("token", "maplibre-gl-huggingface"),
-      "hf_legacy"
-    );
-    assert.ok(
-      ![...storage.values()].some((value) => value.includes("hf_legacy"))
-    );
+    assert.equal(pluginCredentialHost.get("token", "maplibre-gl-huggingface"), "hf_legacy");
+    assert.ok(![...storage.values()].some((value) => value.includes("hf_legacy")));
   });
 
   it("keeps the legacy value and warns when the keychain write fails", async () => {
@@ -89,10 +75,7 @@ describe("built-in plugin token migration on desktop", () => {
 
     await hydrateDesktopCredentials();
 
-    assert.equal(
-      pluginCredentialHost.get("access-token", "maplibre-gl-mapillary"),
-      "MLY|legacy"
-    );
+    assert.equal(pluginCredentialHost.get("access-token", "maplibre-gl-mapillary"), "MLY|legacy");
     assert.equal(storage.get("geolibre:mapillary-access-token"), "MLY|legacy");
     assert.notEqual(useCredentialStorageStatus.getState().error, null);
   });

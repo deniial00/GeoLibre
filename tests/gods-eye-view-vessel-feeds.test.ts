@@ -103,11 +103,8 @@ describe("AISStream message parsing", () => {
       },
     });
     assert.deepEqual(
-      parseAisMessage(
-        '{"Message":{},"MessageType":"SubscriptionConfirmation"}',
-        0
-      ),
-      { kind: "confirmed" }
+      parseAisMessage('{"Message":{},"MessageType":"SubscriptionConfirmation"}', 0),
+      { kind: "confirmed" },
     );
     assert.deepEqual(parseAisMessage('{"error":"Api Key Is Not Valid"}', 0), {
       kind: "error",
@@ -132,9 +129,7 @@ describe("AISStream message parsing", () => {
 
 describe("AIS vessel CZML", () => {
   const now = new Date("2026-09-24T17:00:00Z");
-  const vessel = (
-    overrides: Partial<VesselObservation> = {}
-  ): VesselObservation => ({
+  const vessel = (overrides: Partial<VesselObservation> = {}): VesselObservation => ({
     mmsi: "1",
     latitude: 40,
     longitude: -74,
@@ -146,11 +141,7 @@ describe("AIS vessel CZML", () => {
   });
 
   it("dead-reckons a moving vessel and holds a moored one in place", () => {
-    const result = vesselsToCzml(
-      [vessel(), vessel({ mmsi: "2", speedKnots: 0.1 })],
-      now,
-      600
-    );
+    const result = vesselsToCzml([vessel(), vessel({ mmsi: "2", speedKnots: 0.1 })], now, 600);
     const moving = result.packets[1].position as {
       cartographicDegrees: number[];
       forwardExtrapolationType: string;
@@ -159,9 +150,8 @@ describe("AIS vessel CZML", () => {
     assert.ok(lon1 > lon0, "an eastbound vessel moves east");
     assert.ok(Math.abs(lat1 - lat0) < 1e-3);
     assert.equal(moving.forwardExtrapolationType, "HOLD");
-    const moored = (
-      result.packets[2].position as { cartographicDegrees: number[] }
-    ).cartographicDegrees;
+    const moored = (result.packets[2].position as { cartographicDegrees: number[] })
+      .cartographicDegrees;
     assert.deepEqual(moored.slice(1, 4), moored.slice(5, 8));
     assert.equal(result.attributes.features.length, 2);
   });
@@ -258,11 +248,7 @@ describe("AISStream client", () => {
     sockets[0].open();
     sockets[0].deliver(positionReport);
     client.update("key-1", harbor);
-    assert.equal(
-      sockets[0].sent.length,
-      1,
-      "an unchanged view is not a resubscription"
-    );
+    assert.equal(sockets[0].sent.length, 1, "an unchanged view is not a resubscription");
     client.update("key-1", [3.9, 51.8, 4.6, 52.1]);
     assert.equal(sockets.length, 1);
     assert.equal(sockets[0].sent.length, 2);
@@ -360,10 +346,7 @@ describe("God's Eye View API keys", () => {
       key: "env-key",
       source: "environment",
     });
-    assert.equal(
-      writeStoredGodsEyeViewKey(credentials, "tomtom", " panel-key "),
-      true
-    );
+    assert.equal(writeStoredGodsEyeViewKey(credentials, "tomtom", " panel-key "), true);
     assert.equal(values.get("tomtom"), "panel-key");
     assert.deepEqual(resolveGodsEyeViewKey(credentials, "tomtom", env), {
       key: "panel-key",
@@ -372,12 +355,9 @@ describe("God's Eye View API keys", () => {
     writeStoredGodsEyeViewKey(credentials, "tomtom", "");
     assert.equal(values.size, 0);
     assert.equal(resolveGodsEyeViewKey(credentials, "aisstream", {}), null);
-    assert.deepEqual(
-      resolveGodsEyeViewKey(undefined, "aisstream", { AISSTREAM_API_KEY: "a" }),
-      {
-        key: "a",
-        source: "environment",
-      }
-    );
+    assert.deepEqual(resolveGodsEyeViewKey(undefined, "aisstream", { AISSTREAM_API_KEY: "a" }), {
+      key: "a",
+      source: "environment",
+    });
   });
 });

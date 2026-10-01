@@ -38,7 +38,7 @@ export interface GodsEyeViewResolvedKey {
 /** The key typed into the panel for `provider`, or an empty string. */
 export function readStoredGodsEyeViewKey(
   credentials: GeoLibrePluginCredentials | undefined,
-  provider: GodsEyeViewKeyProvider
+  provider: GodsEyeViewKeyProvider,
 ): string {
   return credentials?.get(provider).trim() ?? "";
 }
@@ -52,7 +52,7 @@ export function readStoredGodsEyeViewKey(
 export function writeStoredGodsEyeViewKey(
   credentials: GeoLibrePluginCredentials | undefined,
   provider: GodsEyeViewKeyProvider,
-  value: string
+  value: string,
 ): boolean {
   return credentials ? credentials.set(provider, value.trim()) : false;
 }
@@ -69,7 +69,7 @@ export function writeStoredGodsEyeViewKey(
 export function resolveGodsEyeViewKey(
   credentials: GeoLibrePluginCredentials | undefined,
   provider: GodsEyeViewKeyProvider,
-  env: Record<string, string | undefined> = getRuntimeEnvironment()
+  env: Record<string, string | undefined> = getRuntimeEnvironment(),
 ): GodsEyeViewResolvedKey | null {
   const stored = readStoredGodsEyeViewKey(credentials, provider);
   if (stored) return { key: stored, source: "panel" };

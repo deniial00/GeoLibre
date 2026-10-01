@@ -39,19 +39,13 @@ import {
   shouldPersistDesktopSettings,
   useDesktopSettingsStore,
 } from "../hooks/useDesktopSettings";
-import {
-  desktopShareSessionAccounts,
-  hydrateDesktopShareSession,
-} from "./share-oauth";
+import { desktopShareSessionAccounts, hydrateDesktopShareSession } from "./share-oauth";
 import {
   hydrateProjectCredentials,
   readProjectCredentialIndex,
   setProjectCredentialsWritable,
 } from "./project-credentials";
-import {
-  hydratePluginCredentials,
-  readPluginCredentialIndex,
-} from "./plugin-credentials";
+import { hydratePluginCredentials, readPluginCredentialIndex } from "./plugin-credentials";
 
 export async function hydrateDesktopCredentials(): Promise<void> {
   if (credentialStorageLocation() !== "keychain") return;
@@ -80,9 +74,8 @@ export async function hydrateDesktopCredentials(): Promise<void> {
   }
   const settingsAccounts = shouldPersistDesktopSettings()
     ? desktopSettingsSecretAccounts(
-        splitDesktopSettingsSecrets(
-          useDesktopSettingsStore.getState().desktopSettings
-        ).publicSettings
+        splitDesktopSettingsSecrets(useDesktopSettingsStore.getState().desktopSettings)
+          .publicSettings,
       )
     : [];
   const accounts = [
@@ -116,14 +109,11 @@ export async function hydrateDesktopCredentials(): Promise<void> {
     setSettingsKeychainWritable(false);
     setProjectCredentialsWritable(false);
     await hydratePluginCredentials(null, null);
-    setKeychainPostgresConnections(
-      withNewIds(readBrowserPostgresConnections())
-    );
+    setKeychainPostgresConnections(withNewIds(readBrowserPostgresConnections()));
     const { secrets } = splitDesktopSettingsSecrets(
-      useDesktopSettingsStore.getState().desktopSettings
+      useDesktopSettingsStore.getState().desktopSettings,
     );
-    if (Object.keys(secrets).length > 0)
-      setPreservedLegacyCredentialSecrets(secrets);
+    if (Object.keys(secrets).length > 0) setPreservedLegacyCredentialSecrets(secrets);
   }
   // Never rejects; a failure starts signed out with the credential warning.
   await hydrateDesktopShareSession(stored);
@@ -138,7 +128,7 @@ function withNewIds(connections: string[]): KeychainPostgresConnection[] {
 
 async function hydratePostgresConnections(
   ids: string[] | null,
-  stored: Readonly<Record<string, string>> | null
+  stored: Readonly<Record<string, string>> | null,
 ): Promise<void> {
   const legacy = readBrowserPostgresConnections();
   if (ids === null || stored === null) {
@@ -161,14 +151,12 @@ async function hydratePostgresConnections(
       // so dropping the id erases nothing. Rewrite the index and stay
       // writable; otherwise one failed save would lock the list for good.
       reportCredentialStorageError(
-        new Error(
-          "A saved PostGIS connection could not be restored from your system keychain."
-        )
+        new Error("A saved PostGIS connection could not be restored from your system keychain."),
       );
       try {
         window.localStorage.setItem(
           POSTGRES_CONNECTION_IDS_STORAGE_KEY,
-          JSON.stringify(entries.map(({ id }) => id))
+          JSON.stringify(entries.map(({ id }) => id)),
         );
       } catch (error) {
         reportCredentialStorageError(error);
@@ -189,23 +177,21 @@ async function hydratePostgresConnections(
     return id;
   };
   const matched = legacy.map((connection) =>
-    takeId((id) => stored[postgresConnectionAccount(id)] === connection)
+    takeId((id) => stored[postgresConnectionAccount(id)] === connection),
   );
-  const entries: KeychainPostgresConnection[] = legacy.map(
-    (connection, index) => ({
-      connection,
-      id:
-        matched[index] ??
-        takeId((id) => stored[postgresConnectionAccount(id)] === undefined) ??
-        crypto.randomUUID(),
-    })
-  );
+  const entries: KeychainPostgresConnection[] = legacy.map((connection, index) => ({
+    connection,
+    id:
+      matched[index] ??
+      takeId((id) => stored[postgresConnectionAccount(id)] === undefined) ??
+      crypto.randomUUID(),
+  }));
   setKeychainPostgresConnections(entries);
 
   try {
     window.localStorage.setItem(
       POSTGRES_CONNECTION_IDS_STORAGE_KEY,
-      JSON.stringify(entries.map(({ id }) => id))
+      JSON.stringify(entries.map(({ id }) => id)),
     );
     for (const { id, connection } of entries) {
       if (stored[postgresConnectionAccount(id)] !== connection) {
@@ -228,13 +214,13 @@ async function hydratePostgresConnections(
 }
 
 async function hydrateSettingsSecrets(
-  stored: Readonly<Record<string, string>> | null
+  stored: Readonly<Record<string, string>> | null,
 ): Promise<void> {
   // A shared-settings URL session never persists, so it never touches credentials.
   if (!shouldPersistDesktopSettings()) return;
 
   const { publicSettings, secrets: legacy } = splitDesktopSettingsSecrets(
-    useDesktopSettingsStore.getState().desktopSettings
+    useDesktopSettingsStore.getState().desktopSettings,
   );
   const hasLegacy = Object.keys(legacy).length > 0;
 
