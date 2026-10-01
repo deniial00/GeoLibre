@@ -1,4 +1,4 @@
-"""Trusted reverse proxies and the client address seen through them."""
+"""Trusted reverse proxies: the client address and the signed-in user seen through them."""
 
 from __future__ import annotations
 
@@ -32,8 +32,8 @@ def load_trusted_proxy_config() -> TrustedProxyConfig:
             ) from exc
     return TrustedProxyConfig(
         networks=tuple(networks),
-        user_header=os.getenv("GEOLIBRE_PROXY_USER_HEADER", "Remote-User"),
-        email_header=os.getenv("GEOLIBRE_PROXY_EMAIL_HEADER", "Remote-Email"),
+        user_header=os.getenv("GEOLIBRE_PROXY_USER_HEADER") or "Remote-User",
+        email_header=os.getenv("GEOLIBRE_PROXY_EMAIL_HEADER") or "Remote-Email",
     )
 
 
@@ -76,3 +76,27 @@ def client_ip(request: Request) -> IPv4Address | IPv6Address | None:
         if not _trusted(config, address):
             return address
     return peer
+
+
+@dataclass(frozen=True)
+class ProxyIdentity:
+    user: str
+    email: str | None
+
+
+def proxy_identity(request: Request) -> ProxyIdentity | None:
+    """Return the user a trusted proxy vouches for; an untrusted peer's headers are never read.
+
+    Raises:
+        ValueError: the trusted proxy sent an empty, overlong, or control-character user.
+    """
+    if not peer_trusted(request):
+        return None
+    config: TrustedProxyConfig = request.app.state.trusted_proxy
+    raw = request.headers.get(config.user_header)
+    if raw is None:
+        return None
+    user = raw.strip()
+    if not user or len(user) > 255 or any(ord(ch) < 32 for ch in user):
+        raise ValueError("invalid proxy identity")
+    return ProxyIdentity(user=user, email=request.headers.get(config.email_header))

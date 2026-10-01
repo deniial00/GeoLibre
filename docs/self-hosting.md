@@ -229,6 +229,71 @@ anyone the SSO layer has not admitted.
     `?url=/projects/watershed.geolibre.json` is ignored. Write the full URL, as
     above. It is still same-origin, so the session cookie is still sent.
 
+#### Passing the signed-in user to the projects server
+
+If you also run the [projects server](server-api.md) (`geolibre-server` in
+`docker-compose.yml`), the same proxy can sign users in to it, so Share and the
+Project Gallery need no separate GeoLibre password. The server trusts the
+proxy's `Remote-User` and `Remote-Email` headers on its sign-in (consent) page,
+but only on connections from an address listed in `GEOLIBRE_TRUSTED_PROXIES`:
+
+1. Set `GEOLIBRE_TRUSTED_PROXIES` to the address the projects server sees the
+   proxy connect from: a comma-separated list of IPs or CIDRs, such as the
+   proxy container's IP or a Docker network that contains only the proxy and
+   the server. Every other peer's identity headers are ignored.
+2. Bind the projects server so only the proxy can reach it. The Compose file
+   publishes it on `127.0.0.1` only; drop that port entirely when the proxy runs
+   in the same Compose network.
+3. The proxy **must strip identity headers sent by the client**. Otherwise
+   anyone who reaches a route where the proxy does not overwrite them can claim
+   to be any user.
+
+The projects server answers on `/api/*` like GeoLens does, so give it its own
+hostname and point the web image's `GEOLIBRE_SHARE_URL` (and the server's
+`GEOLIBRE_PUBLIC_URL`) at it. Only the consent page goes through forward auth:
+the app calls the token endpoint and the API cross-origin with bearer tokens,
+and a login redirect there would break them.
+
+```caddyfile
+projects.example.org {
+    # Drop client-sent identity headers before anything else runs. Caddy orders
+    # request_header ahead of handle, so this precedes the forward_auth below.
+    request_header -Remote-User
+    request_header -Remote-Email
+
+    # The consent page: forward auth sets the headers for the signed-in user.
+    handle /oauth/authorize {
+        forward_auth authelia:9091 {
+            uri /api/verify?rd=https://auth.example.org
+            copy_headers Remote-User Remote-Email
+        }
+        reverse_proxy geolibre-server:8000
+    }
+
+    # `handle`, not `handle_path`: the server expects the /oauth and /api prefixes.
+    handle /oauth/* {
+        reverse_proxy geolibre-server:8000
+    }
+
+    handle /api/* {
+        reverse_proxy geolibre-server:8000
+    }
+}
+```
+
+Signing in from the app then opens a consent page that names the proxy user
+(`Signed in through your organization's proxy as …`) and asks only for the
+device label. The first sign-in creates the account. If your proxy uses other
+header names (oauth2-proxy sends `X-Forwarded-User` and `X-Forwarded-Email`),
+set `GEOLIBRE_PROXY_USER_HEADER` and `GEOLIBRE_PROXY_EMAIL_HEADER` and strip
+those names instead. See
+[Trusted-header proxy sign-in](server-api.md#trusted-header-proxy-sign-in) for
+the full contract.
+
+The nginx Basic Auth built into the web image (`GEOLIBRE_AUTH_USER` /
+`GEOLIBRE_AUTH_PASSWORD`) is not a substitute: it is a single shared
+credential, so it cannot tell the projects server who the visitor is.
+
 ## 3. Connect GeoLibre to GeoLens
 
 The **GeoLens** plugin is built in. There is nothing to install, no marketplace

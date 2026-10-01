@@ -12,7 +12,11 @@ from sqlalchemy import func, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from geolibre_server_api.enterprise_models import AccountSecurity, OrganizationSecurityPolicy
+from geolibre_server_api.enterprise_models import (
+    AccountSecurity,
+    OrganizationIdentityProvider,
+    OrganizationSecurityPolicy,
+)
 from geolibre_server_api.org_models import Organization, OrganizationMember
 from geolibre_server_api.proxy_identity import client_ip
 
@@ -183,3 +187,20 @@ def credential_expired(
     if policy.absolute_lifetime and authenticated_at + policy.absolute_lifetime <= now_ts:
         return True
     return bool(policy.idle_timeout and now_ts - last_activity_at > policy.idle_timeout)
+
+
+def password_login_allowed(session: Session, account_id: str) -> bool:
+    """False when an org of the account requires SSO and it is not that org's break-glass admin."""
+    provider = OrganizationIdentityProvider
+    blocking = session.execute(
+        select(provider.break_glass_account_id, OrganizationMember.role)
+        .join(OrganizationMember, OrganizationMember.organization_id == provider.organization_id)
+        .where(
+            OrganizationMember.account_id == account_id,
+            provider.enabled.is_(True),
+            provider.allow_builtin_accounts.is_(False),
+        )
+    ).all()
+    return all(
+        break_glass == account_id and role == "administrator" for break_glass, role in blocking
+    )

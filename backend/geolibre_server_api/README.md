@@ -52,8 +52,18 @@ Configuration:
   the management grant always expires within 300 seconds and never refreshes.
 - `GEOLIBRE_TRUSTED_PROXIES`: comma-separated IPs or CIDR networks of reverse
   proxies whose `X-Forwarded-For` header is trusted when resolving the client
-  address for organization admin IP allowlists (default empty: the direct peer
-  is the client). An invalid entry fails startup.
+  address for organization admin IP allowlists, and whose identity headers sign
+  users in on the OAuth consent page (default empty: the direct peer is the
+  client and identity headers are ignored). An invalid entry fails startup.
+- `GEOLIBRE_PROXY_USER_HEADER` (default `Remote-User`) and
+  `GEOLIBRE_PROXY_EMAIL_HEADER` (default `Remote-Email`): the headers a trusted
+  proxy uses to pass the signed-in user and their email. The proxy must strip
+  these headers from client requests.
+- `GEOLIBRE_OIDC_CA_BUNDLE`: PEM file of CA certificates trusted for calls to
+  organization identity providers, for providers behind a private CA (default
+  empty: the public CAs bundled with `certifi`). An unreadable file fails
+  startup. Each provider's OIDC `client_secret` is stored unencrypted in the
+  database.
 - `GEOLIBRE_MAX_PROJECT_BYTES`, `GEOLIBRE_MAX_THUMBNAIL_BYTES`: upload limits.
 - `GEOLIBRE_HOST`, `GEOLIBRE_PORT`: bind address and port for the
   `geolibre-server-api` entry point, default `0.0.0.0` and `8000`. Bind to

@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Annotated, Callable, Literal
 from urllib.parse import quote, urlparse
 
+import httpx
 from fastapi import Depends, FastAPI, HTTPException, Query, Request, Response
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
@@ -59,6 +60,7 @@ from geolibre_server_api.auth import (
 )
 from geolibre_server_api.auth_models import OAUTH_INDEXES, Account, Base
 from geolibre_server_api.enterprise_admin import build_enterprise_admin_router
+from geolibre_server_api.oidc import build_http_client
 from geolibre_server_api.org_models import (
     Group,
     GroupInvitation,
@@ -874,8 +876,14 @@ def create_app(
     storage=None,
     public_url: str | None = None,
     clock: Callable[[], int] | None = None,
+    *,
+    oidc_transport: httpx.BaseTransport | None = None,
 ) -> FastAPI:
-    """Build the FastAPI app, wiring the engine, sessions, storage, and routes."""
+    """Build the FastAPI app, wiring the engine, sessions, storage, and routes.
+
+    ``oidc_transport`` replaces the network for outbound identity-provider
+    calls (tests pass an ``httpx.MockTransport``).
+    """
     database_url = database_url or os.getenv(
         "GEOLIBRE_DATABASE_URL", "sqlite:///./geolibre-server-api.db"
     )
@@ -953,6 +961,8 @@ def create_app(
     app.state.clock = clock_fn
     app.state.oauth_config = oauth_config
     app.state.trusted_proxy = load_trusted_proxy_config()
+    # Outbound identity-provider HTTP; lives for the process.
+    app.state.oidc_http = build_http_client(oidc_transport)
     # A declared Content-Length past the largest thing any route accepts is
     # rejected before the body is read at all. Without this, the JSON `content`
     # routes let Pydantic materialize the whole payload in memory *before*

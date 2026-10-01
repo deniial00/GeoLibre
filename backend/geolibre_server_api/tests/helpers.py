@@ -13,6 +13,9 @@ import hashlib
 import json
 import re
 from urllib.parse import parse_qs, urlparse
+from uuid import uuid4
+
+from fake_idp import FakeIdp
 
 WEB_REDIRECT = "https://share.example/oauth-callback.html"
 DESKTOP_REDIRECT = "org.geolibre.desktop:/oauth/callback"
@@ -243,3 +246,64 @@ def add_member(client, token, org_id, username, role="member"):
     )
     assert response.status_code == 200, response.text
     return response
+
+
+def configure_idp(client, token, org_id, **overrides):
+    """PUT the fake provider (endpoints from discovery unless overridden)."""
+    body = {
+        "issuer": FakeIdp.ISSUER,
+        "clientId": FakeIdp.CLIENT_ID,
+        "clientSecret": FakeIdp.CLIENT_SECRET,
+        **overrides,
+    }
+    return client.put(
+        f"/api/organizations/{org_id}/identity-provider", json=body, headers=auth(token)
+    )
+
+
+def start_sso(
+    client,
+    org_slug,
+    *,
+    label="Test device",
+    authorization_endpoint=f"{FakeIdp.ISSUER}/authorize",
+):
+    """Choose organization sign-in on the consent page.
+
+    Returns (pkce_verifier, idp_authorize_params, idp_location).
+    """
+    response, verifier, interaction, csrf = start_authorize(client)
+    assert response.status_code == 200, response.text
+    assert interaction and csrf, "consent form missing interaction/csrf"
+    redirected = client.post(
+        "/oauth/authorize",
+        data={
+            "interaction": interaction,
+            "csrf": csrf,
+            "label": label,
+            "decision": "sso",
+            "organization": org_slug,
+        },
+        headers={"Origin": ORIGIN},
+        follow_redirects=False,
+    )
+    assert redirected.status_code == 303, (redirected.status_code, redirected.text[:300])
+    location = redirected.headers["location"]
+    assert location.startswith(f"{authorization_endpoint}?"), location
+    return verifier, redirect_params(redirected), location
+
+
+def sso_sign_in(client, fake_idp, org_slug, claims, *, label="Test device"):
+    """Sign in through *fake_idp*; returns (callback_response, pkce_verifier).
+
+    The IdP will sign *claims* plus the nonce the server sent.
+    """
+    verifier, params, _ = start_sso(client, org_slug, label=label)
+    code = f"c-{uuid4().hex}"
+    fake_idp.issue(code, {**claims, "nonce": params["nonce"]}, params["code_challenge"])
+    callback = client.get(
+        "/oauth/sso/callback",
+        params={"code": code, "state": params["state"]},
+        follow_redirects=False,
+    )
+    return callback, verifier

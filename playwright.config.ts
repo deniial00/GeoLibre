@@ -91,7 +91,9 @@ export default defineConfig({
   // per-commit gate with `--project=core`.
   projects: [
     { name: "core", testMatch: coreMatch, use: chromium },
-    { name: "features", testIgnore: coreMatch, use: chromium },
+    // `e2e/enterprise-sso/` needs a live API and Keycloak; it has its own
+    // config (`playwright.enterprise-sso.config.ts`) and nightly job.
+    { name: "features", testIgnore: [...coreMatch, "**/enterprise-sso/**"], use: chromium },
   ],
   webServer: {
     command: `npm run build && npm run preview -w geolibre-desktop -- --port ${PORT} --strictPort`,

@@ -10,7 +10,9 @@ This module owns:
   ``/api/account``, ``/api/users/me``),
 - the OAuth 2.0 Authorization Code + PKCE (S256-only) flow: the server-owned
   login/consent form, token exchange with rotating refresh tokens and reuse
-  detection, revocation, and RFC 8414 discovery.
+  detection, revocation, and RFC 8414 discovery,
+- the consent form's organization single sign-on (the OIDC relying-party work
+  lives in ``oidc``) and trusted-proxy sign-in branches.
 
 The flow is deliberately small and pinned to the reference server rather than
 delegated to an OAuth framework: public clients only, no client secrets, no
@@ -56,15 +58,23 @@ from geolibre_server_api.auth_models import (
     PersonalTokenPolicy,
     Token,
 )
-from geolibre_server_api.enterprise_models import AccountSecurity
+from geolibre_server_api.enterprise_models import (
+    AccountSecurity,
+    OidcLoginState,
+    OrganizationIdentityProvider,
+    OrganizationSecurityPolicy,
+)
+from geolibre_server_api.org_models import Organization
 from geolibre_server_api.policy import (
     credential_expired,
     effective_policy,
     ensure_account_security,
+    password_login_allowed,
     password_policy_error,
     record_failed_login,
     record_successful_login,
 )
+from geolibre_server_api.proxy_identity import proxy_identity
 
 # ---------------------------------------------------------------------------
 # Scope vocabulary and grant lifetimes
@@ -485,12 +495,16 @@ LOGIN_ERRORS: dict[str, tuple[int, str]] = {
     "invalid": (401, "invalid username or password"),
     "locked": (401, "account temporarily locked"),
     "expired": (403, "password expired"),
+    "sso_required": (403, "single sign-on required"),
 }
 # The same codes as shown on the OAuth consent page.
 CONSENT_LOGIN_ERRORS: dict[str, str] = {
     "invalid": "Invalid username or password",
     "locked": "Too many failed sign-in attempts. Try again later.",
     "expired": "Your password has expired. Change it, then sign in again.",
+    "sso_required": (
+        "Your organization requires single sign-on. Use “Sign in with your organization”."
+    ),
 }
 
 
@@ -519,6 +533,8 @@ def verify_password_login(
     if not password_matches(password, account.password_hash):
         record_failed_login(session, account.id, now_ts, policy)
         raise PasswordLoginError("invalid")
+    if not password_login_allowed(session, account.id):
+        raise PasswordLoginError("sso_required")
     if (
         policy.password_max_age_days
         and security is not None
@@ -673,6 +689,19 @@ def cleanup_expired_security_rows(session: Session, now_ts: int, *, batch_size: 
     if expired_access_digests:
         session.execute(
             delete(OAuthAccessToken).where(OAuthAccessToken.digest.in_(expired_access_digests))
+        )
+        changed = True
+
+    # Expired single sign-on redirects; deleting an interaction below also
+    # cascades any of its login states that are still unexpired.
+    expired_login_state_ids = list(
+        session.scalars(
+            select(OidcLoginState.id).where(OidcLoginState.expires_at <= now_ts).limit(batch_size)
+        )
+    )
+    if expired_login_state_ids:
+        session.execute(
+            delete(OidcLoginState).where(OidcLoginState.id.in_(expired_login_state_ids))
         )
         changed = True
 
@@ -875,6 +904,7 @@ def authorization_html_response(
     status: int = 200,
     *,
     form_redirect_uri: str | None = None,
+    sso_form_action: bool = False,
 ) -> HTMLResponse:
     response = HTMLResponse(body, status_code=status)
     response.headers["Cache-Control"] = "no-store"
@@ -891,6 +921,10 @@ def authorization_html_response(
             f"{redirect.scheme}://{redirect.netloc}" if redirect.netloc else f"{redirect.scheme}:"
         )
         form_action += f" {callback_source}"
+    if sso_form_action:
+        # The single sign-on POST is answered with a 303 to the organization's
+        # identity provider, whose endpoints are https-only.
+        form_action += " https:"
     response.headers["Content-Security-Policy"] = (
         f"default-src 'none'; form-action {form_action}; frame-ancestors 'none'; base-uri 'none'"
     )
@@ -917,11 +951,41 @@ def render_consent_form(
     label: str,
     scope: str,
     error: str | None,
+    *,
+    sso_available: bool = False,
+    proxy_user: str | None = None,
 ) -> str:
     scope_items = "".join(
         f"<li>{html.escape(scope_description(s))}</li>" for s in canonical_scope(scope).split()
     )
     error_html = f"<p role='alert'>{html.escape(error)}</p>" if error else ""
+    if proxy_user is not None:
+        credentials_html = (
+            "<p>Signed in through your organization's proxy as "
+            f"<strong>{html.escape(proxy_user)}</strong>.</p>"
+        )
+        allow_text = "Allow"
+    else:
+        credentials_html = (
+            "<label>Username <input type='text' name='username' "
+            "autocomplete='username' required></label>"
+            "<label>Password <input type='password' name='password' "
+            "autocomplete='current-password' required></label>"
+        )
+        allow_text = "Sign in and allow"
+    sso_html = ""
+    if sso_available and proxy_user is None:
+        sso_html = (
+            "<form method='post'>"
+            f"<input type='hidden' name='interaction' value='{html.escape(interaction_id)}'>"
+            f"<input type='hidden' name='csrf' value='{html.escape(csrf_value)}'>"
+            f"<input type='hidden' name='label' value='{html.escape(label)}'>"
+            "<label>Organization <input type='text' name='organization' "
+            "autocomplete='organization' required></label>"
+            "<button type='submit' name='decision' value='sso'>"
+            "Sign in with your organization</button>"
+            "</form>"
+        )
     return (
         "<!doctype html><html lang='en'><head><meta charset='utf-8'>"
         "<title>Authorize GeoLibre</title></head><body>"
@@ -937,13 +1001,12 @@ def render_consent_form(
         f"<input type='hidden' name='csrf' value='{html.escape(csrf_value)}'>"
         "<label>Device label <input type='text' name='label' maxlength='100' "
         f"value='{html.escape(label)}'></label>"
-        "<label>Username <input type='text' name='username' "
-        "autocomplete='username' required></label>"
-        "<label>Password <input type='password' name='password' "
-        "autocomplete='current-password' required></label>"
-        "<button type='submit' name='decision' value='allow'>Sign in and allow</button>"
+        f"{credentials_html}"
+        f"<button type='submit' name='decision' value='allow'>{allow_text}</button>"
         "<button type='submit' name='decision' value='cancel' formnovalidate>Cancel</button>"
-        "</form></body></html>"
+        "</form>"
+        f"{sso_html}"
+        "</body></html>"
     )
 
 
@@ -1510,11 +1573,27 @@ def build_identity_router() -> APIRouter:
 def build_oauth_router(config: OAuthConfig) -> APIRouter:
     """Build the Authorization Code + S256 PKCE surface for an enabled server."""
 
+    # The OIDC relying party layers above this module; import it here, not at
+    # module load, so ``oidc`` can depend on ``auth``.
+    from geolibre_server_api import oidc
+
     router = APIRouter(dependencies=[Depends(require_issuer_host(config))])
     # __Host- cookies require Secure; Safari rejects Secure cookies on HTTP
     # loopback, which is permitted only for local development by parse_issuer.
     secure_cookie = config.issuer.startswith("https://")
     browser_cookie = BROWSER_COOKIE if secure_cookie else "geolibre_oauth_browser"
+    sso_redirect_uri = f"{config.issuer}/oauth/sso/callback"
+
+    def _sso_available(session: Session, proxy_user: str | None) -> bool:
+        """Offer organization sign-in when any provider is enabled (never in proxy mode)."""
+        if proxy_user is not None:
+            return False
+        enabled = session.scalar(
+            select(func.count())
+            .select_from(OrganizationIdentityProvider)
+            .where(OrganizationIdentityProvider.enabled.is_(True))
+        )
+        return (enabled or 0) > 0
 
     # -- GET /oauth/authorize: start a pending interaction and render consent --
 
@@ -1565,6 +1644,11 @@ def build_oauth_router(config: OAuthConfig) -> APIRouter:
         label = params.get("device_label", "") or client.name
         if len(label) > 100:
             return oauth_error_redirect(config.issuer, redirect_uri, "invalid_request", state)
+        try:
+            identity = proxy_identity(request)
+        except ValueError:
+            return oauth_error_page(400, "invalid_request", "invalid proxy identity")
+        proxy_user = identity.user if identity is not None else None
 
         now_ts = get_clock(request)()
         cleanup_expired_security_rows(session, now_ts)
@@ -1617,6 +1701,7 @@ def build_oauth_router(config: OAuthConfig) -> APIRouter:
         session.add(interaction)
         session.commit()
 
+        sso_available = _sso_available(session, proxy_user)
         response = authorization_html_response(
             render_consent_form(
                 config,
@@ -1627,8 +1712,11 @@ def build_oauth_router(config: OAuthConfig) -> APIRouter:
                 label,
                 scope,
                 None,
+                sso_available=sso_available,
+                proxy_user=proxy_user,
             ),
             form_redirect_uri=redirect_uri,
+            sso_form_action=sso_available,
         )
         response.set_cookie(
             browser_cookie,
@@ -1679,7 +1767,7 @@ def build_oauth_router(config: OAuthConfig) -> APIRouter:
         label = fields.get("label", "").strip()
         username = fields.get("username", "").strip()
         password = fields.get("password", "")
-        if not interaction_id or not csrf or decision not in ("allow", "cancel"):
+        if not interaction_id or not csrf or decision not in ("allow", "cancel", "sso"):
             return oauth_error_page(400, "invalid_request", "invalid form")
         if not (1 <= len(label) <= 100) or any(ord(c) < 32 for c in label):
             return oauth_error_page(400, "invalid_request", "invalid label")
@@ -1732,24 +1820,120 @@ def build_oauth_router(config: OAuthConfig) -> APIRouter:
                 config.issuer, interaction.redirect_uri, "access_denied", interaction.state
             )
 
+        try:
+            identity = proxy_identity(request)
+        except ValueError:
+            return oauth_error_page(400, "invalid_request", "invalid proxy identity")
+        proxy_user = identity.user if identity is not None else None
+
+        if decision == "sso":
+            return _start_single_sign_on(
+                session,
+                interaction,
+                client,
+                csrf,
+                label,
+                fields.get("organization", "").strip().lower(),
+                now_ts,
+                proxy_user=proxy_user,
+            )
+
+        if identity is not None:
+            # The trusted proxy already authenticated this user.
+            account = oidc.resolve_proxy_account(session, identity, now_ts)
+            return _approve_interaction(
+                session, interaction, account.id, label, now_ts, authenticated_at=now_ts
+            )
+
         # Credential verification: the same scrypt work and lockout/rotation
         # policy as /api/auth/token, but no PAT is minted.
         try:
             account = verify_password_login(session, username, password, now_ts)
         except PasswordLoginError as exc:
-            return _consent_error(interaction, client, csrf, label, CONSENT_LOGIN_ERRORS[exc.code])
+            return _consent_error(
+                session,
+                interaction,
+                client,
+                csrf,
+                label,
+                CONSENT_LOGIN_ERRORS[exc.code],
+                proxy_user=proxy_user,
+            )
         return _approve_interaction(
             session, interaction, account.id, label, now_ts, authenticated_at=now_ts
         )
 
+    def _start_single_sign_on(
+        session: Session,
+        interaction: OAuthAuthorizationCode,
+        client: OAuthClient,
+        csrf: str,
+        label: str,
+        slug: str,
+        now_ts: int,
+        *,
+        proxy_user: str | None,
+    ) -> Response:
+        """Redirect the browser to the named organization's identity provider."""
+        provider = None
+        if slug:
+            provider = session.scalar(
+                select(OrganizationIdentityProvider)
+                .join(Organization, Organization.id == OrganizationIdentityProvider.organization_id)
+                .where(Organization.slug == slug, OrganizationIdentityProvider.enabled.is_(True))
+            )
+        if provider is None:
+            return _consent_error(
+                session,
+                interaction,
+                client,
+                csrf,
+                label,
+                "Single sign-on is not configured for that organization",
+                proxy_user=proxy_user,
+            )
+        org_policy = session.get(OrganizationSecurityPolicy, provider.organization_id)
+        max_age = org_policy.admin_reauth_seconds if org_policy is not None else None
+        state = secrets.token_urlsafe(32)
+        nonce = secrets.token_urlsafe(32)
+        code_verifier = secrets.token_urlsafe(64)
+        session.add(
+            OidcLoginState(
+                id=str(uuid.uuid4()),
+                state_digest=token_digest(state),
+                nonce=nonce,
+                code_verifier=code_verifier,
+                provider_id=provider.id,
+                interaction_id=interaction.id,
+                label=label,
+                max_age=max_age,
+                expires_at=now_ts + config.interaction_ttl,
+            )
+        )
+        session.commit()
+        return no_store_redirect(
+            oidc.build_authorization_redirect(
+                provider,
+                redirect_uri=sso_redirect_uri,
+                state=state,
+                nonce=nonce,
+                code_challenge=base64url_sha256(code_verifier),
+                max_age=max_age,
+            )
+        )
+
     def _consent_error(
+        session: Session,
         interaction: OAuthAuthorizationCode,
         client: OAuthClient,
         csrf: str,
         label: str,
         message: str,
+        *,
+        proxy_user: str | None,
     ) -> HTMLResponse:
         """Re-render the consent form for this interaction with an error message."""
+        sso_available = _sso_available(session, proxy_user)
         return authorization_html_response(
             render_consent_form(
                 config,
@@ -1760,8 +1944,11 @@ def build_oauth_router(config: OAuthConfig) -> APIRouter:
                 label,
                 interaction.scope,
                 message,
+                sso_available=sso_available,
+                proxy_user=proxy_user,
             ),
             form_redirect_uri=interaction.redirect_uri,
+            sso_form_action=sso_available,
         )
 
     def _approve_interaction(
@@ -1813,6 +2000,130 @@ def build_oauth_router(config: OAuthConfig) -> APIRouter:
     ):
         try:
             return _complete_authorization(request, session, body)
+        except OperationalError as exc:
+            session.rollback()
+            if not is_sqlite_lock_error(session, exc):
+                raise
+            return oauth_error_page(503, "temporarily_unavailable", "please try again")
+
+    # -- GET /oauth/sso/callback: the organization IdP returns to the consent --
+
+    def _sso_rejected() -> HTMLResponse:
+        # One generic page: the reason is logged, never shown to the browser.
+        return oauth_error_page(400, "invalid_request", "single sign-on response rejected")
+
+    def _finish_single_sign_on(request: Request, session: Session):
+        params = request.query_params
+        if any(len(params.getlist(key)) > 1 for key in ("state", "code", "error")):
+            return _sso_rejected()
+        state = params.get("state", "")
+        if not state:
+            return _sso_rejected()
+        now_ts = get_clock(request)()
+        login_state = session.scalar(
+            select(OidcLoginState).where(OidcLoginState.state_digest == token_digest(state))
+        )
+        if (
+            login_state is None
+            or login_state.expires_at <= now_ts
+            or login_state.consumed_at is not None
+        ):
+            return _sso_rejected()
+        interaction = session.get(OAuthAuthorizationCode, login_state.interaction_id)
+        if (
+            interaction is None
+            or interaction.interaction_expires_at <= now_ts
+            or interaction.consumed_at is not None
+            or interaction.approved_at is not None
+        ):
+            return _sso_rejected()
+        # The IdP redirect must land in the browser that started consent.
+        cookie = request.cookies.get(browser_cookie)
+        if (
+            not cookie
+            or interaction.browser_cookie_digest is None
+            or not hmac.compare_digest(token_digest(cookie), interaction.browser_cookie_digest)
+        ):
+            return _sso_rejected()
+
+        if params.get("error"):
+            session.execute(
+                update(OidcLoginState)
+                .where(OidcLoginState.id == login_state.id, OidcLoginState.consumed_at.is_(None))
+                .values(consumed_at=now_ts)
+            )
+            session.execute(
+                update(OAuthAuthorizationCode)
+                .where(
+                    OAuthAuthorizationCode.id == interaction.id,
+                    OAuthAuthorizationCode.approved_at.is_(None),
+                    OAuthAuthorizationCode.consumed_at.is_(None),
+                )
+                .values(consumed_at=now_ts)
+            )
+            session.commit()
+            return oauth_error_redirect(
+                config.issuer, interaction.redirect_uri, "access_denied", interaction.state
+            )
+
+        code = params.get("code", "")
+        if not code:
+            return _sso_rejected()
+        # Single use: of two concurrent callbacks for one state, only one
+        # redeems the provider's code.
+        claimed = session.execute(
+            update(OidcLoginState)
+            .where(OidcLoginState.id == login_state.id, OidcLoginState.consumed_at.is_(None))
+            .values(consumed_at=now_ts)
+        ).rowcount
+        if not claimed:
+            session.rollback()
+            return _sso_rejected()
+        session.commit()
+
+        provider = session.get(OrganizationIdentityProvider, login_state.provider_id)
+        if provider is None or not provider.enabled:
+            return _sso_rejected()
+        http = request.app.state.oidc_http
+        try:
+            id_token = oidc.exchange_authorization_code(
+                http, provider, code, login_state.code_verifier, sso_redirect_uri
+            )
+            claims = oidc.validate_id_token(
+                session,
+                http,
+                provider,
+                id_token,
+                nonce=login_state.nonce,
+                now_ts=now_ts,
+                max_age=login_state.max_age,
+            )
+        except oidc.OidcError as exc:
+            oidc.logger.warning("oidc sign-in rejected: %s", exc)
+            return _sso_rejected()
+        account = oidc.resolve_oidc_account(session, provider, claims, now_ts)
+        auth_time = claims.get("auth_time")
+        authenticated_at = (
+            min(auth_time, now_ts)
+            if isinstance(auth_time, int) and not isinstance(auth_time, bool)
+            else now_ts
+        )
+        return _approve_interaction(
+            session,
+            interaction,
+            account.id,
+            login_state.label,
+            now_ts,
+            authenticated_at=authenticated_at,
+        )
+
+    @router.get("/oauth/sso/callback")
+    def oauth_sso_callback(
+        request: Request,
+        session: Session = Depends(get_session),
+    ):
+        try:
+            return _finish_single_sign_on(request, session)
         except OperationalError as exc:
             session.rollback()
             if not is_sqlite_lock_error(session, exc):

@@ -42,10 +42,11 @@ Deployment protections remain the operator's responsibility:
   browser binding, but a fresh cookie bypasses that cap; the reference server
   has no general request limiter. Before enabling OAuth publicly, enforce
   per-client-IP limits at the ingress on **GET and POST** `/oauth/authorize`,
-  `POST /oauth/token`, `POST /api/auth/token`, `POST /api/accounts`, and
-  `POST /api/account/password`. The last four POSTs include password or token
-  operations; consent login
-  and the PAT/account routes run scrypt. Add per-username limits where the
+  `GET /oauth/sso/callback`, `POST /oauth/token`, `POST /api/auth/token`,
+  `POST /api/accounts`, and `POST /api/account/password`. The last four POSTs
+  include password or token operations; consent login and the PAT/account
+  routes run scrypt, and the single sign-on callback calls the organization's
+  identity provider. Add per-username limits where the
   ingress can safely parse credentials. Every public path to the API must go
   through this limiter: Compose binds the API host port to loopback by default.
   A root-issuer nginx deployment can put this zone in its `http` context and
@@ -56,7 +57,7 @@ Deployment protections remain the operator's responsibility:
   limit_req_zone $binary_remote_addr zone=geolibre_auth:10m rate=12r/m;
 
   # TLS issuer server context; proxy other API routes separately.
-  location ~ ^/(oauth/(authorize|token)|api/(auth/token|accounts|account/password))$ {
+  location ~ ^/(oauth/(authorize|token|sso/callback)|api/(auth/token|accounts|account/password))$ {
       limit_req zone=geolibre_auth burst=6 nodelay;
       limit_req_status 429;
       client_max_body_size 16k;
@@ -165,6 +166,7 @@ and unique when present.
 | 401 | `invalid username or password` |
 | 401 | `account temporarily locked` (organization lockout policy) |
 | 403 | `password expired` (change it with `POST /api/account/password`) |
+| 403 | `single sign-on required` (an organization of the account [disallows built-in accounts](#organization-identity-provider)) |
 
 ### `PATCH /api/account`
 
@@ -498,9 +500,173 @@ Response: `204`.
 | --- | --- |
 | 401 | `invalid username or password` |
 | 401 | `account temporarily locked` |
+| 403 | `single sign-on required` |
 | 422 | `new password must differ from the current password` |
 | 422 | `password must be at least <n> characters` |
 | 422 | `password must use at least <n> of: lowercase, uppercase, digits, symbols` |
+
+### Organization identity provider
+
+An organization administrator can connect one OpenID Connect provider (Entra
+ID, Okta, Google, Keycloak, ADFS 2016+, …) to the organization.
+
+- `GET /api/organizations/{id}/identity-provider` (`read:projects`) returns
+  `{"identityProvider": {...}}`, or `404 identity provider not configured`.
+- `PUT /api/organizations/{id}/identity-provider` (`write:projects`) creates or
+  replaces it and returns the `GET` shape.
+- `DELETE /api/organizations/{id}/identity-provider` (`write:projects`)
+  removes it. Response: `204`, also when none is configured.
+
+All three require an organization administrator (the organization's IP
+allowlist applies, and re-authentication applies to `PUT` and `DELETE`) and
+respond with `Cache-Control: private, no-store`. `PUT` body:
+
+```json
+{
+  "issuer": "https://login.example.org/realms/acme",
+  "clientId": "geolibre",
+  "clientSecret": "…",
+  "tokenEndpointAuthMethod": "client_secret_basic",
+  "scopes": ["openid", "email", "profile"],
+  "usernameClaim": "preferred_username",
+  "emailClaim": "email",
+  "groupsClaim": "groups",
+  "defaultRole": "member",
+  "roleMappings": [{"value": "gis-admins", "role": "publisher"}],
+  "groupMappings": [{"value": "gis-admins", "groupId": "group-uuid"}],
+  "requireMfa": false,
+  "allowBuiltinAccounts": true,
+  "breakGlassUsername": null,
+  "enabled": true
+}
+```
+
+| Field | Rules |
+| --- | --- |
+| `issuer` | Required, up to 512 characters, `https://` without query or fragment. Compared exactly with the ID token's `iss`, never normalized. |
+| `clientId` | Required, 1–255 characters. |
+| `clientSecret` | 1–512 characters. Required when creating; omitted or `null` on update keeps the stored secret. Never returned. |
+| `authorizationEndpoint`, `tokenEndpoint`, `jwksUri` | All three (each `https://`) or none. When none, they are read from the issuer's discovery document. |
+| `tokenEndpointAuthMethod` | `client_secret_basic` (default) or `client_secret_post`. |
+| `scopes` | Up to 20 simple scope tokens, including `openid`. Default `openid`, `email`, `profile`. |
+| `usernameClaim`, `emailClaim`, `groupsClaim` | Claim names, up to 64 characters. Defaults `preferred_username`, `email`, `groups`; `groupsClaim` may be `null`. |
+| `defaultRole` | Organization role when no role mapping matches. Default `member`. |
+| `roleMappings` | Up to 100 `{"value", "role"}` entries. |
+| `groupMappings` | Up to 100 `{"value", "groupId"}` entries; each group must belong to this organization. |
+| `requireMfa` | Require `"mfa"` in the ID token's `amr`. Default `false`. |
+| `allowBuiltinAccounts` | `false` disables password sign-in for the organization's members. Default `true`. |
+| `breakGlassUsername` | A current administrator of this organization who keeps password sign-in. Required when `allowBuiltinAccounts` is `false`. |
+| `enabled` | A disabled provider is neither offered nor accepted. Default `true`. |
+
+The `GET` shape echoes the settings (`scopes` as a list) plus `protocol`
+(`"oidc"`), the stored endpoints, `clientSecretSet: true` instead of the
+secret, `redirectUri`, and `updatedAt`. Register `redirectUri`
+(`<issuer>/oauth/sso/callback` of this server; `null` when OAuth is not
+configured) at the identity provider for a confidential client using the
+authorization code flow with S256 PKCE.
+
+`422` errors: `issuer must be an https URL without query or fragment`,
+`clientSecret is required`, `set all three endpoints or none`,
+`identity provider endpoints must be https URLs`,
+`scopes must include openid and use simple scope tokens`,
+`group mapping must name a group in this organization`,
+`break-glass account must be an organization administrator`,
+`a break-glass administrator is required when built-in accounts are disallowed`,
+and `identity provider discovery failed`. Out-of-range values are a generic
+`422`.
+
+- **Discovery:** without explicit endpoints, `PUT` fetches
+  `<issuer>/.well-known/openid-configuration`. Its `issuer` must equal the
+  configured `issuer` exactly and it must name `https://` authorization, token,
+  and JWKS endpoints; a network error, non-`200` status, a body over 1 MiB, or
+  invalid JSON also fails discovery. The endpoints are stored; discovery runs
+  again only on the next `PUT`. Signing keys are fetched from `jwksUri` on the
+  first sign-in and cached; changing `issuer` or `jwksUri` clears the cache.
+- **Accounts:** the first sign-in of a provider subject (`sub`) creates an
+  account linked to it. Its username comes from `usernameClaim` (or else
+  `emailClaim`): lowercased, cut at `@`, other characters replaced with `-`,
+  with a `-2`…`-99` suffix when taken. When nothing fits, the account has no
+  username (see the `username required` sentinel under `GET /api/users/me`). Its
+  email is set only when `email_verified` is `true` and no other account uses
+  the address. A sign-in is never linked to an existing account by email, so
+  existing members who move to single sign-on get a new account. Federated
+  accounts have no password.
+- **Mappings,** applied at every sign-in from the `groupsClaim` value (a string
+  or a list of strings): the role is the highest-ranked `role` among matching
+  `roleMappings`, else `defaultRole`. A new member receives it; an existing
+  member's role follows it only when `roleMappings` is non-empty, and the
+  organization's last administrator is never demoted. For each mapped group,
+  the account becomes a `member` when a matching value is present and loses a
+  plain `member` row when none is; owner and manager rows are never changed.
+- **Built-in accounts:** with `allowBuiltinAccounts: false`, a correct password
+  for any member of the organization other than the break-glass administrator
+  is rejected: `403 single sign-on required` from `POST /api/auth/token` and
+  `POST /api/account/password`, and `Your organization requires single
+  sign-on. Use “Sign in with your organization”.` on the consent page. The
+  break-glass account keeps password sign-in only while it remains an
+  administrator of the organization; lockout still applies to it.
+- **Deletion** removes the provider, its account links, and pending sign-in
+  redirects. Accounts and memberships remain, but accounts created through
+  single sign-on have no way to sign in. A provider configured later links
+  subjects afresh, so their next sign-in creates new accounts; remove the old
+  ones.
+- **Secret storage:** `clientSecret` is stored unencrypted in the database, at
+  the same trust level as the rest of its contents.
+
+### Single sign-on on the consent page
+
+When any organization has an enabled identity provider, the consent page adds
+a second form: an `Organization` field (the organization slug) and a
+`Sign in with your organization` button (`decision=sso`, with the same
+`interaction`, `csrf`, and `label` fields). Its `POST` answers `303` to that
+organization's authorization endpoint with `state`, `nonce`, an S256 PKCE
+challenge, and `max_age` when the organization's security policy sets
+`adminReauthSeconds`. An unknown slug or a disabled provider re-renders the
+consent page with `Single sign-on is not configured for that organization`.
+Browsers apply `form-action` to that redirect, so while single sign-on is
+offered the consent page's `Content-Security-Policy` adds `https:` to
+`form-action`.
+
+`GET /oauth/sso/callback` receives the provider's response. The `state` must
+be live and unused, the interaction undecided and unexpired, and the request
+must carry the browser-binding cookie of the browser that started consent.
+
+- `error` from the provider: `303` to the client's callback with
+  `error=access_denied`.
+- Otherwise the server redeems the `code` at the token endpoint with the client
+  secret and PKCE verifier and validates the ID token: an RS256, PS256, or
+  ES256 signature from the provider's JWKS (an unknown key id refetches the
+  key set at most once a minute), `iss`, `aud` (plus `azp` when there are
+  several audiences), `exp` and `iat` with 60 seconds of leeway, `nonce`,
+  `sub`, `amr` when `requireMfa` is set, and `auth_time` when `max_age` was
+  sent. Success approves the interaction exactly like a password sign-in: `303`
+  to the client's callback with `code`, `state`, and `iss`. The OAuth session's
+  sign-in time is the ID token's `auth_time` when present.
+- Any other failure, including a reused `state`, returns a `400` page with
+  `invalid_request: single sign-on response rejected`. The reason is only
+  logged (`oidc sign-in rejected: <reason>`).
+
+Calls to the identity provider use a 10-second timeout, never follow
+redirects, ignore proxy environment variables, and stop reading at 1 MiB. Set
+`GEOLIBRE_OIDC_CA_BUNDLE` to trust a provider whose certificate is issued by a
+private CA.
+
+### Trusted-header proxy sign-in
+
+Behind an identity-aware proxy listed in `GEOLIBRE_TRUSTED_PROXIES`, the
+consent page trusts the proxy's user header (`GEOLIBRE_PROXY_USER_HEADER`,
+default `Remote-User`) and optional email header (`GEOLIBRE_PROXY_EMAIL_HEADER`,
+default `Remote-Email`). When the direct peer is a trusted proxy and the user
+header is present, the page shows `Signed in through your organization's proxy
+as <user>` instead of the password and single sign-on forms, and `Allow`
+approves the interaction for the account linked to that user. The first
+sign-in creates the account: the username is derived as for single sign-on,
+and the email is set when it is valid and unused. Organization mappings and
+the built-in account switch do not apply to proxy identities. An empty user,
+one over 255 characters, or one containing control characters returns a `400`
+page with `invalid_request: invalid proxy identity`. Identity headers from any
+other peer are never read, so the proxy must strip client-sent identity headers
+and be the only network path to the API.
 
 ## Projects
 
