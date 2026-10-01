@@ -1133,10 +1133,7 @@ function GalleryCard({
               <>
                 <span className="min-w-0 flex-1 truncate">
                   {t("gallery.transferPendingTo", {
-                    target:
-                      manage.pendingTransfer.toUsername ??
-                      manage.pendingTransfer.toOrganization?.name ??
-                      "",
+                    target: manage.pendingTransfer.toUsername ?? "",
                   })}
                 </span>
                 <Button
