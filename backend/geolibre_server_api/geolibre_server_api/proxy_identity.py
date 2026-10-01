@@ -13,12 +13,13 @@ from fastapi import Request
 @dataclass(frozen=True)
 class TrustedProxyConfig:
     networks: tuple[IPv4Network | IPv6Network, ...]
+    identity_enabled: bool
     user_header: str
     email_header: str
 
 
 def load_trusted_proxy_config() -> TrustedProxyConfig:
-    """Read ``GEOLIBRE_TRUSTED_PROXIES`` and the proxy identity header names."""
+    """Read ``GEOLIBRE_TRUSTED_PROXIES``, ``GEOLIBRE_PROXY_AUTH``, and the identity header names."""
     networks: list[IPv4Network | IPv6Network] = []
     for raw in os.getenv("GEOLIBRE_TRUSTED_PROXIES", "").split(","):
         entry = raw.strip()
@@ -32,6 +33,8 @@ def load_trusted_proxy_config() -> TrustedProxyConfig:
             ) from exc
     return TrustedProxyConfig(
         networks=tuple(networks),
+        identity_enabled=os.getenv("GEOLIBRE_PROXY_AUTH", "").strip().lower()
+        in {"1", "true", "yes"},
         user_header=os.getenv("GEOLIBRE_PROXY_USER_HEADER") or "Remote-User",
         email_header=os.getenv("GEOLIBRE_PROXY_EMAIL_HEADER") or "Remote-Email",
     )
@@ -87,12 +90,15 @@ class ProxyIdentity:
 def proxy_identity(request: Request) -> ProxyIdentity | None:
     """Return the user a trusted proxy vouches for; an untrusted peer's headers are never read.
 
+    Proxy sign-in is off unless ``GEOLIBRE_PROXY_AUTH`` enables it: trusting a
+    proxy's ``X-Forwarded-For`` does not imply trusting its identity headers.
+
     Raises:
         ValueError: the trusted proxy sent an empty, overlong, or control-character user.
     """
-    if not peer_trusted(request):
-        return None
     config: TrustedProxyConfig = request.app.state.trusted_proxy
+    if not config.identity_enabled or not peer_trusted(request):
+        return None
     raw = request.headers.get(config.user_header)
     if raw is None:
         return None

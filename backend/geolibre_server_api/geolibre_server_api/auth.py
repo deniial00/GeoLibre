@@ -1840,7 +1840,12 @@ def build_oauth_router(config: OAuthConfig) -> APIRouter:
 
         if identity is not None:
             # The trusted proxy already authenticated this user.
-            account = oidc.resolve_proxy_account(session, identity, now_ts)
+            try:
+                account = oidc.resolve_proxy_account(session, identity, now_ts)
+            except oidc.OidcError as exc:
+                session.rollback()
+                oidc.logger.warning("proxy sign-in rejected: %s", exc)
+                return oauth_error_page(400, "invalid_request", "proxy sign-in failed")
             return _approve_interaction(
                 session, interaction, account.id, label, now_ts, authenticated_at=now_ts
             )
@@ -2098,10 +2103,11 @@ def build_oauth_router(config: OAuthConfig) -> APIRouter:
                 now_ts=now_ts,
                 max_age=login_state.max_age,
             )
+            account = oidc.resolve_oidc_account(session, provider, claims, now_ts)
         except oidc.OidcError as exc:
+            session.rollback()
             oidc.logger.warning("oidc sign-in rejected: %s", exc)
             return _sso_rejected()
-        account = oidc.resolve_oidc_account(session, provider, claims, now_ts)
         auth_time = claims.get("auth_time")
         authenticated_at = (
             min(auth_time, now_ts)

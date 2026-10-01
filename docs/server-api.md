@@ -646,27 +646,32 @@ must carry the browser-binding cookie of the browser that started consent.
   `invalid_request: single sign-on response rejected`. The reason is only
   logged (`oidc sign-in rejected: <reason>`).
 
-Calls to the identity provider use a 10-second timeout, never follow
-redirects, ignore proxy environment variables, and stop reading at 1 MiB. Set
-`GEOLIBRE_OIDC_CA_BUNDLE` to trust a provider whose certificate is issued by a
-private CA.
+Calls to the identity provider give up when connecting or any read stalls for
+10 seconds, or once the whole response has taken longer than 10 seconds. They
+never follow redirects, ignore proxy environment variables, and stop reading at
+1 MiB. Set `GEOLIBRE_OIDC_CA_BUNDLE` to also trust a provider whose
+certificate is issued by a private CA; the public CAs stay trusted.
 
 ### Trusted-header proxy sign-in
 
-Behind an identity-aware proxy listed in `GEOLIBRE_TRUSTED_PROXIES`, the
-consent page trusts the proxy's user header (`GEOLIBRE_PROXY_USER_HEADER`,
-default `Remote-User`) and optional email header (`GEOLIBRE_PROXY_EMAIL_HEADER`,
-default `Remote-Email`). When the direct peer is a trusted proxy and the user
-header is present, the page shows `Signed in through your organization's proxy
-as <user>` instead of the password and single sign-on forms, and `Allow`
-approves the interaction for the account linked to that user. The first
-sign-in creates the account: the username is derived as for single sign-on,
-and the email is set when it is valid and unused. Organization mappings and
-the built-in account switch do not apply to proxy identities. An empty user,
-one over 255 characters, or one containing control characters returns a `400`
-page with `invalid_request: invalid proxy identity`. Identity headers from any
-other peer are never read, so the proxy must strip client-sent identity headers
-and be the only network path to the API.
+With `GEOLIBRE_PROXY_AUTH=true` (or `1`/`yes`), behind an identity-aware proxy
+listed in `GEOLIBRE_TRUSTED_PROXIES`, the consent page trusts the proxy's user
+header (`GEOLIBRE_PROXY_USER_HEADER`, default `Remote-User`) and optional email
+header (`GEOLIBRE_PROXY_EMAIL_HEADER`, default `Remote-Email`). Without
+`GEOLIBRE_PROXY_AUTH`, `GEOLIBRE_TRUSTED_PROXIES` only trusts
+`X-Forwarded-For` and identity headers are never read. When the direct peer is
+a trusted proxy and the user header is present, the page shows `Signed in
+through your organization's proxy as <user>` instead of the password and
+single sign-on forms, and `Allow` approves the interaction for the account
+linked to that user. The first sign-in creates the account: the username is
+derived as for single sign-on, and the email is set when it is valid and
+unused. Organization mappings and the built-in account switch do not apply to
+proxy identities. An empty user, one over 255 characters, or one containing
+control characters returns a `400` page with `invalid_request: invalid proxy
+identity`; an account that cannot be created returns `invalid_request: proxy
+sign-in failed`. Identity headers from any other peer are never read, so the
+proxy must strip client-sent identity headers and be the only network path to
+the API.
 
 ## Projects
 

@@ -234,13 +234,16 @@ anyone the SSO layer has not admitted.
 If you also run the [projects server](server-api.md) (`geolibre-server` in
 `docker-compose.yml`), the same proxy can sign users in to it, so Share and the
 Project Gallery need no separate GeoLibre password. The server trusts the
-proxy's `Remote-User` and `Remote-Email` headers on its sign-in (consent) page,
-but only on connections from an address listed in `GEOLIBRE_TRUSTED_PROXIES`:
+proxy's `Remote-User` and `Remote-Email` headers on its sign-in (consent) page
+once `GEOLIBRE_PROXY_AUTH=true`, and only on connections from an address listed
+in `GEOLIBRE_TRUSTED_PROXIES`:
 
-1. Set `GEOLIBRE_TRUSTED_PROXIES` to the address the projects server sees the
-   proxy connect from: a comma-separated list of IPs or CIDRs, such as the
-   proxy container's IP or a Docker network that contains only the proxy and
-   the server. Every other peer's identity headers are ignored.
+1. Set `GEOLIBRE_PROXY_AUTH=true` and set `GEOLIBRE_TRUSTED_PROXIES` to the
+   address the projects server sees the proxy connect from: a comma-separated
+   list of IPs or CIDRs, such as the proxy container's IP or a Docker network
+   that contains only the proxy and the server. Every other peer's identity
+   headers are ignored. `GEOLIBRE_TRUSTED_PROXIES` alone only trusts the
+   proxy's `X-Forwarded-For`.
 2. Bind the projects server so only the proxy can reach it. The Compose file
    publishes it on `127.0.0.1` only; drop that port entirely when the proxy runs
    in the same Compose network.

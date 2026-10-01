@@ -12,11 +12,19 @@ from helpers import approve, auth, exchange_code, redirect_params, start_authori
 PROXY_USER = {"Remote-User": "grace@example.org", "Remote-Email": "grace@example.org"}
 
 
-@pytest.fixture
-def proxied_app(tmp_path, monkeypatch, clock, fake_idp):
+def _proxied_app(tmp_path, monkeypatch, clock, fake_idp, *, proxy_auth: bool):
     monkeypatch.setenv("GEOLIBRE_OAUTH_CLIENTS", json.dumps(OAUTH_CLIENTS))
     monkeypatch.setenv("GEOLIBRE_TRUSTED_PROXIES", "10.0.0.0/8")
+    if proxy_auth:
+        monkeypatch.setenv("GEOLIBRE_PROXY_AUTH", "true")
+    else:
+        monkeypatch.delenv("GEOLIBRE_PROXY_AUTH", raising=False)
     return _make_app(tmp_path, PUBLIC_URL, clock=clock.now, oidc_transport=fake_idp.transport)
+
+
+@pytest.fixture
+def proxied_app(tmp_path, monkeypatch, clock, fake_idp):
+    return _proxied_app(tmp_path, monkeypatch, clock, fake_idp, proxy_auth=True)
 
 
 def _proxy_sign_in(client) -> dict:
@@ -53,6 +61,21 @@ def test_untrusted_peer_identity_headers_are_ignored(proxied_app):
         assert "name='password'" in page.text
         assert "proxy" not in page.text
         rejected = approve(direct, interaction, csrf, username="", password="")
+        assert rejected.status_code == 200
+        assert "Invalid username or password" in rejected.text
+
+
+def test_trusted_proxy_identity_needs_proxy_auth(tmp_path, monkeypatch, clock, fake_idp):
+    # GEOLIBRE_TRUSTED_PROXIES alone only trusts X-Forwarded-For.
+    app = _proxied_app(tmp_path, monkeypatch, clock, fake_idp, proxy_auth=False)
+    with TestClient(
+        app, base_url=PUBLIC_URL, client=("10.0.0.5", 5000), headers=PROXY_USER
+    ) as proxy:
+        page, _, interaction, csrf = start_authorize(proxy)
+        assert page.status_code == 200
+        assert "name='password'" in page.text
+        assert "proxy" not in page.text
+        rejected = approve(proxy, interaction, csrf, username="", password="")
         assert rejected.status_code == 200
         assert "Invalid username or password" in rejected.text
 

@@ -3,11 +3,14 @@
 from __future__ import annotations
 
 import logging
+import time
 
+import httpx
 import pytest
 from conftest import PUBLIC_URL, WEB_REDIRECT
 from fake_idp import FakeIdp
 from fastapi.testclient import TestClient
+from geolibre_server_api import oidc
 from geolibre_server_api.enterprise_models import FederatedIdentity
 from helpers import (
     account,
@@ -138,6 +141,39 @@ def test_identity_provider_validation(oauth_client):
     )
     assert missing.status_code == 404
     assert missing.json() == {"error": "identity provider not configured"}
+
+
+class _Trickle(httpx.SyncByteStream):
+    """A body sent in two halves with a pause between them."""
+
+    def __init__(self, body: bytes, pause: float):
+        self.body = body
+        self.pause = pause
+
+    def __iter__(self):
+        half = len(self.body) // 2
+        yield self.body[:half]
+        time.sleep(self.pause)
+        yield self.body[half:]
+
+
+def test_discovery_fails_past_the_total_deadline(oauth_client, fake_idp, monkeypatch):
+    def trickling(request: httpx.Request) -> httpx.Response:
+        response = fake_idp.handle(request)
+        return httpx.Response(response.status_code, stream=_Trickle(response.read(), 0.2))
+
+    http = oidc.build_http_client(httpx.MockTransport(trickling))
+    monkeypatch.setattr(oauth_client.app.state, "oidc_http", http)
+    token = admin_token(oauth_client)
+    org_id = create_org(oauth_client, token)
+
+    # Every read is fast; only the whole response is too slow.
+    monkeypatch.setattr(oidc, "FETCH_DEADLINE_SECONDS", 0.1)
+    late = configure_idp(oauth_client, token, org_id)
+    assert late.status_code == 422
+    assert late.json() == {"error": "identity provider discovery failed"}
+    monkeypatch.setattr(oidc, "FETCH_DEADLINE_SECONDS", 10.0)
+    assert configure_idp(oauth_client, token, org_id).status_code == 200
 
 
 def test_sso_flow_maps_roles_and_groups(oauth_client, fake_idp):

@@ -60,7 +60,7 @@ from geolibre_server_api.auth import (
 )
 from geolibre_server_api.auth_models import OAUTH_INDEXES, Account, Base
 from geolibre_server_api.enterprise_admin import build_enterprise_admin_router
-from geolibre_server_api.oidc import build_http_client
+from geolibre_server_api.oidc import build_http_client, build_transport
 from geolibre_server_api.org_models import (
     Group,
     GroupInvitation,
@@ -927,7 +927,7 @@ def create_app(
         cleanup_oauth_state()
 
     @asynccontextmanager
-    async def oauth_lifespan(_app: FastAPI):
+    async def lifespan(_app: FastAPI):
         async def sweep() -> None:
             while True:
                 await asyncio.sleep(OAUTH_CLEANUP_INTERVAL_SECONDS)
@@ -936,13 +936,17 @@ def create_app(
                 except Exception:
                     logger.exception("periodic OAuth security-state cleanup failed")
 
-        task = asyncio.create_task(sweep())
+        task = asyncio.create_task(sweep()) if oauth_config is not None else None
         try:
             yield
         finally:
-            task.cancel()
-            with suppress(asyncio.CancelledError):
-                await task
+            if task is not None:
+                task.cancel()
+                with suppress(asyncio.CancelledError):
+                    await task
+            # Drops pooled IdP connections; the pool reconnects on demand, so a
+            # restarted app (tests re-enter the lifespan) keeps working.
+            idp_transport.close()
 
     object_storage = storage or make_storage()
     base_url = (public_url or os.getenv("GEOLIBRE_PUBLIC_URL", "http://localhost:8000")).rstrip("/")
@@ -953,7 +957,7 @@ def create_app(
     app = FastAPI(
         title="GeoLibre projects and identity API",
         version="1.0",
-        lifespan=oauth_lifespan if oauth_config is not None else None,
+        lifespan=lifespan,
     )
     app.state.engine = engine
     app.state.storage = object_storage
@@ -962,7 +966,8 @@ def create_app(
     app.state.oauth_config = oauth_config
     app.state.trusted_proxy = load_trusted_proxy_config()
     # Outbound identity-provider HTTP; lives for the process.
-    app.state.oidc_http = build_http_client(oidc_transport)
+    idp_transport = oidc_transport or build_transport()
+    app.state.oidc_http = build_http_client(idp_transport)
     # A declared Content-Length past the largest thing any route accepts is
     # rejected before the body is read at all. Without this, the JSON `content`
     # routes let Pydantic materialize the whole payload in memory *before*

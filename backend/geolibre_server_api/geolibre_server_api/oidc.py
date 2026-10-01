@@ -17,6 +17,7 @@ import logging
 import os
 import re
 import ssl
+import time
 import uuid
 from collections.abc import Callable
 from urllib.parse import quote
@@ -43,6 +44,8 @@ from geolibre_server_api.proxy_identity import ProxyIdentity
 logger = logging.getLogger(__name__)
 
 MAX_BODY = 1_048_576
+# Wall-clock budget for one IdP request: connecting, headers, and the body.
+FETCH_DEADLINE_SECONDS = 10.0
 ID_TOKEN_ALGORITHMS = ["RS256", "PS256", "ES256"]
 CLOCK_LEEWAY_SECONDS = 60
 # A JWKS fetched within this window is not refetched for an unknown key id, so
@@ -57,32 +60,44 @@ class OidcError(Exception):
     """A rejected OIDC step; the message is a short reason for the server log."""
 
 
-def build_http_client(transport: httpx.BaseTransport | None) -> httpx.Client:
-    """Build the process-wide IdP client, trusting ``GEOLIBRE_OIDC_CA_BUNDLE`` when set."""
-    verify: ssl.SSLContext | bool = True
+def build_transport() -> httpx.HTTPTransport:
+    """The IdP network transport, also trusting ``GEOLIBRE_OIDC_CA_BUNDLE`` when set."""
+    # httpx's default trust (certifi), plus the operator's private CAs.
+    ssl_context = httpx.create_ssl_context(trust_env=False)
     path = os.getenv("GEOLIBRE_OIDC_CA_BUNDLE")
     if path:
         try:
-            verify = ssl.create_default_context(cafile=path)
+            ssl_context.load_verify_locations(cafile=path)
         except (OSError, ssl.SSLError) as exc:
             raise RuntimeError(f"GEOLIBRE_OIDC_CA_BUNDLE {path!r} cannot be read") from exc
+    return httpx.HTTPTransport(verify=ssl_context, trust_env=False)
+
+
+def build_http_client(transport: httpx.BaseTransport) -> httpx.Client:
+    """The process-wide IdP client over *transport*."""
     return httpx.Client(
         transport=transport,
-        verify=verify,
-        timeout=10.0,
+        timeout=FETCH_DEADLINE_SECONDS,
         follow_redirects=False,
         trust_env=False,
     )
 
 
 def fetch_json(http: httpx.Client, method: str, url: str, **kwargs) -> dict:
-    """Request *url* and return its JSON object body, bounded to ``MAX_BODY`` bytes."""
+    """Request *url* and return its JSON object body, bounded in size and total time.
+
+    httpx's timeout bounds each connect and read; the deadline also stops a
+    server that trickles bytes just fast enough to never trip it.
+    """
+    deadline = time.monotonic() + FETCH_DEADLINE_SECONDS
     body = bytearray()
     try:
         with http.stream(method, url, **kwargs) as response:
             if response.status_code != 200:
                 raise OidcError("http status")
             for chunk in response.iter_bytes():
+                if time.monotonic() > deadline:
+                    raise OidcError("timeout")
                 body.extend(chunk)
                 if len(body) > MAX_BODY:
                     raise OidcError("response too large")
@@ -431,7 +446,7 @@ def _resolve_identity(
             continue
         return account
     if identity is None:
-        raise RuntimeError("could not create a federated account")
+        raise OidcError("account creation conflict")
     identity.last_login_at = now_ts
     account = session.get(Account, identity.account_id)
     if account is None:  # pragma: no cover - the FK cascades account deletion
