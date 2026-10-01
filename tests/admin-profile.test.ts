@@ -24,19 +24,18 @@ it("a policy interface replaces admin-profile.json without fetching it", async (
   }
 });
 
-it("an empty policy interface still replaces admin-profile.json", async (t) => {
-  // A present section is authoritative even when it sets nothing: the policy,
-  // not a stale admin-profile.json, decides the profile.
-  let fetched = false;
-  t.mock.method(globalThis, "fetch", async () => {
-    fetched = true;
-    throw new Error("admin-profile.json must not be read");
+it("an empty policy interface counts as absent and admin-profile.json still applies", async (t) => {
+  let requested = "";
+  t.mock.method(globalThis, "fetch", async (input: unknown) => {
+    requested = String(input);
+    return new Response(JSON.stringify({ level: "beginner", lock: true }));
   });
   try {
     setDeploymentPolicy({ version: 1, interface: {} });
     const patch = await loadAdminProfile([]);
-    assert.equal(patch?.onboarded, true);
-    assert.equal(fetched, false);
+    assert.match(requested, /admin-profile\.json$/);
+    assert.equal(patch?.level, "beginner");
+    assert.equal(patch?.locked, true);
   } finally {
     setDeploymentPolicy(null);
   }
