@@ -97,9 +97,16 @@ installDiagnosticsCapture();
 // marker keeps a 404 at info level.
 const deploymentPolicyReady = loadDeploymentPolicy().then((policy) => {
   // A deployment-configured app name also titles the browser tab; index.html's
-  // static <title> stays the fallback when none is set.
-  const configuredAppName = readConfiguredAppName();
-  if (configuredAppName) document.title = configuredAppName;
+  // static <title> stays the fallback when none is set. Best effort: a title
+  // failure must not stop the app from rendering.
+  try {
+    const configuredAppName = readConfiguredAppName();
+    if (configuredAppName) document.title = configuredAppName;
+  } catch (error) {
+    console.error("[GeoLibre] Failed to apply the configured app name", error);
+  }
+  // Capability application below is deliberately NOT guarded: if it throws, the
+  // app must fail to start rather than render with the default full grant.
 
   // What this deployment is allowed to do (issue #1673). Applied before the
   // app renders, so no surface ever paints with the full grant and then

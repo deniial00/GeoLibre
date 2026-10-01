@@ -2,9 +2,12 @@
 // a host page (a portal, an ERP, a dashboard) has with a framed GeoLibre at
 // runtime, instead of encoding everything in the initial URL (issue #1462).
 //
-// This module is deliberately pure — no window, no store, no map — so the
-// envelope, the origin allowlist, and every verb payload are unit-testable. The
-// runtime wiring lives in `hooks/useEmbedApi.ts`.
+// This module has no store or map dependency, and its readers take their inputs
+// as parameters, so the envelope, the origin allowlist, and every verb payload
+// are unit-testable. The defaults of `readEmbedOrigins` do consult `window`, the
+// build env and the active deployment policy (`getDeploymentPolicy`), which
+// tests bypass by passing explicit arguments. The runtime wiring lives in
+// `hooks/useEmbedApi.ts`.
 //
 // Relationship to the other bridges: `useEmbedBridge`/`useCommandBridge` speak an
 // unversioned, fully-trusted protocol with the GeoLibre Jupyter widget, which
