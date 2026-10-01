@@ -241,12 +241,18 @@ function setBrowser(account: string, key: string, value: string): boolean {
   try {
     if (value) window.localStorage.setItem(key, value);
     else window.localStorage.removeItem(key);
-    // A cleared or replaced token must not resurface from its pre-#2729 key.
-    const legacyKey = LEGACY_PLUGIN_CREDENTIAL_KEYS[account];
-    if (legacyKey) window.localStorage.removeItem(legacyKey);
   } catch {
     sessionOverrides.set(account, value);
     return false;
+  }
+  // A cleared or replaced token must not resurface from its pre-#2729 key.
+  const legacyKey = LEGACY_PLUGIN_CREDENTIAL_KEYS[account];
+  if (legacyKey) {
+    try {
+      window.localStorage.removeItem(legacyKey);
+    } catch {
+      // Cleanup failed: the write itself landed, so it still counts as saved.
+    }
   }
   sessionOverrides.delete(account);
   return true;
