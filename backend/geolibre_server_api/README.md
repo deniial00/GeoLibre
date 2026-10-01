@@ -50,6 +50,10 @@ Configuration:
   `GEOLIBRE_OAUTH_REFRESH_TTL_SECONDS` (`2592000`): positive integer grant
   lifetimes. Refresh rotation never extends a project family's absolute expiry;
   the management grant always expires within 300 seconds and never refreshes.
+- `GEOLIBRE_TRUSTED_PROXIES`: comma-separated IPs or CIDR networks of reverse
+  proxies whose `X-Forwarded-For` header is trusted when resolving the client
+  address for organization admin IP allowlists (default empty: the direct peer
+  is the client). An invalid entry fails startup.
 - `GEOLIBRE_MAX_PROJECT_BYTES`, `GEOLIBRE_MAX_THUMBNAIL_BYTES`: upload limits.
 - `GEOLIBRE_HOST`, `GEOLIBRE_PORT`: bind address and port for the
   `geolibre-server-api` entry point, default `0.0.0.0` and `8000`. Bind to

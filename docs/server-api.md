@@ -42,8 +42,9 @@ Deployment protections remain the operator's responsibility:
   browser binding, but a fresh cookie bypasses that cap; the reference server
   has no general request limiter. Before enabling OAuth publicly, enforce
   per-client-IP limits at the ingress on **GET and POST** `/oauth/authorize`,
-  `POST /oauth/token`, `POST /api/auth/token`, and `POST /api/accounts`.
-  The last three POSTs include password or token operations; consent login
+  `POST /oauth/token`, `POST /api/auth/token`, `POST /api/accounts`, and
+  `POST /api/account/password`. The last four POSTs include password or token
+  operations; consent login
   and the PAT/account routes run scrypt. Add per-username limits where the
   ingress can safely parse credentials. Every public path to the API must go
   through this limiter: Compose binds the API host port to loopback by default.
@@ -55,7 +56,7 @@ Deployment protections remain the operator's responsibility:
   limit_req_zone $binary_remote_addr zone=geolibre_auth:10m rate=12r/m;
 
   # TLS issuer server context; proxy other API routes separately.
-  location ~ ^/(oauth/(authorize|token)|api/(auth/token|accounts))$ {
+  location ~ ^/(oauth/(authorize|token)|api/(auth/token|accounts|account/password))$ {
       limit_req zone=geolibre_auth burst=6 nodelay;
       limit_req_status 429;
       client_max_body_size 16k;
@@ -158,6 +159,12 @@ optional policy fields (but not `email`) and returns the same shape as account
 creation. Tokens are opaque and stored only as SHA-256 digests. `email` is
 optional at account creation, trimmed and normalized to lowercase, validated,
 and unique when present.
+
+| Status | `error` |
+| --- | --- |
+| 401 | `invalid username or password` |
+| 401 | `account temporarily locked` (organization lockout policy) |
+| 403 | `password expired` (change it with `POST /api/account/password`) |
 
 ### `PATCH /api/account`
 
@@ -412,6 +419,88 @@ public and may use `Cache-Control: public, max-age=3600`. For `invite` and
 successful response uses `Cache-Control: private, no-store`; non-members receive
 `404`. This prevents a stable public thumbnail URL from disclosing content from
 a membership-confined group.
+
+## Enterprise sign-in
+
+### Organization security policy
+
+Organization administrators can set a security policy for their members.
+
+- `GET /api/organizations/{id}/security-policy` (`read:projects`) returns
+  `{"securityPolicy": {...}}` with `idleTimeoutSeconds`,
+  `absoluteSessionSeconds`, `adminReauthSeconds`, `adminIpAllowlist` (list),
+  `passwordMinLength`, `passwordMinClasses`, `passwordMaxAgeDays`,
+  `lockoutThreshold`, and `lockoutSeconds`. Unset values are `null`; with no
+  policy every value is `null` and the allowlist is empty.
+- `PUT /api/organizations/{id}/security-policy` (`write:projects`) replaces the
+  whole policy (an omitted field becomes `null`) and returns the `GET` shape.
+
+Both require an organization administrator and respond with
+`Cache-Control: private, no-store`. Bounds:
+
+| Field | Allowed |
+| --- | --- |
+| `idleTimeoutSeconds` | 300–2592000 |
+| `absoluteSessionSeconds` | 900–31536000 |
+| `adminReauthSeconds` | 60–86400 |
+| `passwordMinLength` | 8–128 |
+| `passwordMinClasses` | 1–4 (lowercase, uppercase, digits, symbols) |
+| `passwordMaxAgeDays` | 1–3650 |
+| `lockoutThreshold` | 3–100 |
+| `lockoutSeconds` | 60–86400 |
+| `adminIpAllowlist` | up to 50 IP addresses or CIDR networks |
+
+Out-of-range values are a `422`. Other `422` errors:
+`adminIpAllowlist entries must be IP addresses or networks`,
+`lockoutThreshold and lockoutSeconds must be set together`, and
+`adminIpAllowlist must include your current address` (so an administrator
+cannot lock themselves out).
+
+When an account belongs to several organizations, the strictest value wins:
+the shortest idle timeout, absolute session lifetime, password age, and
+lockout threshold; the longest minimum length, class count, and lockout
+duration. Password length is never below 8.
+
+- **Idle and absolute session limits** apply to OAuth sessions and personal
+  tokens. An OAuth session idle longer than `idleTimeoutSeconds`, or older than
+  `absoluteSessionSeconds` since its sign-in, is revoked: Bearer use returns
+  `401 invalid or expired token` and refresh returns `400 invalid_grant`. A
+  personal token is measured from its creation and last use and is revoked the
+  same way. New OAuth families never outlive the absolute limit.
+- **Lockout:** `lockoutThreshold` consecutive wrong passwords lock the account
+  for `lockoutSeconds`; a successful sign-in resets the count.
+- **Password rotation:** a password older than `passwordMaxAgeDays` is
+  rejected at sign-in until changed with `POST /api/account/password`. For
+  accounts created before this feature, the age counts from their first
+  sign-in after the upgrade.
+- **Administrator re-authentication:** when the organization sets
+  `adminReauthSeconds`, administrator mutations (organization settings,
+  members, invitations, security policy) from a credential whose sign-in is
+  older than that return `401 {"error":"reauthentication_required"}` with
+  `WWW-Authenticate: Bearer error="insufficient_user_authentication",
+  max_age="<seconds>"` (RFC 9470). Sign in again to continue. Reads are not
+  affected.
+- **Administrator IP allowlist:** when `adminIpAllowlist` is non-empty, every
+  administrator route of that organization from an address outside it returns
+  `403 administrative access is not allowed from this network`. The client
+  address is the direct peer unless the peer is listed in
+  `GEOLIBRE_TRUSTED_PROXIES` (comma-separated IPs or CIDRs); then the
+  rightmost untrusted `X-Forwarded-For` entry is used.
+
+### `POST /api/account/password`
+
+Unauthenticated. Body:
+`{"username":"ada","currentPassword":"...","newPassword":"..."}` (new password
+up to 1024 characters). Works even when the current password has expired.
+Response: `204`.
+
+| Status | `error` |
+| --- | --- |
+| 401 | `invalid username or password` |
+| 401 | `account temporarily locked` |
+| 422 | `new password must differ from the current password` |
+| 422 | `password must be at least <n> characters` |
+| 422 | `password must use at least <n> of: lowercase, uppercase, digits, symbols` |
 
 ## Projects
 

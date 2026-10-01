@@ -213,3 +213,33 @@ def sign_in(
     exchanged = exchange_code(client, code, client_id=client_id, verifier=verifier)
     assert exchanged.status_code == 200, (exchanged.status_code, exchanged.text)
     return exchanged.json()
+
+
+def admin_token(client, username="ada") -> str:
+    """An OAuth access token able to call the org-admin (write:projects) routes."""
+    return sign_in(client, username=username, scope="read:projects write:projects")["access_token"]
+
+
+def create_org(client, token, slug="acme", name="Acme") -> str:
+    response = client.post(
+        "/api/organizations", json={"slug": slug, "name": name}, headers=auth(token)
+    )
+    assert response.status_code == 201, response.text
+    return response.json()["organization"]["id"]
+
+
+def set_policy(client, token, org_id, **fields):
+    return client.put(
+        f"/api/organizations/{org_id}/security-policy", json=fields, headers=auth(token)
+    )
+
+
+def add_member(client, token, org_id, username, role="member"):
+    ensure_account(client, username)
+    response = client.put(
+        f"/api/organizations/{org_id}/members",
+        json={"username": username, "role": role},
+        headers=auth(token),
+    )
+    assert response.status_code == 200, response.text
+    return response

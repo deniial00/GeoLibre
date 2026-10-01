@@ -77,6 +77,7 @@ class OAuthAuthorizationCode(Base):
     session_id: Mapped[str | None] = mapped_column(
         ForeignKey("oauth_sessions.id", ondelete="SET NULL"), nullable=True
     )
+    authenticated_at: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
 
 class OAuthSession(Base):
@@ -97,6 +98,7 @@ class OAuthSession(Base):
     expires_at: Mapped[int] = mapped_column(Integer)
     revoked_at: Mapped[int | None] = mapped_column(Integer, nullable=True)
     rotation_version: Mapped[int] = mapped_column(Integer, default=0)
+    authenticated_at: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
 
 class OAuthAccessToken(Base):

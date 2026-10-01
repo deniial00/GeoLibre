@@ -41,6 +41,7 @@ from sqlalchemy import (
 from sqlalchemy.exc import IntegrityError, OperationalError
 from sqlalchemy.orm import Mapped, Session, mapped_column, relationship, selectinload, sessionmaker
 
+from geolibre_server_api import enterprise_models  # noqa: F401
 from geolibre_server_api.auth import (
     AuthPrincipal,
     InsufficientScopeError,
@@ -57,10 +58,21 @@ from geolibre_server_api.auth import (
     token_digest,
 )
 from geolibre_server_api.auth_models import OAUTH_INDEXES, Account, Base
+from geolibre_server_api.enterprise_admin import build_enterprise_admin_router
+from geolibre_server_api.org_models import (
+    Group,
+    GroupInvitation,
+    GroupMember,
+    GroupRole,
+    Organization,
+    OrganizationInvitation,
+    OrganizationMember,
+    OrganizationRole,
+)
+from geolibre_server_api.policy import organization_role, require_organization_admin
+from geolibre_server_api.proxy_identity import load_trusted_proxy_config
 
 Visibility = Literal["public", "unlisted", "private", "organization"]
-OrganizationRole = Literal["administrator", "publisher", "member", "viewer"]
-GroupRole = Literal["owner", "manager", "member"]
 PublicSharingPolicy = Literal["yes", "publishers", "no"]
 JoinPolicy = Literal["invite", "request", "open"]
 SLUG_RE = re.compile(r"[^a-z0-9]+")
@@ -71,110 +83,6 @@ IMAGE_TYPES = {"image/png", "image/jpeg", "image/webp"}
 
 OAUTH_CLEANUP_INTERVAL_SECONDS = 300
 logger = logging.getLogger(__name__)
-
-
-class Organization(Base):
-    __tablename__ = "organizations"
-    id: Mapped[str] = mapped_column(String(36), primary_key=True)
-    slug: Mapped[str] = mapped_column(String(100), unique=True)
-    name: Mapped[str] = mapped_column(String(100))
-    public_sharing_policy: Mapped[str] = mapped_column(String(16), default="yes")
-    default_visibility: Mapped[str] = mapped_column(String(16), default="organization")
-    categories_json: Mapped[str] = mapped_column(Text, default="[]")
-    created_at: Mapped[str] = mapped_column(String(32))
-    members: Mapped[list[OrganizationMember]] = relationship(
-        back_populates="organization", cascade="all, delete-orphan"
-    )
-
-
-class OrganizationMember(Base):
-    __tablename__ = "organization_members"
-    organization_id: Mapped[str] = mapped_column(
-        ForeignKey("organizations.id", ondelete="CASCADE"), primary_key=True
-    )
-    account_id: Mapped[str] = mapped_column(
-        ForeignKey("accounts.id", ondelete="CASCADE"), primary_key=True
-    )
-    role: Mapped[str] = mapped_column(String(16))
-    created_at: Mapped[str] = mapped_column(String(32))
-    organization: Mapped[Organization] = relationship(back_populates="members")
-    account: Mapped[Account] = relationship()
-
-
-class OrganizationInvitation(Base):
-    __tablename__ = "organization_invitations"
-    id: Mapped[str] = mapped_column(String(36), primary_key=True)
-    organization_id: Mapped[str] = mapped_column(
-        ForeignKey("organizations.id", ondelete="CASCADE"), index=True
-    )
-    invited_by_id: Mapped[str] = mapped_column(ForeignKey("accounts.id", ondelete="CASCADE"))
-    username: Mapped[str | None] = mapped_column(String(39), nullable=True, index=True)
-    email: Mapped[str | None] = mapped_column(String(320), nullable=True, index=True)
-    role: Mapped[str] = mapped_column(String(16), default="member")
-    status: Mapped[str] = mapped_column(String(16), default="pending")
-    token_digest: Mapped[str] = mapped_column(String(64), unique=True)
-    created_at: Mapped[str] = mapped_column(String(32))
-    accepted_at: Mapped[str | None] = mapped_column(String(32), nullable=True)
-    revoked_at: Mapped[str | None] = mapped_column(String(32), nullable=True)
-    organization: Mapped[Organization] = relationship()
-
-
-class Group(Base):
-    __tablename__ = "groups"
-    id: Mapped[str] = mapped_column(String(36), primary_key=True)
-    organization_id: Mapped[str | None] = mapped_column(
-        ForeignKey("organizations.id", ondelete="CASCADE"), nullable=True, index=True
-    )
-    owner_id: Mapped[str] = mapped_column(ForeignKey("accounts.id", ondelete="CASCADE"), index=True)
-    name: Mapped[str] = mapped_column(String(100))
-    description: Mapped[str] = mapped_column(Text, default="")
-    thumbnail_type: Mapped[str | None] = mapped_column(String(20), nullable=True)
-    join_policy: Mapped[str] = mapped_column(String(16), default="invite")
-    shared_update: Mapped[bool] = mapped_column(Boolean, default=False)
-    created_at: Mapped[str] = mapped_column(String(32))
-    members: Mapped[list[GroupMember]] = relationship(
-        back_populates="group", cascade="all, delete-orphan"
-    )
-
-
-class GroupMember(Base):
-    __tablename__ = "group_members"
-    __table_args__ = (
-        Index(
-            "uq_group_accepted_owner",
-            "group_id",
-            unique=True,
-            sqlite_where=text("role = 'owner' AND status = 'accepted'"),
-            postgresql_where=text("role = 'owner' AND status = 'accepted'"),
-        ),
-    )
-    group_id: Mapped[str] = mapped_column(
-        ForeignKey("groups.id", ondelete="CASCADE"), primary_key=True
-    )
-    account_id: Mapped[str] = mapped_column(
-        ForeignKey("accounts.id", ondelete="CASCADE"), primary_key=True
-    )
-    role: Mapped[str] = mapped_column(String(16))
-    status: Mapped[str] = mapped_column(String(16), default="accepted")
-    created_at: Mapped[str] = mapped_column(String(32))
-    group: Mapped[Group] = relationship(back_populates="members")
-    account: Mapped[Account] = relationship()
-
-
-class GroupInvitation(Base):
-    __tablename__ = "group_invitations"
-    id: Mapped[str] = mapped_column(String(36), primary_key=True)
-    group_id: Mapped[str] = mapped_column(ForeignKey("groups.id", ondelete="CASCADE"), index=True)
-    invited_by_id: Mapped[str] = mapped_column(ForeignKey("accounts.id", ondelete="CASCADE"))
-    username: Mapped[str | None] = mapped_column(String(39), nullable=True, index=True)
-    email: Mapped[str | None] = mapped_column(String(320), nullable=True, index=True)
-    role: Mapped[str] = mapped_column(String(16), default="member")
-    status: Mapped[str] = mapped_column(String(16), default="pending")
-    token_digest: Mapped[str] = mapped_column(String(64), unique=True)
-    created_at: Mapped[str] = mapped_column(String(32))
-    accepted_at: Mapped[str | None] = mapped_column(String(32), nullable=True)
-    revoked_at: Mapped[str | None] = mapped_column(String(32), nullable=True)
-    group: Mapped[Group] = relationship()
 
 
 class Project(Base):
@@ -750,6 +658,8 @@ def postgresql_upgrade_statements() -> list[str]:
         ON group_members (group_id)
         WHERE role = 'owner' AND status = 'accepted'
         """,
+        "ALTER TABLE oauth_authorization_codes ADD COLUMN IF NOT EXISTS authenticated_at INTEGER",
+        "ALTER TABLE oauth_sessions ADD COLUMN IF NOT EXISTS authenticated_at INTEGER",
     ]
 
 
@@ -770,6 +680,8 @@ def upgrade_sqlite_schema(engine) -> None:
     tables = set(inspector.get_table_names())
     additions = {
         "accounts": [("email", "VARCHAR(320)")],
+        "oauth_authorization_codes": [("authenticated_at", "INTEGER")],
+        "oauth_sessions": [("authenticated_at", "INTEGER")],
         "projects": [
             ("organization_id", "VARCHAR(36)"),
             ("created_by_id", "VARCHAR(36)"),
@@ -1040,6 +952,7 @@ def create_app(
     app.state.session_factory = sessions
     app.state.clock = clock_fn
     app.state.oauth_config = oauth_config
+    app.state.trusted_proxy = load_trusted_proxy_config()
     # A declared Content-Length past the largest thing any route accepts is
     # rejected before the body is read at all. Without this, the JSON `content`
     # routes let Pydantic materialize the whole payload in memory *before*
@@ -1141,6 +1054,7 @@ def create_app(
 
     # Identity routes must precede the username/slug catch-alls below.
     app.include_router(build_identity_router())
+    app.include_router(build_enterprise_admin_router())
     if oauth_config is not None:
         app.include_router(build_oauth_router(oauth_config))
 
@@ -1240,24 +1154,6 @@ def create_app(
         return (
             session.scalar(project_query) is not None or session.scalar(redirect_query) is not None
         )
-
-    def organization_role(session: Session, organization_id: str, account_id: str) -> str | None:
-        return session.scalar(
-            select(OrganizationMember.role).where(
-                OrganizationMember.organization_id == organization_id,
-                OrganizationMember.account_id == account_id,
-            )
-        )
-
-    def require_organization_admin(
-        session: Session, organization_id: str, account: Account
-    ) -> Organization:
-        organization = session.get(Organization, organization_id)
-        if organization is None:
-            raise HTTPException(404, "organization not found")
-        if organization_role(session, organization_id, account.id) != "administrator":
-            raise HTTPException(403, "organization administrator permission required")
-        return organization
 
     def group_membership(session: Session, group_id: str, account_id: str) -> GroupMember | None:
         member = session.get(GroupMember, (group_id, account_id))
@@ -2011,11 +1907,14 @@ def create_app(
     def patch_organization(
         organization_id: str,
         body: OrganizationSettingsPatch,
+        request: Request,
         principal: AuthPrincipal = Depends(require_scope("write:projects")),
         session: Session = Depends(get_session),
     ):
         account = principal.account
-        organization = require_organization_admin(session, organization_id, account)
+        organization = require_organization_admin(
+            session, organization_id, principal, request, mutation=True
+        )
         updates = body.model_dump(exclude_unset=True)
         validate_default_visibility(
             updates.get("public_sharing_policy") or organization.public_sharing_policy,
@@ -2037,11 +1936,14 @@ def create_app(
     @app.delete("/api/organizations/{organization_id}", status_code=204)
     def delete_organization(
         organization_id: str,
+        request: Request,
         principal: AuthPrincipal = Depends(require_scope("write:projects")),
         session: Session = Depends(get_session),
     ):
         """Delete an organization with its projects, groups, members, and invitations."""
-        organization = require_organization_admin(session, organization_id, principal.account)
+        organization = require_organization_admin(
+            session, organization_id, principal, request, mutation=True
+        )
         project_rows = session.execute(
             select(Project.id, Project.delete_protected)
             .where(Project.organization_id == organization.id)
@@ -2096,11 +1998,12 @@ def create_app(
     def put_organization_member(
         organization_id: str,
         body: OrganizationMemberChange,
+        request: Request,
         principal: AuthPrincipal = Depends(require_scope("write:projects")),
         session: Session = Depends(get_session),
     ):
         account = principal.account
-        require_organization_admin(session, organization_id, account)
+        require_organization_admin(session, organization_id, principal, request, mutation=True)
         target = session.scalar(select(Account).where(Account.username == body.username))
         if target is None:
             raise HTTPException(404, "user not found")
@@ -2153,6 +2056,7 @@ def create_app(
     def delete_organization_member(
         organization_id: str,
         username: str,
+        request: Request,
         principal: AuthPrincipal = Depends(require_scope("write:projects")),
         session: Session = Depends(get_session),
     ):
@@ -2162,7 +2066,7 @@ def create_app(
                 raise HTTPException(404, "organization not found")
             target = account
         else:
-            require_organization_admin(session, organization_id, account)
+            require_organization_admin(session, organization_id, principal, request, mutation=True)
             target = session.scalar(select(Account).where(Account.username == username))
         member = session.get(OrganizationMember, (organization_id, target.id)) if target else None
         if member is None:
@@ -2192,11 +2096,12 @@ def create_app(
     def create_organization_invitation(
         organization_id: str,
         body: OrganizationInvitationCreate,
+        request: Request,
         principal: AuthPrincipal = Depends(require_scope("write:projects")),
         session: Session = Depends(get_session),
     ):
         account = principal.account
-        require_organization_admin(session, organization_id, account)
+        require_organization_admin(session, organization_id, principal, request, mutation=True)
         username, email = invitation_target(body.username, body.email)
         target = invitation_account(session, username, email)
         if username and target is None:
@@ -2236,11 +2141,11 @@ def create_app(
     def list_organization_invitations(
         organization_id: str,
         response: Response,
+        request: Request,
         principal: AuthPrincipal = Depends(require_scope("read:projects")),
         session: Session = Depends(get_session),
     ):
-        account = principal.account
-        require_organization_admin(session, organization_id, account)
+        require_organization_admin(session, organization_id, principal, request, mutation=False)
         invitations = session.scalars(
             select(OrganizationInvitation)
             .where(OrganizationInvitation.organization_id == organization_id)
@@ -2256,11 +2161,11 @@ def create_app(
     def revoke_organization_invitation(
         organization_id: str,
         invitation_id: str,
+        request: Request,
         principal: AuthPrincipal = Depends(require_scope("write:projects")),
         session: Session = Depends(get_session),
     ):
-        account = principal.account
-        require_organization_admin(session, organization_id, account)
+        require_organization_admin(session, organization_id, principal, request, mutation=True)
         invitation = session.get(OrganizationInvitation, invitation_id)
         if (
             invitation is None
@@ -3292,6 +3197,7 @@ def create_app(
     def create_project_transfer(
         project_id: str,
         body: ProjectTransferCreate,
+        request: Request,
         principal: AuthPrincipal = Depends(require_scope("write:projects")),
         session: Session = Depends(get_session),
     ):
@@ -3361,7 +3267,9 @@ def create_app(
                 "project": project_json(project, session, account),
             }
 
-        organization = require_organization_admin(session, body.organization_id, account)
+        organization = require_organization_admin(
+            session, body.organization_id, principal, request, mutation=True
+        )
         if project.organization_id == organization.id:
             raise HTTPException(422, "project already belongs to that owner")
         if path_reserved(session, None, organization.id, slug, project.id):

@@ -56,6 +56,15 @@ from geolibre_server_api.auth_models import (
     PersonalTokenPolicy,
     Token,
 )
+from geolibre_server_api.enterprise_models import AccountSecurity
+from geolibre_server_api.policy import (
+    credential_expired,
+    effective_policy,
+    ensure_account_security,
+    password_policy_error,
+    record_failed_login,
+    record_successful_login,
+)
 
 # ---------------------------------------------------------------------------
 # Scope vocabulary and grant lifetimes
@@ -373,6 +382,7 @@ class AuthPrincipal:
     scopes: frozenset[str]
     credential_id: str
     session_id: str | None
+    authenticated_at: int
 
 
 class InsufficientScopeError(HTTPException):
@@ -462,6 +472,65 @@ def backfill_policy(session: Session, digest: str) -> PersonalTokenPolicy:
     return policy
 
 
+class PasswordLoginError(Exception):
+    """A rejected password sign-in; ``code`` is one of the documented reasons."""
+
+    def __init__(self, code: str):
+        super().__init__(code)
+        self.code = code
+
+
+# Password-login rejection codes mapped to the token API's status and error.
+LOGIN_ERRORS: dict[str, tuple[int, str]] = {
+    "invalid": (401, "invalid username or password"),
+    "locked": (401, "account temporarily locked"),
+    "expired": (403, "password expired"),
+}
+# The same codes as shown on the OAuth consent page.
+CONSENT_LOGIN_ERRORS: dict[str, str] = {
+    "invalid": "Invalid username or password",
+    "locked": "Too many failed sign-in attempts. Try again later.",
+    "expired": "Your password has expired. Change it, then sign in again.",
+}
+
+
+def verify_password_login(
+    session: Session,
+    username: str,
+    password: str,
+    now_ts: int,
+    *,
+    allow_expired: bool = False,
+) -> Account:
+    """Verify built-in credentials under the account's effective security policy."""
+    account = session.scalar(select(Account).where(Account.username == username))
+    if account is None:
+        # Hash anyway before failing. Short-circuiting here would skip the
+        # scrypt call that a real username always pays for, and the timing
+        # difference enumerates accounts one request at a time, which a
+        # request-count rate limiter does not address.
+        password_hash(password or "unused")
+        raise PasswordLoginError("invalid")
+    security = session.get(AccountSecurity, account.id)
+    locked_until = security.locked_until if security is not None else None
+    if locked_until is not None and locked_until > now_ts:
+        raise PasswordLoginError("locked")
+    policy = effective_policy(session, account.id)
+    if not password_matches(password, account.password_hash):
+        record_failed_login(session, account.id, now_ts, policy)
+        raise PasswordLoginError("invalid")
+    if (
+        policy.password_max_age_days
+        and security is not None
+        and security.password_changed_at is not None
+        and security.password_changed_at + policy.password_max_age_days * 86400 <= now_ts
+        and not allow_expired
+    ):
+        raise PasswordLoginError("expired")
+    record_successful_login(session, account.id, now_ts)
+    return account
+
+
 def optional_principal(
     request: Request,
     authorization: Annotated[str | None, Header()] = None,
@@ -498,12 +567,29 @@ def optional_principal(
             raise HTTPException(
                 401, "invalid or expired token", headers=bearer_challenge("invalid_token")
             )
+        authenticated_at = oauth_session.authenticated_at or oauth_session.created_at
+        if credential_expired(
+            effective_policy(session, account.id),
+            authenticated_at=authenticated_at,
+            last_activity_at=oauth_session.last_used_at or oauth_session.created_at,
+            now_ts=now_ts,
+        ):
+            session.execute(
+                update(OAuthSession)
+                .where(OAuthSession.id == oauth_session.id)
+                .values(revoked_at=now_ts)
+            )
+            session.commit()
+            raise HTTPException(
+                401, "invalid or expired token", headers=bearer_challenge("invalid_token")
+            )
         touch_session(session, oauth_session.id, now_ts)
         return AuthPrincipal(
             account=account,
             scopes=frozenset(oauth_session.scope.split()),
             credential_id=oauth_session.id,
             session_id=oauth_session.id,
+            authenticated_at=authenticated_at,
         )
     token_row = session.get(Token, digest)
     if token_row is None:
@@ -529,6 +615,24 @@ def optional_principal(
         raise HTTPException(
             401, "invalid or expired token", headers=bearer_challenge("invalid_token")
         )
+    token_created = int(
+        datetime.fromisoformat(token_row.created_at.replace("Z", "+00:00")).timestamp()
+    )
+    if credential_expired(
+        effective_policy(session, account.id),
+        authenticated_at=token_created,
+        last_activity_at=policy.last_used_at or token_created,
+        now_ts=now_ts,
+    ):
+        session.execute(
+            update(PersonalTokenPolicy)
+            .where(PersonalTokenPolicy.id == policy.id)
+            .values(revoked_at=now_ts)
+        )
+        session.commit()
+        raise HTTPException(
+            401, "invalid or expired token", headers=bearer_challenge("invalid_token")
+        )
 
     touch_policy(session, digest, now_ts)
     return AuthPrincipal(
@@ -536,6 +640,7 @@ def optional_principal(
         scopes=frozenset(policy.scope.split()),
         credential_id=digest,
         session_id=None,
+        authenticated_at=token_created,
     )
 
 
@@ -988,6 +1093,16 @@ class RevokeOtherSessionsRequest(BaseModel):
     model_config = {"extra": "forbid"}
 
 
+class PasswordChangeRequest(BaseModel):
+    """Body for ``POST /api/account/password``."""
+
+    username: str
+    current_password: str = Field(alias="currentPassword", max_length=1024)
+    new_password: str = Field(alias="newPassword", max_length=1024)
+
+    model_config = {"extra": "forbid", "populate_by_name": True}
+
+
 def owned_project_session(
     session: Session, account_id: str, session_id: str, now_ts: int, *, lock: bool = False
 ) -> OAuthSession:
@@ -1056,6 +1171,9 @@ def build_identity_router() -> APIRouter:
             created_at=now(),
         )
         session.add(account)
+        session.add(
+            AccountSecurity(account_id=account.id, password_changed_at=get_clock(request)())
+        )
         try:
             session.flush()
         except IntegrityError:
@@ -1084,16 +1202,13 @@ def build_identity_router() -> APIRouter:
     ):
         """Exchange account credentials for a personal API token."""
         _validate_pat_lifetime(body.expiresInDays)
-        account = session.scalar(select(Account).where(Account.username == body.username))
-        if account is None:
-            # Hash anyway before failing. Short-circuiting here would skip the
-            # scrypt call that a real username always pays for, and the timing
-            # difference enumerates accounts one request at a time, which a
-            # request-count rate limiter does not address.
-            password_hash(body.password or "unused")
-            raise HTTPException(401, "invalid username or password")
-        if not password_matches(body.password, account.password_hash):
-            raise HTTPException(401, "invalid username or password")
+        try:
+            account = verify_password_login(
+                session, body.username, body.password, get_clock(request)()
+            )
+        except PasswordLoginError as exc:
+            status, message = LOGIN_ERRORS[exc.code]
+            raise HTTPException(status, message) from None
         token, extra = issue_token(
             session,
             account,
@@ -1103,6 +1218,31 @@ def build_identity_router() -> APIRouter:
             clock=get_clock(request),
         )
         return {"account": account_json(account), "token": token, **extra}
+
+    @router.post("/api/account/password", status_code=204)
+    def change_password(
+        body: PasswordChangeRequest,
+        request: Request,
+        session: Session = Depends(get_session),
+    ):
+        """Change a password with the current one; works after the password expired."""
+        now_ts = get_clock(request)()
+        try:
+            account = verify_password_login(
+                session, body.username, body.current_password, now_ts, allow_expired=True
+            )
+        except PasswordLoginError as exc:
+            status, message = LOGIN_ERRORS[exc.code]
+            raise HTTPException(status, message) from None
+        if body.new_password == body.current_password:
+            raise HTTPException(422, "new password must differ from the current password")
+        error = password_policy_error(body.new_password, effective_policy(session, account.id))
+        if error:
+            raise HTTPException(422, error)
+        account.password_hash = password_hash(body.new_password)
+        ensure_account_security(session, account.id).password_changed_at = now_ts
+        session.commit()
+        return Response(status_code=204)
 
     @router.delete("/api/auth/token", status_code=204)
     def revoke(
@@ -1592,39 +1732,47 @@ def build_oauth_router(config: OAuthConfig) -> APIRouter:
                 config.issuer, interaction.redirect_uri, "access_denied", interaction.state
             )
 
-        # Credential verification: the same scrypt work as /api/auth/token, but
-        # no PAT is minted and the login never hits the token API.
-        account = session.scalar(select(Account).where(Account.username == username))
-        if account is None:
-            password_hash(password or "unused")
-            return authorization_html_response(
-                render_consent_form(
-                    config,
-                    client,
-                    interaction.redirect_uri,
-                    interaction.id,
-                    csrf,
-                    label,
-                    interaction.scope,
-                    "Invalid username or password",
-                ),
-                form_redirect_uri=interaction.redirect_uri,
-            )
-        if not password_matches(password, account.password_hash):
-            return authorization_html_response(
-                render_consent_form(
-                    config,
-                    client,
-                    interaction.redirect_uri,
-                    interaction.id,
-                    csrf,
-                    label,
-                    interaction.scope,
-                    "Invalid username or password",
-                ),
-                form_redirect_uri=interaction.redirect_uri,
-            )
+        # Credential verification: the same scrypt work and lockout/rotation
+        # policy as /api/auth/token, but no PAT is minted.
+        try:
+            account = verify_password_login(session, username, password, now_ts)
+        except PasswordLoginError as exc:
+            return _consent_error(interaction, client, csrf, label, CONSENT_LOGIN_ERRORS[exc.code])
+        return _approve_interaction(
+            session, interaction, account.id, label, now_ts, authenticated_at=now_ts
+        )
 
+    def _consent_error(
+        interaction: OAuthAuthorizationCode,
+        client: OAuthClient,
+        csrf: str,
+        label: str,
+        message: str,
+    ) -> HTMLResponse:
+        """Re-render the consent form for this interaction with an error message."""
+        return authorization_html_response(
+            render_consent_form(
+                config,
+                client,
+                interaction.redirect_uri,
+                interaction.id,
+                csrf,
+                label,
+                interaction.scope,
+                message,
+            ),
+            form_redirect_uri=interaction.redirect_uri,
+        )
+
+    def _approve_interaction(
+        session: Session,
+        interaction: OAuthAuthorizationCode,
+        account_id: str,
+        label: str,
+        now_ts: int,
+        authenticated_at: int,
+    ) -> Response:
+        """Approve a pending interaction for an authenticated account and mint the code."""
         code_value = secrets.token_urlsafe(32)
         # Atomic consume-on-approve: a double submission cannot issue two live
         # codes (the unique code_digest column backs the same guarantee).
@@ -1637,11 +1785,12 @@ def build_oauth_router(config: OAuthConfig) -> APIRouter:
                 OAuthAuthorizationCode.interaction_expires_at > now_ts,
             )
             .values(
-                account_id=account.id,
+                account_id=account_id,
                 label=label,
                 approved_at=now_ts,
                 code_digest=token_digest(code_value),
                 code_expires_at=now_ts + config.code_ttl,
+                authenticated_at=authenticated_at,
             )
         ).rowcount
         if not updated:
@@ -1719,6 +1868,13 @@ def build_oauth_router(config: OAuthConfig) -> APIRouter:
         session_id = str(uuid.uuid4())
         management = code_row.scope == MANAGEMENT_SCOPE
         family_expires = now_ts + (MANAGEMENT_TTL_SECONDS if management else config.refresh_ttl)
+        if not management:
+            policy = effective_policy(session, code_row.account_id)
+            if policy.absolute_lifetime:
+                family_expires = min(
+                    family_expires,
+                    (code_row.authenticated_at or now_ts) + policy.absolute_lifetime,
+                )
         access_expires = min(now_ts + config.access_ttl, family_expires)
         oauth_session = OAuthSession(
             id=session_id,
@@ -1730,6 +1886,7 @@ def build_oauth_router(config: OAuthConfig) -> APIRouter:
             created_at=now_ts,
             expires_at=family_expires,
             rotation_version=0,
+            authenticated_at=code_row.authenticated_at,
         )
         access_value = secrets.token_urlsafe(32)
         session.add(oauth_session)
@@ -1811,6 +1968,20 @@ def build_oauth_router(config: OAuthConfig) -> APIRouter:
             or refresh.expires_at <= now_ts
         ):
             return oauth_token_error(400, "invalid_grant")
+        policy = effective_policy(session, oauth_session.account_id)
+        if credential_expired(
+            policy,
+            authenticated_at=oauth_session.authenticated_at or oauth_session.created_at,
+            last_activity_at=oauth_session.last_used_at or oauth_session.created_at,
+            now_ts=now_ts,
+        ):
+            session.execute(
+                update(OAuthSession)
+                .where(OAuthSession.id == oauth_session.id)
+                .values(revoked_at=now_ts)
+            )
+            session.commit()
+            return oauth_token_error(400, "invalid_grant")
         if refresh.consumed_at is not None:
             # Reuse: a consumed generation presented with its correct binding
             # revokes the whole family (including any tokens minted by the
@@ -1841,7 +2012,7 @@ def build_oauth_router(config: OAuthConfig) -> APIRouter:
                 OAuthSession.revoked_at.is_(None),
                 OAuthSession.expires_at > now_ts,
             )
-            .values(rotation_version=OAuthSession.rotation_version + 1)
+            .values(rotation_version=OAuthSession.rotation_version + 1, last_used_at=now_ts)
         ).rowcount
         if not rotated:
             session.rollback()
