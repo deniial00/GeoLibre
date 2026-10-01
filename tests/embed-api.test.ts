@@ -107,6 +107,16 @@ describe("readEmbedOrigins", () => {
   it("is empty when neither is configured, which keeps the API off", () => {
     assert.deepEqual(readEmbedOrigins({}, {}), []);
   });
+
+  it("lets deployment.json override the env, and an empty list turns the API off", () => {
+    const build = { [EMBED_ORIGINS_ENV]: "https://b.example" };
+    const runtime = { [EMBED_ORIGINS_ENV]: "https://a.example" };
+    assert.deepEqual(readEmbedOrigins(build, runtime, []), []);
+    assert.deepEqual(readEmbedOrigins(build, runtime, ["https://p.example"]), [
+      "https://p.example",
+    ]);
+    assert.deepEqual(readEmbedOrigins(build, runtime, undefined), ["https://a.example"]);
+  });
 });
 
 describe("isEmbedOriginAllowed", () => {

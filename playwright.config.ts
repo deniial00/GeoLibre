@@ -30,6 +30,7 @@ const CORE_SPECS = [
   "pwa.spec.ts",
   "style-manager.spec.ts",
   "identify-restore.spec.ts",
+  "deployment-policy.spec.ts",
 ];
 
 const coreMatch = CORE_SPECS.map((spec) => `**/${spec}`);

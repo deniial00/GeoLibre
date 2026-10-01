@@ -12,6 +12,8 @@ import {
   type ServiceLibraryKind,
 } from "../components/layout/add-data/service-library";
 import { EXPERIENCE_LEVELS, type ExperienceLevel } from "../hooks/useDesktopSettings";
+import { setDeploymentPolicy } from "./deployment-env";
+import { OPTIONAL_RESOURCE_HEADER } from "./diagnostics";
 import { normalizeStringList } from "./string-lists";
 
 /** The only deployment.json format version this build understands. */
@@ -394,4 +396,59 @@ export function parseDeploymentPolicy(contents: string | null): DeploymentPolicy
     return null;
   }
   return resolveDeploymentPolicy(parsed);
+}
+
+/** How long startup waits for deployment.json before rendering without it. */
+export const DEPLOYMENT_POLICY_TIMEOUT_MS = 3000;
+
+export interface FetchDeploymentPolicyOptions {
+  url?: string;
+  fetchImpl?: typeof fetch;
+  timeoutMs?: number;
+}
+
+function defaultPolicyUrl(): string {
+  const meta = import.meta as ImportMeta & { env?: { BASE_URL?: string } };
+  return `${meta.env?.BASE_URL ?? "/"}deployment.json`;
+}
+
+/**
+ * Fetches and parses deployment.json. Resolves `null` — never rejects — when the
+ * file is absent (404, HTML fallback), unreachable, malformed or too slow: no
+ * policy is the normal case and must leave the app's behavior unchanged.
+ */
+export async function fetchDeploymentPolicy(
+  options: FetchDeploymentPolicyOptions = {},
+): Promise<DeploymentPolicy | null> {
+  const url = options.url ?? defaultPolicyUrl();
+  const fetchImpl = options.fetchImpl ?? fetch;
+  const controller = new AbortController();
+  const timer = setTimeout(
+    () => controller.abort(),
+    options.timeoutMs ?? DEPLOYMENT_POLICY_TIMEOUT_MS,
+  );
+  try {
+    const response = await fetchImpl(url, {
+      headers: { [OPTIONAL_RESOURCE_HEADER]: "1" },
+      cache: "no-store",
+      signal: controller.signal,
+    });
+    if (!response.ok) return null;
+    return parseDeploymentPolicy(await response.text());
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+let loading: Promise<DeploymentPolicy | null> | null = null;
+
+/** Fetches deployment.json once and installs it as the active policy. */
+export function loadDeploymentPolicy(): Promise<DeploymentPolicy | null> {
+  loading ??= fetchDeploymentPolicy().then((policy) => {
+    setDeploymentPolicy(policy);
+    return policy;
+  });
+  return loading;
 }

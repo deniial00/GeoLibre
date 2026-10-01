@@ -20,6 +20,7 @@ import {
   validateMapExpression,
 } from "@geolibre/core";
 import type { GeoLibreLayer } from "@geolibre/core";
+import { getDeploymentPolicy } from "./deployment-env";
 import { EMBED_API_SOURCE, EMBED_API_VERSION, type AddLayerSpec } from "@geolibre/embed";
 
 export { EMBED_API_SOURCE, EMBED_API_VERSION };
@@ -85,7 +86,13 @@ export function parseEmbedOrigins(raw: unknown): string[] {
  *   writes onto `window`.
  * @returns The allowed origins, empty when the API is not enabled.
  */
-export function readEmbedOrigins(viteEnv?: EnvRecord, deploymentEnv?: EnvRecord): string[] {
+export function readEmbedOrigins(
+  viteEnv?: EnvRecord,
+  deploymentEnv?: EnvRecord,
+  policyOrigins: readonly string[] | undefined = getDeploymentPolicy()?.sharing?.embedOrigins,
+): string[] {
+  // deployment.json wins outright; an empty list turns the embed API off.
+  if (policyOrigins !== undefined) return parseEmbedOrigins(policyOrigins.join(","));
   const runtime =
     deploymentEnv ??
     (typeof window === "undefined"

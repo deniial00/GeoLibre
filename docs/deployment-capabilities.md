@@ -67,14 +67,12 @@ docker build \
   -t geolibre-classroom .
 ```
 
-!!! note "Build time only, for now"
-    Unlike `GEOLIBRE_SHARE_URL`, `GEOLIBRE_EMBED_ORIGINS`, and the other
-    deployment settings, this cannot yet be set with `-e` on a **prebuilt**
-    image — `docker/entrypoint.sh` does not publish it into the runtime
-    configuration, so it has to be baked in. Configuring a published image with
-    `-e GEOLIBRE_MODE=kiosk`, and having nginx refuse the corresponding
-    requests, is tracked in
-    [#1673](https://github.com/opengeos/GeoLibre/issues/1673).
+!!! note "Runtime configuration"
+    A [`deployment.json`](deployment-policy.md) with a `capabilities` array,
+    served next to the app, restricts a **prebuilt** deployment without a
+    rebuild and takes precedence over `VITE_GEOLIBRE_CAPABILITIES`. `-e` on a
+    prebuilt image still cannot set this variable, because `docker/entrypoint.sh`
+    does not publish it into the runtime configuration.
 
 ### Defaults and parsing
 

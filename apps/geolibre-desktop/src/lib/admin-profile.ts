@@ -13,6 +13,7 @@ import {
   type ExperienceLevel,
   type UiProfileSettings,
 } from "../hooks/useDesktopSettings";
+import { getDeploymentPolicy } from "./deployment-env";
 import { OPTIONAL_RESOURCE_HEADER } from "./diagnostics";
 import { isTauri } from "./is-tauri";
 import { normalizeStringList } from "./string-lists";
@@ -43,6 +44,9 @@ interface AdminProfileFile {
 export async function loadAdminProfile(
   pluginIds: readonly string[],
 ): Promise<Partial<UiProfileSettings> | null> {
+  // A deployment.json `interface` section replaces admin-profile.json whole.
+  const policyInterface = getDeploymentPolicy()?.interface;
+  if (policyInterface) return resolveAdminProfile(policyInterface, pluginIds);
   const file = await readAdminProfileFile();
   if (!file) return null;
   return resolveAdminProfile(file, pluginIds);

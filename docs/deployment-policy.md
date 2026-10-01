@@ -5,12 +5,30 @@ settings of a GeoLibre deployment: which capabilities users have, which
 interface elements are visible, which plugins may load, the curated service
 library, sharing endpoints, and branding.
 
-!!! note "Not loaded yet"
-    This release ships the file format only: the
-    [JSON Schema](https://github.com/opengeos/GeoLibre/blob/main/schema/deployment.schema.json),
-    the TypeScript types and a lenient parser. Nothing reads `deployment.json`
-    at runtime yet, so writing one changes no behavior. Loading and enforcement
-    arrive in later releases.
+## Loading
+
+The web, desktop and Jupyter builds fetch `deployment.json` from the app's base
+URL (`<base>/deployment.json`) before the first render, so nothing paints with a
+setting the policy then changes. No policy applies when the file is absent
+(404 or an HTML fallback page), unreachable, not JSON, of an unknown `version`,
+or does not arrive within 3 seconds. In those cases the app behaves exactly as
+it does without the file. Reading the file from a container mount or the
+desktop config directory arrives in a later release.
+
+What each section does today:
+
+- `capabilities` restricts the app; `[]` grants none, and omitting it leaves
+  `VITE_GEOLIBRE_CAPABILITIES` (or the default full grant) in force.
+- `interface` replaces `admin-profile.json` whole; fields are not merged.
+- `plugins.registryUrl` sets the plugin registry. `allowed`, `blocked`,
+  `sideload` and `defaultActive` are stored but not enforced yet.
+- `services`, `sharing`, `geolens` and `branding.appName` override the
+  matching `GEOLIBRE_*` deployment settings. `sharing.embedOrigins: []` turns
+  the embed API off.
+- `branding.welcome: false` suppresses the first-launch wizard.
+- `ai.enabled: true` points the assistant at the same-origin `/ai` proxy;
+  `false` removes any operator-configured AI proxy (a provider a user enters in
+  Settings is unaffected). `ai.model` picks the proxy's model.
 
 ## Example
 
@@ -146,7 +164,7 @@ An id in `blocked` is never loaded, even if it is also in `allowed`; when
 
 ## Precedence between sources
 
-When the policy is loaded, the intended order, highest first, is:
+The order, highest first, is:
 
 1. `deployment.json`
 2. runtime environment (`window.__GEOLIBRE_DEPLOYMENT_ENV__`)

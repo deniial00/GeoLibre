@@ -7,6 +7,13 @@ import { DEPLOYMENT_CAPABILITIES } from "@geolibre/core";
 import { SERVICE_KINDS } from "../apps/geolibre-desktop/src/components/layout/add-data/service-library";
 import { EXPERIENCE_LEVELS } from "../apps/geolibre-desktop/src/hooks/useDesktopSettings";
 import {
+  getDeploymentPolicy,
+  setDeploymentPolicy,
+} from "../apps/geolibre-desktop/src/lib/deployment-env";
+import { OPTIONAL_RESOURCE_HEADER } from "../apps/geolibre-desktop/src/lib/diagnostics";
+import {
+  fetchDeploymentPolicy,
+  loadDeploymentPolicy,
   parseDeploymentPolicy,
   resolveDeploymentPolicy,
 } from "../apps/geolibre-desktop/src/lib/deployment-policy";
@@ -169,4 +176,93 @@ test("schema enums stay in sync with code", () => {
   assert.deepEqual(schema.properties.services.properties.catalog.items.properties.kind.enum, [
     ...SERVICE_KINDS,
   ]);
+});
+
+function fakeFetch(body: string, init: ResponseInit = {}): typeof fetch {
+  return (async () => new Response(body, init)) as typeof fetch;
+}
+
+test("fetchDeploymentPolicy treats absence as no policy, silently", async (t) => {
+  const warnings = captureWarnings(t);
+  const url = "/deployment.json";
+  assert.equal(
+    await fetchDeploymentPolicy({
+      url,
+      fetchImpl: fakeFetch("", { status: 404 }),
+    }),
+    null,
+  );
+  assert.equal(
+    await fetchDeploymentPolicy({
+      url,
+      fetchImpl: fakeFetch("<!doctype html><html></html>"),
+    }),
+    null,
+  );
+  const rejecting = (async () => {
+    throw new TypeError("network");
+  }) as typeof fetch;
+  assert.equal(await fetchDeploymentPolicy({ url, fetchImpl: rejecting }), null);
+  assert.deepEqual(warnings, []);
+});
+
+test("fetchDeploymentPolicy parses a served policy and marks the request optional", async () => {
+  let seen: RequestInit | undefined;
+  const fetchImpl = (async (_input: unknown, init?: RequestInit) => {
+    seen = init;
+    return new Response('{"version":1,"capabilities":["data:add"]}');
+  }) as typeof fetch;
+  const policy = await fetchDeploymentPolicy({
+    url: "/deployment.json",
+    fetchImpl,
+  });
+  assert.deepEqual(policy?.capabilities, ["data:add"]);
+  assert.equal((seen?.headers as Record<string, string>)[OPTIONAL_RESOURCE_HEADER], "1");
+  assert.equal(seen?.cache, "no-store");
+});
+
+test("fetchDeploymentPolicy ignores an unknown version with one warning", async (t) => {
+  const warnings = captureWarnings(t);
+  const policy = await fetchDeploymentPolicy({
+    url: "/deployment.json",
+    fetchImpl: fakeFetch('{"version":2}'),
+  });
+  assert.equal(policy, null);
+  assert.equal(warnings.length, 1);
+});
+
+test("fetchDeploymentPolicy gives up on a hung request after the timeout", async () => {
+  const hung = ((_input: unknown, init?: RequestInit) =>
+    new Promise((_resolve, reject) => {
+      init?.signal?.addEventListener("abort", () =>
+        reject(new DOMException("aborted", "AbortError")),
+      );
+    })) as typeof fetch;
+  const started = Date.now();
+  assert.equal(
+    await fetchDeploymentPolicy({
+      url: "/d.json",
+      fetchImpl: hung,
+      timeoutMs: 20,
+    }),
+    null,
+  );
+  assert.ok(Date.now() - started < 2000);
+});
+
+test("loadDeploymentPolicy fetches once and installs the policy", async (t) => {
+  let calls = 0;
+  t.mock.method(globalThis, "fetch", async () => {
+    calls += 1;
+    return new Response('{"version":1,"branding":{"welcome":false}}');
+  });
+  try {
+    const first = loadDeploymentPolicy();
+    assert.equal(loadDeploymentPolicy(), first);
+    assert.deepEqual((await first)?.branding, { welcome: false });
+    assert.equal(calls, 1);
+    assert.deepEqual(getDeploymentPolicy()?.branding, { welcome: false });
+  } finally {
+    setDeploymentPolicy(null);
+  }
 });
