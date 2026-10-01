@@ -1,9 +1,9 @@
 """OpenID Connect federation: IdP HTTP, ID token validation, and federated accounts.
 
 Every outbound call goes through ``app.state.oidc_http`` (bounded responses,
-no redirects, no proxy environment). ID tokens are verified with joserfc
-against the provider's cached JWKS; claims are then checked by hand because
-``jwt.decode`` verifies only the signature.
+no redirects, no proxy environment, public addresses only; see ``egress``). ID
+tokens are verified with joserfc against the provider's cached JWKS; claims
+are then checked by hand because ``jwt.decode`` verifies only the signature.
 
 Rejection reasons are short strings for the server log only; the browser sees
 one generic page so a failed sign-in reveals nothing about which check failed.
@@ -33,13 +33,14 @@ from sqlalchemy.orm import Session
 
 from geolibre_server_api import auth
 from geolibre_server_api.auth_models import Account
+from geolibre_server_api.egress import GuardedTransport
 from geolibre_server_api.enterprise_models import (
     AccountSecurity,
     FederatedIdentity,
     OrganizationIdentityProvider,
 )
 from geolibre_server_api.org_models import ROLE_RANK, Group, GroupMember, OrganizationMember
-from geolibre_server_api.proxy_identity import ProxyIdentity
+from geolibre_server_api.proxy_identity import ProxyIdentity, parse_networks
 
 logger = logging.getLogger(__name__)
 
@@ -61,7 +62,11 @@ class OidcError(Exception):
 
 
 def build_transport() -> httpx.HTTPTransport:
-    """The IdP network transport, also trusting ``GEOLIBRE_OIDC_CA_BUNDLE`` when set."""
+    """The IdP network transport: public addresses only, plus ``GEOLIBRE_OIDC_CA_BUNDLE``.
+
+    ``GEOLIBRE_OIDC_ALLOWED_NETWORKS`` lists the internal networks an
+    identity provider may still be reached on.
+    """
     # httpx's default trust (certifi), plus the operator's private CAs.
     ssl_context = httpx.create_ssl_context(trust_env=False)
     path = os.getenv("GEOLIBRE_OIDC_CA_BUNDLE")
@@ -70,7 +75,7 @@ def build_transport() -> httpx.HTTPTransport:
             ssl_context.load_verify_locations(cafile=path)
         except (OSError, ssl.SSLError) as exc:
             raise RuntimeError(f"GEOLIBRE_OIDC_CA_BUNDLE {path!r} cannot be read") from exc
-    return httpx.HTTPTransport(verify=ssl_context, trust_env=False)
+    return GuardedTransport(ssl_context, parse_networks("GEOLIBRE_OIDC_ALLOWED_NETWORKS"))
 
 
 def build_http_client(transport: httpx.BaseTransport) -> httpx.Client:

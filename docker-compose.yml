@@ -54,6 +54,7 @@ services:
       GEOLIBRE_PROXY_USER_HEADER: "${GEOLIBRE_PROXY_USER_HEADER:-Remote-User}"
       GEOLIBRE_PROXY_EMAIL_HEADER: "${GEOLIBRE_PROXY_EMAIL_HEADER:-Remote-Email}"
       GEOLIBRE_OIDC_CA_BUNDLE: "${GEOLIBRE_OIDC_CA_BUNDLE:-}"
+      GEOLIBRE_OIDC_ALLOWED_NETWORKS: "${GEOLIBRE_OIDC_ALLOWED_NETWORKS:-}"
     volumes:
       - geolibre-projects:/data/objects
     depends_on:

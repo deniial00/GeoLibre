@@ -18,21 +18,24 @@ class TrustedProxyConfig:
     email_header: str
 
 
-def load_trusted_proxy_config() -> TrustedProxyConfig:
-    """Read ``GEOLIBRE_TRUSTED_PROXIES``, ``GEOLIBRE_PROXY_AUTH``, and the identity header names."""
+def parse_networks(variable: str) -> tuple[IPv4Network | IPv6Network, ...]:
+    """Parse the comma-separated IPs or CIDRs in env *variable*; an invalid entry fails startup."""
     networks: list[IPv4Network | IPv6Network] = []
-    for raw in os.getenv("GEOLIBRE_TRUSTED_PROXIES", "").split(","):
+    for raw in os.getenv(variable, "").split(","):
         entry = raw.strip()
         if not entry:
             continue
         try:
             networks.append(ipaddress.ip_network(entry, strict=False))
         except ValueError as exc:
-            raise RuntimeError(
-                f"GEOLIBRE_TRUSTED_PROXIES entry {entry!r} is not an IP network"
-            ) from exc
+            raise RuntimeError(f"{variable} entry {entry!r} is not an IP network") from exc
+    return tuple(networks)
+
+
+def load_trusted_proxy_config() -> TrustedProxyConfig:
+    """Read ``GEOLIBRE_TRUSTED_PROXIES``, ``GEOLIBRE_PROXY_AUTH``, and the identity header names."""
     return TrustedProxyConfig(
-        networks=tuple(networks),
+        networks=parse_networks("GEOLIBRE_TRUSTED_PROXIES"),
         identity_enabled=os.getenv("GEOLIBRE_PROXY_AUTH", "").strip().lower()
         in {"1", "true", "yes"},
         user_header=os.getenv("GEOLIBRE_PROXY_USER_HEADER") or "Remote-User",

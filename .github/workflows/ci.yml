@@ -381,6 +381,8 @@ jobs:
         env:
           GEOLIBRE_TEST_OIDC_ISSUER: https://localhost:8443/geolibre
           GEOLIBRE_OIDC_CA_BUNDLE: /tmp/idp/cert.pem
+          # The mock IdP listens on loopback, which the SSRF guard refuses by default.
+          GEOLIBRE_OIDC_ALLOWED_NETWORKS: 127.0.0.1/32
         run: python -m pytest backend/geolibre_server_api/tests -m oidc_interop
 
       - name: Print mock-oauth2-server logs

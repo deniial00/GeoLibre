@@ -67,6 +67,12 @@ Configuration:
   `certifi`, for providers behind a private CA (default empty: the public CAs
   only). An unreadable file fails startup. Each provider's OIDC
   `client_secret` is stored unencrypted in the database.
+- `GEOLIBRE_OIDC_ALLOWED_NETWORKS`: comma-separated IPs or CIDR networks that
+  organization identity providers may be reached on even though they are not
+  public, such as an on-premises IdP on `10.20.0.0/16` (default empty: calls
+  to loopback, private, link-local, CGNAT, multicast, and reserved addresses
+  are refused, because any user who creates an organization chooses its
+  provider URLs). An invalid entry fails startup.
 - `GEOLIBRE_MAX_PROJECT_BYTES`, `GEOLIBRE_MAX_THUMBNAIL_BYTES`: upload limits.
 - `GEOLIBRE_HOST`, `GEOLIBRE_PORT`: bind address and port for the
   `geolibre-server-api` entry point, default `0.0.0.0` and `8000`. Bind to

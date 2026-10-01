@@ -189,7 +189,7 @@ jobs:
         run: |
           GEOLIBRE_DATABASE_URL=sqlite:////tmp/gl-e2e.db GEOLIBRE_STORAGE_PATH=/tmp/gl-e2e-objects \
           GEOLIBRE_PUBLIC_URL=http://localhost:8000 GEOLIBRE_CORS_ORIGINS=http://localhost:4173 \
-          GEOLIBRE_OIDC_CA_BUNDLE=/tmp/idp/cert.pem \
+          GEOLIBRE_OIDC_CA_BUNDLE=/tmp/idp/cert.pem GEOLIBRE_OIDC_ALLOWED_NETWORKS=127.0.0.1/32 \
           GEOLIBRE_OAUTH_CLIENTS='[{"client_id":"geolibre-web","name":"GeoLibre Web","redirect_uris":["http://localhost:4173/oauth-callback.html"],"scopes":["read:projects","write:projects","share:public"]}]' \
           nohup geolibre-server-api > /tmp/gl-api.log 2>&1 &
           curl -fsS --retry 30 --retry-all-errors --retry-delay 1 http://localhost:8000/health

@@ -582,6 +582,17 @@ and `identity provider discovery failed`. Out-of-range values are a generic
   invalid JSON also fails discovery. The endpoints are stored; discovery runs
   again only on the next `PUT`. Signing keys are fetched from `jwksUri` on the
   first sign-in and cached; changing `issuer` or `jwksUri` clears the cache.
+- **Internal addresses (SSRF protection):** any signed-in user can create an
+  organization and choose its provider URLs, so the server connects to an
+  identity provider only on public addresses. Each host is resolved once and
+  every loopback, private, link-local, CGNAT (`100.64.0.0/10`), multicast,
+  reserved, or unspecified address (including their IPv4-mapped, NAT64, 6to4,
+  and Teredo forms) is dropped; a host left with none fails like a network
+  error, so discovery answers `identity provider discovery failed` and sign-in
+  is rejected. The connection goes to the checked address, while TLS still
+  verifies the certificate against the URL's hostname. To use a provider on an
+  internal network, list its networks in `GEOLIBRE_OIDC_ALLOWED_NETWORKS`
+  (comma-separated IPs or CIDRs; an invalid entry fails startup).
 - **Accounts:** the first sign-in of a provider subject (`sub`) creates an
   account linked to it. Its username comes from `usernameClaim` (or else
   `emailClaim`): lowercased, cut at `@`, other characters replaced with `-`,
