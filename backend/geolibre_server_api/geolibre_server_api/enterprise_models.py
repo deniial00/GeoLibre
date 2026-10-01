@@ -127,3 +127,60 @@ class OidcLoginState(Base):
     max_age: Mapped[int | None] = mapped_column(Integer, nullable=True)
     expires_at: Mapped[int] = mapped_column(Integer, index=True)
     consumed_at: Mapped[int | None] = mapped_column(Integer, nullable=True)
+
+
+class ScimToken(Base):
+    """A bearer token an identity provider uses to provision one organization over SCIM."""
+
+    __tablename__ = "scim_tokens"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    organization_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("organizations.id", ondelete="CASCADE"), index=True
+    )
+    created_by_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("accounts.id", ondelete="CASCADE")
+    )
+    digest: Mapped[str] = mapped_column(String(64), unique=True)
+    label: Mapped[str] = mapped_column(String(100))
+    created_at: Mapped[int] = mapped_column(Integer)
+    last_used_at: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    revoked_at: Mapped[int | None] = mapped_column(Integer, nullable=True)
+
+
+class ScimUser(Base):
+    """An account provisioned into (or linked to) an organization over SCIM."""
+
+    __tablename__ = "scim_users"
+    __table_args__ = (UniqueConstraint("organization_id", "user_name", name="uq_scim_user_name"),)
+
+    organization_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("organizations.id", ondelete="CASCADE"), primary_key=True
+    )
+    account_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("accounts.id", ondelete="CASCADE"), primary_key=True
+    )
+    # Stored lowercased; SCIM userName comparisons are case-insensitive.
+    user_name: Mapped[str] = mapped_column(String(255))
+    external_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    # The SCIM representation only; never copied to Account.email.
+    email: Mapped[str | None] = mapped_column(String(320), nullable=True)
+    display_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    created_at: Mapped[int] = mapped_column(Integer)
+    updated_at: Mapped[int] = mapped_column(Integer)
+
+
+class ScimGroup(Base):
+    """Marks a group as provisioned over SCIM by its organization's identity provider."""
+
+    __tablename__ = "scim_groups"
+
+    group_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("groups.id", ondelete="CASCADE"), primary_key=True
+    )
+    organization_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("organizations.id", ondelete="CASCADE"), index=True
+    )
+    external_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    created_at: Mapped[int] = mapped_column(Integer)
+    updated_at: Mapped[int] = mapped_column(Integer)

@@ -69,6 +69,7 @@ from geolibre_server_api.policy import (
     credential_expired,
     effective_policy,
     ensure_account_security,
+    is_deactivated,
     password_login_allowed,
     password_policy_error,
     record_failed_login,
@@ -506,6 +507,9 @@ CONSENT_LOGIN_ERRORS: dict[str, str] = {
         "Your organization requires single sign-on. Use “Sign in with your organization”."
     ),
 }
+# Single sign-on and proxy sign-in of a SCIM-deactivated account. Password
+# sign-in reports "invalid" instead, so it reveals nothing to a password guesser.
+DEACTIVATED_MESSAGE = "This account has been deactivated."
 
 
 def verify_password_login(
@@ -532,6 +536,8 @@ def verify_password_login(
     policy = effective_policy(session, account.id)
     if not password_matches(password, account.password_hash):
         record_failed_login(session, account.id, now_ts, policy)
+        raise PasswordLoginError("invalid")
+    if is_deactivated(session, account.id):
         raise PasswordLoginError("invalid")
     if not password_login_allowed(session, account.id):
         raise PasswordLoginError("sso_required")
@@ -579,7 +585,7 @@ def optional_principal(
                 401, "invalid or expired token", headers=bearer_challenge("invalid_token")
             )
         account = session.get(Account, oauth_session.account_id)
-        if account is None:
+        if account is None or is_deactivated(session, account.id):
             raise HTTPException(
                 401, "invalid or expired token", headers=bearer_challenge("invalid_token")
             )
@@ -627,7 +633,7 @@ def optional_principal(
             401, "invalid or expired token", headers=bearer_challenge("invalid_token")
         )
     account = session.get(Account, token_row.account_id)
-    if account is None:
+    if account is None or is_deactivated(session, account.id):
         raise HTTPException(
             401, "invalid or expired token", headers=bearer_challenge("invalid_token")
         )
@@ -1852,6 +1858,16 @@ def build_oauth_router(config: OAuthConfig) -> APIRouter:
                 session.rollback()
                 oidc.logger.warning("proxy sign-in rejected: %s", exc)
                 return oauth_error_page(400, "invalid_request", "proxy sign-in failed")
+            if is_deactivated(session, account.id):
+                return _consent_error(
+                    session,
+                    interaction,
+                    client,
+                    csrf,
+                    label,
+                    DEACTIVATED_MESSAGE,
+                    proxy_user=proxy_user,
+                )
             return _approve_interaction(
                 session, interaction, account.id, label, now_ts, authenticated_at=now_ts
             )
@@ -2114,6 +2130,8 @@ def build_oauth_router(config: OAuthConfig) -> APIRouter:
             session.rollback()
             oidc.logger.warning("oidc sign-in rejected: %s", exc)
             return _sso_rejected()
+        if is_deactivated(session, account.id):
+            return oauth_error_page(403, "access_denied", DEACTIVATED_MESSAGE)
         auth_time = claims.get("auth_time")
         authenticated_at = (
             min(auth_time, now_ts)
@@ -2292,7 +2310,7 @@ def build_oauth_router(config: OAuthConfig) -> APIRouter:
         ):
             return oauth_token_error(400, "invalid_grant")
         policy = effective_policy(session, oauth_session.account_id)
-        if credential_expired(
+        if is_deactivated(session, oauth_session.account_id) or credential_expired(
             policy,
             authenticated_at=oauth_session.authenticated_at or oauth_session.created_at,
             last_activity_at=oauth_session.last_used_at or oauth_session.created_at,

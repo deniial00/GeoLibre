@@ -12,6 +12,7 @@ from sqlalchemy import func, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from geolibre_server_api.auth_models import OAuthSession, PersonalTokenPolicy, Token
 from geolibre_server_api.enterprise_models import (
     AccountSecurity,
     OrganizationIdentityProvider,
@@ -216,3 +217,47 @@ def require_not_break_glass(session: Session, organization_id: str, account_id: 
     )
     if break_glass is not None:
         raise HTTPException(422, "account is the organization's break-glass administrator")
+
+
+def is_deactivated(session: Session, account_id: str) -> bool:
+    """True when SCIM deactivated the account."""
+    status = session.scalar(
+        select(AccountSecurity.status).where(AccountSecurity.account_id == account_id)
+    )
+    return status == "deactivated"
+
+
+def deactivate_account(session: Session, account_id: str, now_ts: int) -> None:
+    """Deactivate the account and revoke every OAuth family and personal token.
+
+    The caller commits, so the status flip and the revocations land together.
+    """
+    from geolibre_server_api.auth import backfill_account_policies
+
+    security = ensure_account_security(session, account_id)
+    security.status = "deactivated"
+    security.deactivated_at = now_ts
+    session.execute(
+        update(OAuthSession)
+        .where(OAuthSession.account_id == account_id, OAuthSession.revoked_at.is_(None))
+        .values(revoked_at=now_ts)
+    )
+    # Legacy tokens get a policy row first so the revocation below covers them.
+    backfill_account_policies(session, account_id)
+    session.execute(
+        update(PersonalTokenPolicy)
+        .where(
+            PersonalTokenPolicy.token_digest.in_(
+                select(Token.digest).where(Token.account_id == account_id)
+            ),
+            PersonalTokenPolicy.revoked_at.is_(None),
+        )
+        .values(revoked_at=now_ts)
+    )
+
+
+def reactivate_account(session: Session, account_id: str) -> None:
+    """Allow sign-in again; credentials revoked by the deactivation stay revoked."""
+    security = ensure_account_security(session, account_id)
+    security.status = "active"
+    security.deactivated_at = None

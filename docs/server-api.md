@@ -692,6 +692,115 @@ sign-in failed`. Identity headers from any other peer are never read, so the
 proxy must strip client-sent identity headers and be the only network path to
 the API.
 
+### SCIM 2.0
+
+An organization's identity provider can provision its users and groups with
+SCIM 2.0 (RFC 7643/7644). An organization administrator mints a token for it:
+
+- `POST /api/organizations/{id}/scim-tokens` (`write:projects`), body
+  `{"label": "Entra ID"}` (1–100 characters), returns `201`
+  `{"token": "...", "scimToken": {...}, "baseUrl": "<public URL>/scim/v2/<organization id>"}`.
+  The raw token is shown only here; the server stores its digest.
+- `GET /api/organizations/{id}/scim-tokens` (`read:projects`) returns
+  `{"scimTokens": [...]}`, newest first.
+- `DELETE /api/organizations/{id}/scim-tokens/{tokenId}` (`write:projects`)
+  revokes the token. Response: `204`; an unknown token, or one of another
+  organization, is `404 SCIM token not found`.
+
+A token object is `{"id", "label", "createdAt", "lastUsedAt", "revokedAt"}`
+(`lastUsedAt` is updated at most once a minute). The routes require an
+organization administrator (with the organization's IP allowlist, and
+re-authentication for `POST` and `DELETE`) and respond with
+`Cache-Control: private, no-store`.
+
+Configure the identity provider with `baseUrl` as the tenant/SCIM URL and the
+token as a Bearer secret. Every SCIM request needs
+`Authorization: Bearer <token>` for that organization; a missing, revoked, or
+other organization's token is `401` with `WWW-Authenticate: Bearer`. SCIM
+requests are machine-to-machine, so the organization's administrator IP
+allowlist and re-authentication window do not apply to them; revoke a token to
+cut off a provider.
+
+Request bodies are `application/scim+json` (or `application/json`); responses
+are `application/scim+json`. Errors use the SCIM error message:
+`{"schemas": ["urn:ietf:params:scim:api:messages:2.0:Error"], "status": "409", "detail": "userName already exists", "scimType": "uniqueness"}`.
+
+| Endpoint | Notes |
+| --- | --- |
+| `GET /ServiceProviderConfig`, `/ResourceTypes`, `/Schemas` | Discovery. PATCH and filtering are supported (up to 100 results); bulk, sort, ETags, and password changes are not. |
+| `GET /Users` | `startIndex` (default 1) and `count` (0–100, default 100), ordered by creation. `filter` only `userName eq "…"` (case-insensitive) or `externalId eq "…"`; anything else is `400 invalidFilter`. |
+| `POST /Users` | Creates an account. `userName` (1–255 characters, stored lowercased) is required and unique per organization (`409 uniqueness`). |
+| `GET`/`PUT`/`PATCH`/`DELETE /Users/{id}` | `id` is the account id. `PUT` replaces `userName`, `externalId`, `displayName`, `emails`, and (when present) `active`. |
+| `GET /Groups` | `filter` only `displayName eq "…"` (case-insensitive) or `externalId eq "…"`. |
+| `POST /Groups` | Creates an organization group owned by the token's creator, with `join_policy` `invite`. Every member must be a user provisioned in this organization (`400 invalidValue`). |
+| `GET`/`PUT`/`PATCH`/`DELETE /Groups/{id}` | `PUT` replaces `displayName`, `externalId`, and the member set. `DELETE` deletes the group. |
+
+A user resource carries `id`, `userName`, `externalId`, `displayName`,
+`active`, `emails` (the primary address only), and `meta`. Other attributes are
+accepted and ignored. A provisioned account has no password and no email
+address of its own: `emails` is kept for the SCIM representation only. Its
+username is derived from `userName` the way single sign-on derives it, and it
+joins the organization with the identity provider's `defaultRole` (`member`
+without a provider). A group resource's `members` lists only plain accepted
+members; the owner and managers are never listed or changed by SCIM. Only users
+and groups created through SCIM are visible to it (`404 resource not found`
+otherwise).
+
+**PATCH** bodies need the `urn:ietf:params:scim:api:messages:2.0:PatchOp`
+schema and an `Operations` list (else `400 invalidSyntax`). `op` is
+case-insensitive. For users, `add` and `replace` accept the paths `active`,
+`userName`, `externalId`, `displayName`, `emails`, and
+`emails[type eq "work"].value`, or no path with an object of attributes;
+unknown paths are ignored. `remove` accepts only `externalId` and
+`displayName`. Other operations are `400 unsupported patch operation`
+(`invalidSyntax`). For groups, `add` takes `members` (a list of
+`{"value": "<user id>"}`), `displayName`, or `externalId`; `remove` takes
+`members[value eq "<user id>"]`, `members` with a value list (or no value to
+remove every member), or `externalId`; `replace` takes `displayName`,
+`externalId`, `members`, or no path with an object of those. A successful
+PATCH returns `200` with the resource.
+
+**Entra ID:** `active` may be the strings `"True"`/`"False"`, operation names
+may be capitalized (`Replace`), and Entra's extra attribute paths are ignored,
+so its default attribute mappings work unchanged. Entra soft-deletes by
+setting `active` to `false`, and later sends `DELETE`.
+
+**Deactivation.** Setting `active` to `false` (`PUT` or `PATCH`), or
+`DELETE`, depends on who manages the account:
+
+- An account this organization manages (created by its SCIM or its single
+  sign-on) is deactivated: every OAuth session and personal token is revoked in
+  the same transaction, Bearer use returns `401 invalid or expired token`,
+  refresh returns `400 invalid_grant`, password sign-in fails as an invalid
+  password, single sign-on returns a `403` page with
+  `This account has been deactivated.`, and trusted-proxy sign-in shows the
+  same message on the consent page.
+- Any other account only loses its membership in this organization and its
+  membership (except group ownership) in the organization's groups; the account
+  itself and its other organizations are untouched. Access ends on the next
+  request because authorization reads memberships live. Its SCIM `active` reads
+  `false` while it is not a member.
+- Setting `active` back to `true` reactivates a managed account and re-adds the
+  organization membership if missing. Credentials revoked by the deactivation
+  stay revoked; the user signs in again.
+- `DELETE /Users/{id}` deactivates as above, removes the organization and group
+  memberships, and forgets the SCIM user. Removing the organization's only
+  administrator, by deactivation of an account it does not manage or by
+  `DELETE`, is `409 cannot remove the last organization administrator`
+  (`mutability`); removing the identity provider's break-glass account is
+  `409 cannot remove the organization's break-glass administrator`
+  (`mutability`). Clear `breakGlassUsername` on the provider first.
+- Removing a membership applies the organization's public sharing policy the
+  same way leaving through the members API does: the removed account's public
+  organization projects become organization-only unless the policy is `yes`.
+
+**Single sign-on link:** the first single sign-on of a subject in an
+organization with SCIM users links to the provisioned account whose `userName`
+equals the ID token's `usernameClaim` (lowercased), or failing that its
+`emailClaim`, instead of creating a new account. Provision `userName` as the
+value the provider puts in that claim (for Entra ID, the UPN in
+`preferred_username`).
+
 ## Projects
 
 ### Project representation

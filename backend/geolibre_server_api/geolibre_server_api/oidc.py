@@ -38,6 +38,7 @@ from geolibre_server_api.enterprise_models import (
     AccountSecurity,
     FederatedIdentity,
     OrganizationIdentityProvider,
+    ScimUser,
 )
 from geolibre_server_api.org_models import (
     ROLE_RANK,
@@ -485,6 +486,47 @@ def _first_string(*values: object) -> str:
     return ""
 
 
+def _link_scim_user(
+    session: Session, provider: OrganizationIdentityProvider, claims: dict, now_ts: int
+) -> None:
+    """Link a subject's first sign-in to the account SCIM provisioned for that user name.
+
+    The username claim is tried first, then the email claim; only string claims count.
+    """
+    if _find_identity(session, provider.id, claims["sub"]) is not None:
+        return
+    for claim_name in (provider.username_claim, provider.email_claim):
+        value = claims.get(claim_name)
+        if not isinstance(value, str) or not value:
+            continue
+        account_id = session.scalar(
+            select(ScimUser.account_id).where(
+                ScimUser.organization_id == provider.organization_id,
+                ScimUser.user_name == value.lower(),
+            )
+        )
+        if account_id is None:
+            continue
+        try:
+            with session.begin_nested():
+                session.add(
+                    FederatedIdentity(
+                        id=str(uuid.uuid4()),
+                        account_id=account_id,
+                        provider_key=provider.id,
+                        provider_id=provider.id,
+                        subject=claims["sub"],
+                        created_at=now_ts,
+                        last_login_at=now_ts,
+                    )
+                )
+                session.flush()
+        except IntegrityError:
+            # A concurrent first sign-in linked the subject; the caller re-reads it.
+            pass
+        return
+
+
 def resolve_oidc_account(
     session: Session,
     provider: OrganizationIdentityProvider,
@@ -493,9 +535,12 @@ def resolve_oidc_account(
 ) -> Account:
     """Find or JIT-create the account for validated claims and apply the org mapping.
 
-    Never links to an existing account by email: that would let any IdP that
-    asserts an address take over a local account.
+    A first sign-in links to the account the provider's own organization
+    provisioned over SCIM under the same user name. It never links to any other
+    existing account by email: that would let any IdP that asserts an address
+    take over a local account.
     """
+    _link_scim_user(session, provider, claims, now_ts)
     account = _resolve_identity(
         session,
         provider_key=provider.id,

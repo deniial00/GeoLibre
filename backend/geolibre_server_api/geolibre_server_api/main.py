@@ -79,6 +79,7 @@ from geolibre_server_api.project_models import (
 )
 from geolibre_server_api.projects import demote_disallowed_public_projects, log_project_activity
 from geolibre_server_api.proxy_identity import load_trusted_proxy_config
+from geolibre_server_api.scim import SCIM_MEDIA_TYPE, ScimError, build_scim_router
 
 Visibility = Literal["public", "unlisted", "private", "organization"]
 PublicSharingPolicy = Literal["yes", "publishers", "no"]
@@ -727,6 +728,7 @@ def create_app(
     app.state.session_factory = sessions
     app.state.clock = clock_fn
     app.state.oauth_config = oauth_config
+    app.state.base_url = base_url
     app.state.trusted_proxy = load_trusted_proxy_config()
     # Outbound identity-provider HTTP; lives for the process.
     idp_transport = oidc_transport or build_transport()
@@ -821,6 +823,21 @@ def create_app(
     async def validation_error(_request: Request, exc: RequestValidationError):
         return JSONResponse({"error": str(exc.errors()[0]["msg"])}, status_code=422)
 
+    @app.exception_handler(ScimError)
+    async def scim_error(_request: Request, exc: ScimError):
+        """Serialize a SCIM failure as an RFC 7644 error message."""
+        return JSONResponse(
+            {
+                "schemas": ["urn:ietf:params:scim:api:messages:2.0:Error"],
+                "status": str(exc.status),
+                "detail": exc.detail,
+                **({"scimType": exc.scim_type} if exc.scim_type else {}),
+            },
+            status_code=exc.status,
+            media_type=SCIM_MEDIA_TYPE,
+            headers=exc.headers,
+        )
+
     @app.exception_handler(Exception)
     async def unexpected_error(_request: Request, exc: Exception):
         # Only HTTPException and RequestValidationError were handled, so anything
@@ -833,6 +850,7 @@ def create_app(
     # Identity routes must precede the username/slug catch-alls below.
     app.include_router(build_identity_router())
     app.include_router(build_enterprise_admin_router())
+    app.include_router(build_scim_router())
     if oauth_config is not None:
         app.include_router(build_oauth_router(oauth_config))
 
