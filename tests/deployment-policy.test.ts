@@ -266,3 +266,16 @@ test("loadDeploymentPolicy fetches once and installs the policy", async (t) => {
     setDeploymentPolicy(null);
   }
 });
+
+test("catalog id and name are stored trimmed", () => {
+  const policy = resolveDeploymentPolicy({
+    version: 1,
+    services: {
+      catalog: [
+        { id: " city ", name: " City WMS ", kind: "wms", fields: { url: "https://e.example/wms" } },
+      ],
+    },
+  });
+  assert.equal(policy?.services?.catalog?.[0].id, "city");
+  assert.equal(policy?.services?.catalog?.[0].name, "City WMS");
+});

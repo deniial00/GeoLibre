@@ -19,7 +19,9 @@ What each section does today:
 
 - `capabilities` restricts the app; `[]` grants none, and omitting it leaves
   `VITE_GEOLIBRE_CAPABILITIES` (or the default full grant) in force.
-- `interface` replaces `admin-profile.json` whole; fields are not merged.
+- `interface` replaces `admin-profile.json` whole; fields are not merged. A
+  present `interface` section wins even when it is empty (`{}`): omit the
+  section entirely to keep using `admin-profile.json`.
 - `plugins.registryUrl` sets the plugin registry. `allowed`, `blocked`,
   `sideload` and `defaultActive` are stored but not enforced yet.
 - `services`, `sharing`, `geolens` and `branding.appName` override the

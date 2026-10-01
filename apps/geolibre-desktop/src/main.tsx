@@ -362,10 +362,18 @@ if (isDesktopRuntime()) {
 // after App resolves — a free win, and it matters over the network in the web
 // build where these are separate fetches.
 void Promise.all([
-  // App's module graph reads deployment settings at import time (usePlugins.ts
-  // seeds the GeoLens default URL at module load), so it must evaluate only
-  // after the deployment policy has been applied.
-  deploymentPolicyReady.then(() => import("./App")),
+  // Start App's chunk downloading and evaluating while deployment.json is in
+  // flight, then apply the policy-dependent module setup once both are done.
+  // Nothing in App's module graph reads deployment settings at import time
+  // (the GeoLens default URL is seeded by initGeoLensDefaultUrl below), so the
+  // chunk can evaluate before the policy is applied; nothing renders until the
+  // policy has been.
+  Promise.all([import("./App"), import("./hooks/usePlugins"), deploymentPolicyReady]).then(
+    ([app, plugins]) => {
+      plugins.initGeoLensDefaultUrl();
+      return app;
+    },
+  ),
   import("./components/common/error-boundaries"),
   loadAuthGate(authGate),
   // Sidecar-dependent panels can issue a request as soon as App mounts. On

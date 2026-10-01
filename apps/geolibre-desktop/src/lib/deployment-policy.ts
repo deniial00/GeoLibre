@@ -258,8 +258,8 @@ function readCatalogEntry(v: unknown, index: number): Result<DeploymentServiceEn
     if (!isValidFieldValue(value)) return err(`${at}.fields.${key} has an invalid value`);
   }
   const entry: DeploymentServiceEntry = {
-    id: id.value,
-    name: name.value,
+    id: id.value.trim(),
+    name: name.value.trim(),
     kind: e.kind as ServiceLibraryKind,
     fields: e.fields as Record<string, ServiceFieldValue>,
   };
