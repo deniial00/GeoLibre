@@ -294,15 +294,16 @@ export function ProjectGalleryDialog({
           setProjects(mine);
           setHasMore(false);
           // Transfers are a best-effort add-on: a share host without the
-          // endpoints (an older deployment) must not break "My projects", so a
-          // rejected fetch yields empty lists rather than an error.
+          // endpoints (an older deployment) must not break "My projects".
+          // Preserve a previously loaded inbox through transient fetch failures;
+          // open and session changes clear it when the account can change.
           const [incoming, outgoing] = await Promise.allSettled([
             fetchIncomingTransfers({ token, signal: controller.signal }),
             fetchOutgoingTransfers({ token, signal: controller.signal }),
           ]);
           if (controller.signal.aborted) return;
-          setIncomingTransfers(incoming.status === "fulfilled" ? incoming.value : []);
-          setOutgoingTransfers(outgoing.status === "fulfilled" ? outgoing.value : []);
+          if (incoming.status === "fulfilled") setIncomingTransfers(incoming.value);
+          if (outgoing.status === "fulfilled") setOutgoingTransfers(outgoing.value);
         } else if (effectiveScope === "organizations" || effectiveScope === "groups") {
           const token = await resolveShareRequestToken(trimmedToken);
           const result = await fetchProjectsSharedWithMe({

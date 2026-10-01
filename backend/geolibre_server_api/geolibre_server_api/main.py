@@ -300,6 +300,15 @@ class ProjectTransfer(Base):
     to_organization: Mapped[Organization | None] = relationship()
 
 
+PENDING_TRANSFER_INDEX = Index(
+    "uq_project_transfers_pending",
+    ProjectTransfer.project_id,
+    unique=True,
+    sqlite_where=ProjectTransfer.status == "pending",
+    postgresql_where=ProjectTransfer.status == "pending",
+)
+
+
 class ProjectRedirect(Base):
     """The namespace and slug a project vacated when it was transferred.
 
@@ -983,6 +992,8 @@ def create_app(
     # Add the OAuth indexes idempotently when upgrading a persisted database.
     for index in OAUTH_INDEXES:
         index.create(engine, checkfirst=True)
+    # create_all does not add an index to an already-existing transfer table.
+    PENDING_TRANSFER_INDEX.create(engine, checkfirst=True)
     sessions = sessionmaker(engine, expire_on_commit=False)
     oauth_config = make_oauth_config(public_url)
     clock_fn = clock or (lambda: int(datetime.now(UTC).timestamp()))
@@ -1599,8 +1610,9 @@ def create_app(
         target = visible_read(session, session.get(Project, redirect.project_id), principal)
         raw, page_url = canonical_urls(target)
         response = RedirectResponse(page_url if page else raw, status_code=301)
-        if protected(target):
-            response.headers["Cache-Control"] = "private, no-store"
+        response.headers["Cache-Control"] = (
+            "private, no-store" if protected(target) else "public, no-cache"
+        )
         return response
 
     def project_json(
@@ -1765,6 +1777,15 @@ def create_app(
             "createdAt": transfer.created_at,
             "resolvedAt": transfer.resolved_at,
         }
+
+    def resolve_pending_transfer(session: Session, transfer_id: str, status: str) -> bool:
+        """Only one concurrent accept, decline, or cancel may resolve an offer."""
+        result = session.execute(
+            update(ProjectTransfer)
+            .where(ProjectTransfer.id == transfer_id, ProjectTransfer.status == "pending")
+            .values(status=status, resolved_at=now())
+        )
+        return result.rowcount == 1
 
     def apply_transfer(
         session: Session,
@@ -2021,9 +2042,14 @@ def create_app(
     ):
         """Delete an organization with its projects, groups, members, and invitations."""
         organization = require_organization_admin(session, organization_id, principal.account)
-        project_ids = list(
-            session.scalars(select(Project.id).where(Project.organization_id == organization.id))
-        )
+        project_rows = session.execute(
+            select(Project.id, Project.delete_protected)
+            .where(Project.organization_id == organization.id)
+            .with_for_update()
+        ).all()
+        if any(delete_protected for _, delete_protected in project_rows):
+            raise HTTPException(409, DELETE_PROTECTED)
+        project_ids = [project_id for project_id, _ in project_rows]
         for project_id in project_ids:
             session.delete(session.get(Project, project_id))
         thumbnail_group_ids = delete_group_rows(
@@ -3276,7 +3302,12 @@ def create_app(
         applied immediately: the initiator already administers the recipient.
         """
         account = principal.account
-        project = owned(session, session.get(Project, project_id), principal)
+        # Serialize offers and immediate organization moves on the same project.
+        project = owned(
+            session,
+            session.scalar(select(Project).where(Project.id == project_id).with_for_update()),
+            principal,
+        )
         if not can_transfer_project(session, project, account):
             raise HTTPException(
                 403, "organization administrator permission required to move a project"
@@ -3317,7 +3348,14 @@ def create_app(
                 session.commit()
             except IntegrityError:
                 session.rollback()
-                raise HTTPException(409, TRANSFER_SLUG_CONFLICT) from None
+                if session.scalar(
+                    select(ProjectTransfer.id).where(
+                        ProjectTransfer.project_id == project_id,
+                        ProjectTransfer.status == "pending",
+                    )
+                ):
+                    raise HTTPException(409, TRANSFER_PENDING) from None
+                raise HTTPException(409, TRANSFER_INVALID) from None
             return {
                 "transfer": transfer_json(transfer),
                 "project": project_json(project, session, account),
@@ -3414,20 +3452,27 @@ def create_app(
         )
         if transfer is None:
             raise HTTPException(404, "transfer not found")
-        project = transfer.project
+        # Lock the same project row as transfer creation before rechecking
+        # authority; a concurrent organization move cannot overtake acceptance.
+        project = session.scalar(
+            select(Project).where(Project.id == transfer.project_id).with_for_update()
+        )
+        if project is None:
+            raise HTTPException(409, TRANSFER_INVALID)
         # The initiator may have lost the right to hand the project over (left
         # the organization, say) since offering it. Void the offer rather than
         # completing a transfer they can no longer authorize.
         if transfer.from_account is None or not can_transfer_project(
             session, project, transfer.from_account
         ):
-            transfer.status = "cancelled"
-            transfer.resolved_at = now()
-            session.commit()
+            if resolve_pending_transfer(session, transfer.id, "cancelled"):
+                session.commit()
             raise HTTPException(409, TRANSFER_INVALID)
         slug = slugify(body.slug) if body and body.slug else transfer.slug
         if path_reserved(session, account.id, None, slug, project.id):
             raise HTTPException(409, TRANSFER_SLUG_CONFLICT)
+        if not resolve_pending_transfer(session, transfer.id, "accepted"):
+            raise HTTPException(409, TRANSFER_INVALID)
         apply_transfer(
             session,
             project,
@@ -3437,14 +3482,13 @@ def create_app(
             slug=slug,
         )
         transfer.slug = slug
-        transfer.status = "accepted"
-        transfer.resolved_at = now()
         try:
             session.commit()
         except IntegrityError:
             session.rollback()
             raise HTTPException(409, TRANSFER_SLUG_CONFLICT) from None
         session.refresh(project)
+        session.refresh(transfer)
         return {
             "project": project_json(project, session, account),
             "transfer": transfer_json(transfer),
@@ -3466,8 +3510,8 @@ def create_app(
         )
         if transfer is None:
             raise HTTPException(404, "transfer not found")
-        transfer.status = "declined"
-        transfer.resolved_at = now()
+        if not resolve_pending_transfer(session, transfer.id, "declined"):
+            raise HTTPException(404, "transfer not found")
         session.commit()
         return Response(status_code=204)
 
@@ -3490,8 +3534,8 @@ def create_app(
             session, transfer.project, principal.account
         ):
             raise HTTPException(404, "transfer not found")
-        transfer.status = "cancelled"
-        transfer.resolved_at = now()
+        if not resolve_pending_transfer(session, transfer.id, "cancelled"):
+            raise HTTPException(404, "transfer not found")
         session.commit()
         return Response(status_code=204)
 

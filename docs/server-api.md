@@ -304,7 +304,9 @@ Routes:
   `organization` visibility, and logs a `visibility_change` activity for each.
 - `DELETE /api/organizations/{id}` deletes the organization, its
   organization-owned projects and their stored objects, its groups, members, and
-  invitations; administrator only. Members' personal projects are kept.
+  invitations; administrator only. Members' personal projects are kept. If any
+  organization project is delete-protected, it refuses the entire deletion with
+  `409` until that project's protection is turned off.
 - `GET /api/organizations/{id}/members` lists members.
 - `PUT /api/organizations/{id}/members` adds or updates
   `{"username":"ada","role":"member"}`; administrator only. Lowering a role
@@ -642,7 +644,9 @@ organization-only project's new address is not disclosed to others: an
 anonymous request to a vacated private address is `404`, not `301`.
 Authorized redirects to private or organization-only projects use
 `Cache-Control: private, no-store` so the old path cannot retain a previously
-authorized destination after sign-out.
+authorized destination after sign-out. Public and unlisted redirects use
+`Cache-Control: public, no-cache` so a later transfer or visibility change
+revalidates the destination.
 
 ### Transfers
 
@@ -690,8 +694,8 @@ Receiving and managing:
   is optional: `{"slug": "..."}` overrides the destination slug, which is how a
   recipient resolves a slug conflict (`409 slug already exists for the new
   owner`). Responds `200` with `{"project": <project>, "transfer": <transfer>}`.
-  If the initiator no longer manages the project, the offer is cancelled and
-  the response is `409 transfer is no longer valid`.
+  If the initiator no longer manages the project, or another request resolved
+  the offer first, the response is `409 transfer is no longer valid`.
 - `POST /api/transfers/{id}/decline` (recipient only) responds `204`.
 - `DELETE /api/transfers/{id}` cancels a pending transfer (the initiator, or
   anyone who can still manage the project) and responds `204`.

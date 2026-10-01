@@ -8,7 +8,13 @@ makes DELETE refuse with a message naming it.
 
 from __future__ import annotations
 
+import json
+import uuid
+
+import pytest
+from geolibre_server_api.main import ProjectTransfer
 from helpers import account, auth, create_project
+from sqlalchemy.exc import IntegrityError
 
 
 def patch_project(client, token, project_id, body):
@@ -37,6 +43,40 @@ def test_delete_protection_rejects_an_explicit_null(client):
     project, _ = create_project(client, ada, "public", "Wetlands")
     response = patch_project(client, ada, project["id"], {"deleteProtected": None})
     assert response.status_code == 422, response.text
+
+
+def test_organization_deletion_refuses_a_protected_project(client):
+    admin = account(client, "admin")
+    organization = client.post(
+        "/api/organizations", headers=auth(admin), json={"slug": "lab", "name": "Lab"}
+    ).json()["organization"]
+    project, content = create_project(client, admin, "public", "Wetlands")
+    assert patch_project(client, admin, project["id"], {"deleteProtected": True}).status_code == 200
+    moved = client.post(
+        f"/api/projects/{project['id']}/transfers",
+        headers=auth(admin),
+        json={"organizationId": organization["id"]},
+    )
+    assert moved.status_code == 201, moved.text
+
+    refused = client.delete(f"/api/organizations/{organization['id']}", headers=auth(admin))
+    assert refused.status_code == 409
+    assert "delete-protected" in refused.json()["error"]
+    assert client.get(f"/api/projects/{project['id']}", headers=auth(admin)).status_code == 200
+    assert client.get(
+        "/org/lab/wetlands.geolibre.json",
+        headers=auth(admin),
+        follow_redirects=False,
+    ).json() == json.loads(content)
+
+    assert (
+        patch_project(client, admin, project["id"], {"deleteProtected": False}).status_code == 200
+    )
+    assert (
+        client.delete(f"/api/organizations/{organization['id']}", headers=auth(admin)).status_code
+        == 204
+    )
+    assert client.get(f"/api/projects/{project['id']}", headers=auth(admin)).status_code == 404
 
 
 def test_user_transfer_requires_acceptance_then_redirects_the_old_path(client):
@@ -74,13 +114,36 @@ def test_user_transfer_requires_acceptance_then_redirects_the_old_path(client):
     raw_redirect = client.get("/ada/wetlands.geolibre.json", follow_redirects=False)
     assert raw_redirect.status_code == 301
     assert raw_redirect.headers["location"].endswith("/bob/wetlands.geolibre.json")
+    assert raw_redirect.headers["cache-control"] == "public, no-cache"
     page_redirect = client.get("/ada/wetlands", follow_redirects=False)
     assert page_redirect.status_code == 301
     assert page_redirect.headers["location"].endswith("/bob/wetlands")
+    assert page_redirect.headers["cache-control"] == "public, no-cache"
 
     # The vacated slug stays reserved against a new upload of the same title.
     reused, _ = create_project(client, ada, "public", "Wetlands")
     assert reused["slug"] == "wetlands-2"
+
+    # A second hand-off changes the first old path's canonical destination;
+    # clients must revalidate its 301 instead of keeping Bob's old address.
+    carol = account(client, "carol")
+    next_offer = client.post(
+        f"/api/projects/{project['id']}/transfers",
+        headers=auth(bob),
+        json={"username": "carol"},
+    )
+    assert next_offer.status_code == 201, next_offer.text
+    assert (
+        client.post(
+            f"/api/transfers/{next_offer.json()['transfer']['id']}/accept",
+            headers=auth(carol),
+        ).status_code
+        == 200
+    )
+    latest_redirect = client.get("/ada/wetlands", follow_redirects=False)
+    assert latest_redirect.status_code == 301
+    assert latest_redirect.headers["location"].endswith("/carol/wetlands")
+    assert latest_redirect.headers["cache-control"] == "public, no-cache"
 
 
 def test_transfer_slug_conflicts_are_reported_and_resolvable(client):
@@ -247,6 +310,50 @@ def test_private_project_old_path_does_not_leak_via_redirect(client):
         response = client.get(path, headers=auth(bob), follow_redirects=False)
         assert response.status_code == 301
         assert response.headers["cache-control"] == "private, no-store"
+
+
+def test_only_one_pending_offer_is_allowed_in_storage(client):
+    ada = account(client, "ada")
+    account(client, "bob")
+    project, _ = create_project(client, ada)
+    first = client.post(
+        f"/api/projects/{project['id']}/transfers",
+        headers=auth(ada),
+        json={"username": "bob"},
+    )
+    assert first.status_code == 201, first.text
+
+    # The database, not just the API's preflight SELECT, must reject a second
+    # offer so two simultaneous requests cannot both persist a pending row.
+    with client.app.state.session_factory() as session:
+        original = session.get(ProjectTransfer, first.json()["transfer"]["id"])
+        session.add(
+            ProjectTransfer(
+                id=str(uuid.uuid4()),
+                project_id=original.project_id,
+                from_account_id=original.from_account_id,
+                to_account_id=original.to_account_id,
+                slug="another",
+                status="pending",
+                created_at=original.created_at,
+            )
+        )
+        with pytest.raises(IntegrityError):
+            session.commit()
+        session.rollback()
+
+    assert (
+        client.delete(
+            f"/api/transfers/{first.json()['transfer']['id']}", headers=auth(ada)
+        ).status_code
+        == 204
+    )
+    replacement = client.post(
+        f"/api/projects/{project['id']}/transfers",
+        headers=auth(ada),
+        json={"username": "bob"},
+    )
+    assert replacement.status_code == 201, replacement.text
 
 
 def test_transfer_guards_pending_decline_cancel_and_delete(client):
