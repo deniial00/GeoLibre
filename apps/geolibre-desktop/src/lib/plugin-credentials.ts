@@ -251,7 +251,10 @@ function setBrowser(account: string, key: string, value: string): boolean {
     try {
       window.localStorage.removeItem(legacyKey);
     } catch {
-      // Cleanup failed: the write itself landed, so it still counts as saved.
+      // Cleanup failed: without the override a later read would migrate the
+      // legacy value back over a cleared or replaced token.
+      sessionOverrides.set(account, value);
+      return false;
     }
   }
   sessionOverrides.delete(account);
