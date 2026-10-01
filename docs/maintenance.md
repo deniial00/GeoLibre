@@ -693,6 +693,20 @@ manual check, not a Dependabot event:
   the `geolibre-arcgis-sdk` service-worker rule in `vite.config.ts`. The
   version is in every URL, so a bump mints new cache entries.
 
+### `httpx` (`backend/geolibre_server_api/pyproject.toml`) — private transport pool
+
+The projects server's protection against identity-provider requests to internal
+addresses (`geolibre_server_api/egress.py`) needs an httpcore network backend,
+which `httpx.HTTPTransport` does not accept. `GuardedTransport` therefore
+replaces the private `HTTPTransport._pool` with an `httpcore.ConnectionPool`
+built on `GuardedBackend`. If `_pool` is renamed, building the transport raises
+`RuntimeError` at startup. If httpx keeps `_pool` but stops sending requests
+through it, the guard is bypassed with no error. After a bump, check that
+`HTTPTransport.handle_request` still sends requests through `self._pool`, and
+run `python -m pytest backend/geolibre_server_api/tests/test_egress.py`
+(`test_identity_provider_client_refuses_loopback` makes a real connection
+through the transport).
+
 ## Adding a blend mode
 
 **Do not add a blend mode without checking it in the browser.** MapLibre's blend

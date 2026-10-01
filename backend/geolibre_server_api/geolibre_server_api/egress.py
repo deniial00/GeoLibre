@@ -105,11 +105,20 @@ class GuardedTransport(httpx.HTTPTransport):
     """``httpx.HTTPTransport`` over a pool whose connections pass ``GuardedBackend``.
 
     ``HTTPTransport`` accepts no network backend, so its pool is rebuilt with
-    one; request mapping and error translation stay httpx's own.
+    one; request mapping and error translation stay httpx's own. ``_pool`` is
+    private httpx API (see docs/maintenance.md): if it disappears, building the
+    transport fails instead of silently keeping the unguarded pool.
     """
 
     def __init__(self, ssl_context: ssl.SSLContext, allowed: Networks):
         super().__init__(verify=ssl_context, trust_env=False)
+        unguarded = getattr(self, "_pool", None)
+        if not isinstance(unguarded, httpcore.ConnectionPool):
+            raise RuntimeError(
+                "httpx.HTTPTransport no longer keeps its pool in `_pool`; "
+                "the identity-provider egress guard cannot be installed"
+            )
+        unguarded.close()
         self._pool = httpcore.ConnectionPool(
             ssl_context=ssl_context,
             max_connections=100,
