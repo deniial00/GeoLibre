@@ -90,21 +90,28 @@ import { configureShareOAuthReadiness, markColdShareCallback } from "./lib/share
 
 installDiagnosticsCapture();
 
-// deployment.json (issue #2783): the deployment's policy, fetched before the
-// app renders so nothing paints with settings it then retracts. Absent
-// (404/HTML fallback/error/timeout) means today's env-driven behavior. The
-// fetch goes through the diagnostics wrapper installed above, whose optional
-// marker keeps a 404 at info level.
-const deploymentPolicyReady = loadDeploymentPolicy().then((policy) => {
-  // A deployment-configured app name also titles the browser tab; index.html's
-  // static <title> stays the fallback when none is set. Best effort: a title
-  // failure must not stop the app from rendering.
+// A deployment-configured app name also titles the browser tab; index.html's
+// static <title> stays the fallback when none is set. Best effort: a title
+// failure must not stop the app from rendering. Applied once up front from the
+// env so the tab is right while deployment.json is in flight, and again once
+// the policy (which can set branding.appName) has been applied.
+function applyConfiguredAppName(): void {
   try {
     const configuredAppName = readConfiguredAppName();
     if (configuredAppName) document.title = configuredAppName;
   } catch (error) {
     console.error("[GeoLibre] Failed to apply the configured app name", error);
   }
+}
+applyConfiguredAppName();
+
+// deployment.json (issue #2783): the deployment's policy, fetched before the
+// app renders so nothing paints with settings it then retracts. Absent
+// (404/HTML fallback/error/timeout) means today's env-driven behavior. The
+// fetch goes through the diagnostics wrapper installed above, whose optional
+// marker keeps a 404 at info level.
+const deploymentPolicyReady = loadDeploymentPolicy().then((policy) => {
+  applyConfiguredAppName();
   // Capability application below is deliberately NOT guarded: if it throws, the
   // app must fail to start rather than render with the default full grant.
 

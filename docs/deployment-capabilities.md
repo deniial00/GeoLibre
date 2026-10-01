@@ -74,6 +74,15 @@ docker build \
     prebuilt image still cannot set this variable, because `docker/entrypoint.sh`
     does not publish it into the runtime configuration.
 
+!!! warning "A late or blocked `deployment.json` fails open"
+    The browser waits at most 3 seconds for `deployment.json`. If the request
+    is dropped, blocked or slower than that, the session starts **without** the
+    policy, and the capabilities then come from `VITE_GEOLIBRE_CAPABILITIES` or,
+    absent that, the full default grant. This is the same client-side gate as
+    everything on this page: it limits what the interface offers and is not
+    access control. Do not rely on it where someone can interfere with the
+    request; enforce restrictions on the server instead.
+
 ### Defaults and parsing
 
 - **Unset (the default) grants everything.** An existing deployment that

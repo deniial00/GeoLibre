@@ -32,6 +32,12 @@ What each section does today:
   `false` removes any operator-configured AI proxy (a provider a user enters in
   Settings is unaffected). `ai.model` picks the proxy's model.
 
+Because the wait is bounded, `capabilities` fails open like every other
+section: a `deployment.json` that is blocked or arrives late means that session
+runs with the env-derived capabilities or the default full grant. See
+[Deployment capabilities](deployment-capabilities.md) before using it as a
+restriction.
+
 ## Example
 
 ```json
