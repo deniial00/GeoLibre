@@ -18,9 +18,11 @@
 import type { GeoLibreCredentialLocation } from "@geolibre/plugins";
 import {
   credentialStorageLocation,
+  hasPendingCredential,
   isStorableCredentialAccount,
   queueCredentialChanges,
   reportCredentialStorageError,
+  useCredentialStorageStatus,
 } from "./credential-store";
 
 /** Desktop: non-secret JSON array of accounts that have a stored value. */
@@ -37,6 +39,8 @@ export function pluginCredentialAccount(pluginId: string, name: string): string 
 
 /** Desktop: account → stored value, for this session. */
 let values: Record<string, string> = {};
+/** Desktop: account → value last handed to the keychain write queue. */
+let persisted: Record<string, string> = {};
 /** Desktop: false until hydration succeeds; edits then stay in memory. */
 let writable = false;
 /** Web: values whose localStorage write failed, kept for this session. */
@@ -91,9 +95,15 @@ export function hydratePluginCredentials(
       return;
     }
   }
+  persisted = { ...values };
   writable = true;
 }
 
+/**
+ * Checks the host-call arguments and returns the desktop account. Throws when
+ * the owner is missing (the call bypassed the plugin-scoped app) or the name
+ * is invalid.
+ */
 function validate(name: string, ownerPluginId: string | undefined): string {
   if (typeof ownerPluginId !== "string" || ownerPluginId === "") {
     throw new Error("app.credentials must be called through the app API a plugin receives.");
@@ -104,31 +114,63 @@ function validate(name: string, ownerPluginId: string | undefined): string {
   return pluginCredentialAccount(ownerPluginId, name);
 }
 
+/** The web localStorage key for one plugin's credential. */
 function browserKey(ownerPluginId: string, name: string): string {
   return `${PLUGIN_CREDENTIAL_BROWSER_KEY_PREFIX}${ownerPluginId}.${name}`;
 }
 
+/** Desktop read: the in-memory value, "" when none. */
 function getDesktop(account: string): string {
   return values[account] ?? "";
 }
 
+/**
+ * Desktop write. Memory changes first so the session keeps working, but
+ * `persisted` only advances once a change has been handed to the write queue,
+ * so repeating a request after an index or keychain failure retries it
+ * instead of reporting success. Adds are index-first (a crash never leaves an
+ * unindexed secret); deletes drop the index entry only after the keychain
+ * delete succeeded (a failed delete is never forgotten across a restart).
+ * Returns false while the account has an unrecovered failed keychain write.
+ */
 function setDesktop(account: string, value: string): boolean {
-  const previous = values[account] ?? "";
   if (value === "") delete values[account];
   else values[account] = value;
   if (!writable || !isStorableCredentialAccount(account)) return false;
-  if (previous === value) return true;
-  try {
-    const index = new Set(readPluginCredentialIndex());
-    if (value) index.add(account);
-    else index.delete(account);
-    window.localStorage.setItem(PLUGIN_CREDENTIAL_ACCOUNTS_STORAGE_KEY, JSON.stringify([...index]));
-  } catch (error) {
-    reportCredentialStorageError(error);
-    return false;
+  if (value) {
+    try {
+      const index = new Set(readPluginCredentialIndex());
+      index.add(account);
+      window.localStorage.setItem(
+        PLUGIN_CREDENTIAL_ACCOUNTS_STORAGE_KEY,
+        JSON.stringify([...index]),
+      );
+    } catch (error) {
+      reportCredentialStorageError(error);
+      return false;
+    }
   }
-  void queueCredentialChanges({ [account]: previous }, { [account]: value });
-  return true;
+  const failedBefore = useCredentialStorageStatus.getState().failedAccounts[account] === true;
+  const previous = persisted[account] ?? "";
+  if (value) persisted[account] = value;
+  else delete persisted[account];
+  const drained = queueCredentialChanges({ [account]: previous }, { [account]: value });
+  if (!value) {
+    void drained.then(() => {
+      // A newer value, or a delete that has not landed, keeps the entry.
+      if (account in values || hasPendingCredential(account)) return;
+      try {
+        const index = readPluginCredentialIndex().filter((entry) => entry !== account);
+        window.localStorage.setItem(
+          PLUGIN_CREDENTIAL_ACCOUNTS_STORAGE_KEY,
+          JSON.stringify(index),
+        );
+      } catch (error) {
+        reportCredentialStorageError(error);
+      }
+    });
+  }
+  return !failedBefore;
 }
 
 function getBrowser(account: string, key: string): string {
