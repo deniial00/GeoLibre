@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { afterEach, before, beforeEach, describe, it } from "node:test";
 import type { PluginManager } from "../packages/plugins/src/plugin-manager";
 import type { GeoLibreAppAPI } from "../packages/plugins/src/types";
+import { strToU8, zipSync } from "fflate";
 
 // Recovering from a SHA-256 pin block (#2318). external-plugins pulls in
 // browser-only modules through its import chain, so the module is imported
@@ -16,6 +17,7 @@ const ENTRY_URL = "http://localhost:7777/pin-demo/entry.js";
 // Files the fetch shim serves, keyed by absolute URL.
 let served = new Map<string, string>();
 let storage = new Map<string, string>();
+let requests: string[] = [];
 
 function pluginBundle(): Map<string, string> {
   return new Map([
@@ -56,6 +58,7 @@ function installBrowserShims(): void {
   globals.document = { getElementById: () => null };
   globals.fetch = (input: unknown) => {
     const url = String(input);
+    requests.push(url.split("?")[0]);
     const body = serve(url);
     if (body === undefined) {
       return Promise.resolve({ ok: false, status: 404 } as Response);
@@ -100,6 +103,7 @@ describe("recovering a URL plugin blocked by its integrity pin", () => {
   beforeEach(() => {
     storage = new Map();
     served = pluginBundle();
+    requests = [];
     manager = new PluginManagerCtor();
   });
 
@@ -108,6 +112,99 @@ describe("recovering a URL plugin blocked by its integrity pin", () => {
     // left registered by one test would be skipped as "already loaded" by the
     // next. Uninstalling every URL is the same teardown the app performs.
     externalPlugins.unloadRemovedUrlPlugins(manager, [], app);
+  });
+
+  it("reports a blocked ID before fetching entry or style, even when allowed", async () => {
+    served.set(
+      MANIFEST_URL,
+      JSON.stringify({
+        id: "pin-demo", name: "Pin Demo", version: "1.0.0",
+        entry: "entry.js", style: "style.css",
+      }),
+    );
+    const result = await externalPlugins.loadExternalPlugins(manager, [], [MANIFEST_URL], {
+      policy: { version: 1, plugins: { blocked: ["pin-demo"], allowed: ["pin-demo"] } },
+    });
+    assert.deepEqual(result.loadedPluginIds, []);
+    assert.deepEqual(manager.list(), []);
+    assert.deepEqual(requests, [MANIFEST_URL]);
+    assert.equal(result.issues[0].sourceUrl, MANIFEST_URL);
+    assert.match(result.issues[0].message, /blocked by deployment policy/);
+  });
+
+  it("allowed empty denies URLs but exempts bundled drop-ins", async () => {
+    const policy = { version: 1 as const, plugins: { allowed: [] } };
+    const denied = await externalPlugins.loadExternalPlugins(manager, [], [MANIFEST_URL], { policy });
+    assert.deepEqual(requests, [MANIFEST_URL]);
+    assert.match(denied.issues[0].message, /not allowed/);
+    requests = [];
+    const bundled = await externalPlugins.loadExternalPlugins(manager, [], [MANIFEST_URL], {
+      policy, bundledManifestUrls: [MANIFEST_URL],
+    });
+    assert.deepEqual(bundled.loadedPluginIds, ["pin-demo"]);
+    assert.deepEqual(bundled.issues, []);
+    assert.deepEqual(requests, [MANIFEST_URL, ENTRY_URL]);
+  });
+
+  it("sideload false denies stored manual URLs but permits registry URLs", async () => {
+    const policy = { version: 1 as const, plugins: { sideload: false } };
+    const denied = await externalPlugins.loadExternalPlugins(manager, [], [MANIFEST_URL], { policy });
+    assert.deepEqual(requests, []);
+    assert.match(denied.issues[0].message, /sideloading/);
+    const registry = await externalPlugins.loadExternalPlugins(manager, [], [MANIFEST_URL], {
+      policy, registryManifestUrls: [MANIFEST_URL],
+    });
+    assert.deepEqual(registry.loadedPluginIds, ["pin-demo"]);
+    assert.deepEqual(registry.issues, []);
+  });
+
+  it("programmatic archive installation refuses before unpacking with a load issue", async () => {
+    await assert.rejects(
+      externalPlugins.installWebPluginArchive(manager, "denied.zip", new Uint8Array(), app, {
+        version: 1, plugins: { sideload: false },
+      }),
+      (error: unknown) => {
+        assert.ok(error instanceof externalPlugins.PluginPolicyError);
+        assert.equal(error.archiveName, "denied.zip");
+        assert.match(error.message, /sideloading/);
+        return true;
+      },
+    );
+    assert.deepEqual(manager.list(), []);
+  });
+
+  it("blocked archive code is not evaluated or persisted", async () => {
+    const bytes = zipSync({
+      "plugin.json": strToU8(served.get(MANIFEST_URL)!),
+      "entry.js": strToU8("throw new Error('archive entry executed');"),
+    });
+    await assert.rejects(
+      externalPlugins.installWebPluginArchive(manager, "blocked.zip", bytes, app, {
+        version: 1, plugins: { blocked: ["pin-demo"] },
+      }),
+      (error: unknown) => {
+        assert.ok(error instanceof externalPlugins.PluginPolicyError);
+        assert.equal(error.archiveName, "blocked.zip");
+        assert.match(error.message, /blocked/);
+        return true;
+      },
+    );
+    assert.deepEqual(manager.list(), []);
+    assert.deepEqual(await externalPlugins.listInstalledWebPlugins(), []);
+  });
+
+  it("policy defaultActive activates only on fresh-project restore", async () => {
+    await externalPlugins.loadExternalPlugins(manager, [], [MANIFEST_URL], {
+      policy: { version: 1, plugins: { defaultActive: ["pin-demo"] } },
+    });
+    assert.equal(manager.isActive("pin-demo"), false);
+    manager.restoreProjectState(null, app);
+    assert.equal(manager.isActive("pin-demo"), true);
+    manager.restoreProjectState(
+      { manifestUrls: [], activePluginIds: [], mapControlPositions: {}, settings: {} },
+      app,
+    );
+    assert.equal(manager.isActive("pin-demo"), false);
   });
 
   it("clears the pin on uninstall even though the blocked plugin never registered", async () => {

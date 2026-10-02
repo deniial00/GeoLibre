@@ -23,8 +23,9 @@ What each section does today:
 - `interface` replaces `admin-profile.json` whole; fields are not merged. An
   empty `interface` (`{}`) configures nothing and counts as absent, so
   `admin-profile.json` still applies.
-- `plugins.registryUrl` sets the plugin registry. `allowed`, `blocked`,
-  `sideload` and `defaultActive` are stored but not enforced yet.
+- `plugins.registryUrl` sets the plugin registry. `allowed`, `blocked` and
+  `sideload` gate external plugin loads and installs; `defaultActive` seeds
+  activation in fresh projects.
 - `services`, `sharing`, `geolens` and `branding.appName` override the
   matching `GEOLIBRE_*` deployment settings. `sharing.embedOrigins: []` turns
   the embed API off.
@@ -170,6 +171,31 @@ mean opposite things. Omitted means "no restriction from this file"; `[]` means
 
 An id in `blocked` is never loaded, even if it is also in `allowed`; when
 `allowed` is present, any id not in it is not loaded.
+
+The evaluator checks sideload permission first, then `blocked`, then `allowed`.
+Bundled drop-ins under `public/plugins/` are exempt from `allowed` and
+`sideload`, but still honor `blocked`. Built-in plugins are not external plugins
+and are not governed by these load restrictions.
+
+For URL plugins, GeoLibre must fetch `plugin.json` to learn the id. A denied id
+never has its entry or stylesheet fetched or its code imported. Denials appear
+as external plugin load issues.
+
+With `sideload: false`, manifest URL, zip and directory controls disappear and
+programmatic installs refuse. Project-supplied manifest URLs produce no trust
+prompt and cannot be trusted into settings. Previously installed URLs stay in
+settings, but only URLs recognized by the current configured registry may load
+(plus bundled drop-ins). If that registry is unavailable, these installed URLs
+fail closed; bundled drop-ins can still load. Existing file-installed archives
+and additional directories cannot load.
+
+`defaultActive` marks permitted, loaded external plugins for activation in a
+fresh project. It does not override a saved project's active plugin list and
+does not allow a denied plugin to load. Without a `plugins` section, existing
+loading and activation behavior is unchanged.
+
+Plugin policy is client-side enforcement only, not a server security boundary:
+a modified client can bypass it. It does not provide signing or sandboxing.
 
 ## Precedence between sources
 

@@ -32,6 +32,31 @@ import {
   verifyPluginBundleIntegrity,
 } from "./plugin-integrity";
 import { isTauri } from "./tauri-io";
+import type { DeploymentPolicy } from "./deployment-policy";
+import { getDeploymentPolicy } from "./deployment-env";
+import { evaluatePlugin, type PluginSource } from "./plugin-policy";
+
+export class PluginPolicyError extends Error implements ExternalPluginLoadIssue {
+  constructor(
+    public readonly archiveName: string,
+    message: string,
+    public readonly sourceUrl?: string,
+  ) {
+    super(message);
+    this.name = "PluginPolicyError";
+  }
+}
+
+function enforcePluginPolicy(
+  id: string,
+  source: PluginSource,
+  policy: DeploymentPolicy | null,
+  archiveName: string,
+  sourceUrl?: string,
+): void {
+  const decision = evaluatePlugin(id, source, policy);
+  if (!decision.allowed) throw new PluginPolicyError(archiveName, decision.reason, sourceUrl);
+}
 
 interface ExternalPluginBundleError {
   archiveName: string;
@@ -102,10 +127,17 @@ export async function loadExternalPlugins(
      * would stop loading until they reloaded it from Settings.
      */
     bundledManifestUrls?: readonly string[];
+    policy?: DeploymentPolicy | null;
+    /** URLs recognized by the configured registry, not arbitrary installed URLs. */
+    registryManifestUrls?: readonly string[];
   } = {},
 ): Promise<ExternalPluginLoadResult> {
   const issues: ExternalPluginLoadIssue[] = [];
   const bundledUrls = new Set(options.bundledManifestUrls ?? []);
+  const policy = options.policy === undefined ? getDeploymentPolicy() : options.policy;
+  const registryUrls = new Set(options.registryManifestUrls ?? []);
+  const urlSource = (url: string): PluginSource =>
+    bundledUrls.has(url) ? "bundled" : registryUrls.has(url) ? "registry" : "manifest-url";
   // The filesystem scan (Tauri IPC + disk), the manifest URL fetches (network),
   // and the IndexedDB read (web-installed archives) are independent, so overlap
   // them. Web-installed archives are the browser counterpart of the desktop
@@ -113,13 +145,15 @@ export async function loadExternalPlugins(
   // re-scans it, while the web build replays the unpacked bundle stored here.
   const [filesystemResult, urlBundles, webBundles] = await Promise.all([
     isTauri()
-      ? loadFilesystemPluginBundles(additionalPluginDirectories)
+      ? loadFilesystemPluginBundles(
+          policy?.plugins?.sideload === false ? [] : additionalPluginDirectories,
+        )
       : Promise.resolve<ExternalPluginBundleLoadResult>({
           pluginsDirectories: [],
           bundles: [],
           errors: [],
         }),
-    loadPluginUrlBundles(pluginManifestUrls, issues, bundledUrls),
+    loadPluginUrlBundles(pluginManifestUrls, issues, bundledUrls, policy, urlSource),
     loadWebInstalledPluginBundles(),
   ]);
   for (const error of filesystemResult.errors) {
@@ -133,6 +167,13 @@ export async function loadExternalPlugins(
 
   for (const bundle of [...filesystemResult.bundles, ...urlBundles, ...webBundles]) {
     try {
+      enforcePluginPolicy(
+        bundle.manifest.id,
+        bundle.sourceUrl ? urlSource(bundle.sourceUrl) : "zip",
+        policy,
+        bundle.archiveName,
+        bundle.sourceUrl,
+      );
       const loadedFrom = externallyLoadedPluginSources.get(bundle.manifest.id);
       if (loadedFrom !== undefined) {
         // Already loaded by a previous scan; a settings change re-runs the
@@ -158,13 +199,14 @@ export async function loadExternalPlugins(
 
       const plugin = await importExternalPlugin(bundle);
       manager.register(plugin);
-      // Manifest-level activeByDefault, honored for bundled drop-ins only
-      // (silently ignored elsewhere; see the manifest type doc). Marked after
-      // register() so the restore pass activates it with a real app API.
+      // Deployment defaults may opt permitted external plugins in; manifest
+      // activeByDefault remains bundled-only. Restore uses these marks only
+      // when the project has no saved plugin state.
       if (
-        bundle.manifest.activeByDefault === true &&
-        bundle.sourceUrl !== undefined &&
-        bundledUrls.has(bundle.sourceUrl)
+        policy?.plugins?.defaultActive?.includes(plugin.id) ||
+        (bundle.manifest.activeByDefault === true &&
+          bundle.sourceUrl !== undefined &&
+          bundledUrls.has(bundle.sourceUrl))
       ) {
         manager.markDefaultActive(plugin.id);
       }
@@ -236,6 +278,8 @@ async function loadPluginUrlBundles(
   issues: ExternalPluginLoadIssue[],
   /** Manifest URLs of deployer-baked drop-ins, exempt from SHA-256 pinning. */
   bundledUrls: ReadonlySet<string>,
+  policy: DeploymentPolicy | null,
+  urlSource: (url: string) => PluginSource,
 ): Promise<ExternalPluginBundle[]> {
   const bundles: ExternalPluginBundle[] = [];
   // Record the attempt before the fetch, not after a successful verification:
@@ -245,7 +289,9 @@ async function loadPluginUrlBundles(
     if (!bundledUrls.has(manifestUrl)) pinnedUrlLoadAttempts.add(manifestUrl);
   }
   const results = await Promise.allSettled(
-    manifestUrls.map((manifestUrl) => loadPluginUrlBundle(manifestUrl)),
+    manifestUrls.map((manifestUrl) =>
+      loadPluginUrlBundle(manifestUrl, undefined, policy, urlSource(manifestUrl)),
+    ),
   );
   for (const [index, result] of results.entries()) {
     if (result.status === "fulfilled") {
@@ -306,7 +352,13 @@ async function loadPluginUrlBundles(
 async function loadPluginUrlBundle(
   manifestUrl: string,
   signal?: AbortSignal,
+  policy: DeploymentPolicy | null = getDeploymentPolicy(),
+  source: PluginSource = "manifest-url",
 ): Promise<ExternalPluginBundle> {
+  // Sideload denial needs no manifest request; ID gates run after plugin.json.
+  if (policy?.plugins?.sideload === false && source !== "registry" && source !== "bundled") {
+    enforcePluginPolicy("", source, policy, manifestUrl, manifestUrl);
+  }
   // Revalidate every request (manifest, entry, style) instead of serving from
   // the HTTP cache. A static host can hand the manifest and the entry very
   // different cache lifetimes (e.g. GitHub Pages / Fastly cache JSON for ~10
@@ -328,6 +380,7 @@ async function loadPluginUrlBundle(
   if (!isExternalPluginManifest(manifest)) {
     throw new Error("Plugin manifest is invalid.");
   }
+  enforcePluginPolicy(manifest.id, source, policy, manifestUrl, manifestUrl);
 
   const cacheToken = pluginAssetCacheToken(manifestResponse, manifest);
   const entryUrl = withPluginAssetCacheToken(
@@ -546,8 +599,13 @@ export async function installWebPluginArchive(
   fileName: string,
   bytes: Uint8Array,
   app: GeoLibreAppAPI,
+  policy: DeploymentPolicy | null = getDeploymentPolicy(),
 ): Promise<string> {
+  if (policy?.plugins?.sideload === false) {
+    enforcePluginPolicy("", "zip", policy, fileName);
+  }
   const bundle = await bundleFromZipBytes(fileName, bytes);
+  enforcePluginPolicy(bundle.manifest.id, "zip", policy, fileName);
   // importExternalPlugin validates the exported plugin, that it matches the
   // manifest id/name/version, and rejects activeByDefault.
   const plugin = await importExternalPlugin(bundle);
@@ -578,6 +636,7 @@ export async function installWebPluginArchive(
   }
 
   manager.register(plugin);
+  if (policy?.plugins?.defaultActive?.includes(plugin.id)) manager.markDefaultActive(plugin.id);
   externallyLoadedPluginSources.set(plugin.id, webPluginSource(plugin.id));
   if (bundle.styleSource) {
     injectExternalPluginStyle(plugin.id, bundle.styleSource);
@@ -731,10 +790,11 @@ export function reloadExternalUrlPlugin(
   manager: PluginManager,
   manifestUrl: string,
   app: GeoLibreAppAPI,
+  options: { policy?: DeploymentPolicy | null; source?: PluginSource } = {},
 ): Promise<GeoLibrePlugin> {
   const inFlight = inFlightUrlUpgrades.get(manifestUrl);
   if (inFlight) return inFlight;
-  const promise = reloadExternalUrlPluginUncoalesced(manager, manifestUrl, app).finally(() => {
+  const promise = reloadExternalUrlPluginUncoalesced(manager, manifestUrl, app, options).finally(() => {
     inFlightUrlUpgrades.delete(manifestUrl);
   });
   inFlightUrlUpgrades.set(manifestUrl, promise);
@@ -745,6 +805,7 @@ async function reloadExternalUrlPluginUncoalesced(
   manager: PluginManager,
   manifestUrl: string,
   app: GeoLibreAppAPI,
+  options: { policy?: DeploymentPolicy | null; source?: PluginSource },
 ): Promise<GeoLibrePlugin> {
   let existingId: string | null = null;
   for (const [id, source] of externallyLoadedPluginSources) {
@@ -754,6 +815,15 @@ async function reloadExternalUrlPluginUncoalesced(
     }
   }
   const wasActive = existingId ? manager.isActive(existingId) : false;
+  if (existingId !== null) {
+    enforcePluginPolicy(
+      existingId,
+      options.source ?? "manifest-url",
+      options.policy === undefined ? getDeploymentPolicy() : options.policy,
+      manifestUrl,
+      manifestUrl,
+    );
+  }
 
   // Fetch and validate the new version first; if this throws the old plugin is
   // untouched. Bound the fetch so a stalled endpoint can't leave the Update
@@ -763,7 +833,12 @@ async function reloadExternalUrlPluginUncoalesced(
   let bundle: ExternalPluginBundle;
   let plugin: GeoLibrePlugin;
   try {
-    bundle = await loadPluginUrlBundle(manifestUrl, controller.signal);
+    bundle = await loadPluginUrlBundle(
+      manifestUrl,
+      controller.signal,
+      options.policy === undefined ? getDeploymentPolicy() : options.policy,
+      options.source ?? "manifest-url",
+    );
     // The timeout only bounds the fetch/stream above; a dynamic import() of a
     // local blob URL can't be aborted, but it evaluates near-instantly so it is
     // not a practical hang risk.

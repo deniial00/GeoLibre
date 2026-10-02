@@ -1,5 +1,6 @@
 import { expect, test, type Page } from "@playwright/test";
 import { strToU8, zipSync } from "fflate";
+import { createEmptyProject, DEFAULT_LAYER_STYLE } from "@geolibre/core";
 
 // A minimal but valid external GeoLibre plugin: the entry is a self-contained
 // ESM module exporting a GeoLibrePlugin whose id/name/version match the
@@ -100,4 +101,117 @@ test("installs a plugin from an uploaded zip, persists it across reload, and uni
   await page.keyboard.press("Escape");
   await page.getByRole("button", { name: "Plugins", exact: true }).click();
   await expect(page.getByRole("menu").getByText(PLUGIN_NAME)).toHaveCount(0);
+});
+
+test("blocked archive installs report denial without registering or persisting the plugin", async ({
+  page,
+}) => {
+  await page.route("**/deployment.json", (route) => route.fulfill({
+    json: { version: 1, plugins: { blocked: [PLUGIN_ID] } },
+  }));
+  await page.goto("/");
+  await expect(page.getByTestId("map-canvas")).toBeVisible();
+  const dialog = await openManagePluginsSettings(page);
+  const [chooser] = await Promise.all([
+    page.waitForEvent("filechooser"),
+    dialog.getByRole("button", { name: /Choose \.zip/ }).click(),
+  ]);
+  await chooser.setFiles({
+    name: `${PLUGIN_ID}.zip`,
+    mimeType: "application/zip",
+    buffer: buildPluginZip(),
+  });
+  await expect(dialog.getByText(`Plugin '${PLUGIN_ID}' is blocked by deployment policy.`)).toBeVisible();
+  await expect(dialog.getByRole("button", { name: `Uninstall ${PLUGIN_NAME}` })).toHaveCount(0);
+  await page.reload();
+  await expect(page.getByTestId("map-canvas")).toBeVisible();
+  await page.getByRole("button", { name: "Plugins", exact: true }).click();
+  await expect(page.getByRole("menu").getByText(PLUGIN_NAME)).toHaveCount(0);
+});
+
+test("sideload=false hides installation controls and ignores project manifest URLs without prompting", async ({
+  page,
+}) => {
+  await page.route("**/deployment.json", (route) =>
+    route.fulfill({ json: { version: 1, plugins: { sideload: false } } }),
+  );
+  const manifestUrl = "https://example.com/e2e-policy-plugin/plugin.json";
+  const pluginRequests: string[] = [];
+  await page.route("https://example.com/e2e-policy-plugin/**", (route) => {
+    pluginRequests.push(route.request().url());
+    return route.abort();
+  });
+  await page.goto("/");
+  await expect(page.getByTestId("map-canvas")).toBeVisible();
+
+  const dialog = await openManagePluginsSettings(page);
+  await expect(dialog.getByRole("button", { name: /Choose \.zip/ })).toHaveCount(0);
+  await expect(dialog.getByRole("textbox", { name: "Plugin manifest URL" })).toHaveCount(0);
+  await expect(dialog.getByRole("textbox", { name: "Plugin directory" })).toHaveCount(0);
+  await expect(dialog.getByRole("button", { name: "Browse plugin directory" })).toHaveCount(0);
+  await page.keyboard.press("Escape");
+
+  const project = createEmptyProject();
+  project.plugins = {
+    manifestUrls: [manifestUrl],
+    activePluginIds: [PLUGIN_ID],
+    mapControlPositions: {},
+    settings: {},
+  };
+  project.layers = [{
+    id: "policy-project-layer",
+    name: "Policy project loaded",
+    type: "geojson",
+    source: { type: "geojson" },
+    visible: true,
+    opacity: 1,
+    style: DEFAULT_LAYER_STYLE,
+    metadata: {},
+    geojson: { type: "FeatureCollection", features: [] },
+  }];
+  await page.evaluate((text) => {
+    const dataTransfer = new DataTransfer();
+    dataTransfer.items.add(new File([text], "policy.geolibre.json", { type: "application/json" }));
+    const target = document.querySelector('[data-testid="desktop-shell"]')!;
+    for (const type of ["dragenter", "dragover", "drop"]) {
+      target.dispatchEvent(new DragEvent(type, {
+        bubbles: true,
+        cancelable: true,
+        dataTransfer,
+      }));
+    }
+  }, JSON.stringify(project));
+  await expect(page.locator('[data-testid="layer-row"][data-layer-name="Policy project loaded"]')).toBeVisible();
+  await expect(page.getByRole("dialog", { name: "Load plugins from this project?" })).toHaveCount(0);
+  await page.getByRole("button", { name: "Plugins", exact: true }).click();
+  await expect(page.getByRole("menu").getByText(PLUGIN_NAME)).toHaveCount(0);
+  expect(pluginRequests).toEqual([]);
+});
+
+test("deployment plugin rules filter registry installation entries", async ({ page }) => {
+  await page.route("**/deployment.json", (route) => route.fulfill({
+    json: {
+      version: 1,
+      plugins: {
+        registryUrl: "https://example.com/policy-registry.json",
+        allowed: ["allowed-plugin"],
+        blocked: ["blocked-plugin"],
+      },
+    },
+  }));
+  await page.route("https://example.com/policy-registry.json", (route) => route.fulfill({
+    json: ["allowed-plugin", "blocked-plugin", "unlisted-plugin"].map((id) => ({
+      id,
+      name: id,
+      version: "2.0.0",
+      manifestUrl: `https://example.com/${id}/plugin.json`,
+    })),
+  }));
+  await page.goto("/");
+  await expect(page.getByTestId("map-canvas")).toBeVisible();
+  const dialog = await openManagePluginsSettings(page);
+  await dialog.getByRole("button", { name: /^All / }).click();
+  await expect(dialog.getByRole("button", { name: "Install allowed-plugin" })).toBeVisible();
+  await expect(dialog.getByText("blocked-plugin", { exact: true })).toHaveCount(0);
+  await expect(dialog.getByText("unlisted-plugin", { exact: true })).toHaveCount(0);
 });

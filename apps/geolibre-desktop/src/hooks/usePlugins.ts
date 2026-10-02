@@ -125,7 +125,11 @@ import {
   closeFloatingPanel,
   getOpenFloatingPanels,
 } from "@geolibre/plugins";
-import { readDeploymentEnvValue } from "../lib/deployment-env";
+import { getDeploymentPolicy, readDeploymentEnvValue } from "../lib/deployment-env";
+import type { DeploymentPolicy } from "../lib/deployment-policy";
+import { evaluatePlugin } from "../lib/plugin-policy";
+import { fetchPluginRegistry } from "../lib/plugin-registry";
+import { bundleFromZipBytes } from "../lib/plugin-archive-unpack";
 import { CesiumEngine, getPrimaryCesiumControlHost, type MapEngine } from "@geolibre/map";
 import type {
   GeoLibreCogLayerOptions,
@@ -160,6 +164,7 @@ import {
   unloadFilesystemPlugin,
   unloadRemovedUrlPlugins,
   type InstalledWebPlugin,
+  PluginPolicyError,
 } from "../lib/external-plugins";
 import { appendDiagnostic } from "../lib/diagnostics";
 import { pickZarrDirectory, zarrDirectoryPickerSupported } from "../lib/zarr-directory-picker";
@@ -537,7 +542,22 @@ export async function upgradeExternalPlugin(
   manifestUrl: string,
   mapControllerRef: RefObject<MapEngine | null>,
 ): Promise<void> {
-  await reloadExternalUrlPlugin(manager, manifestUrl, createAppAPI(mapControllerRef));
+  const policy = getDeploymentPolicy();
+  const bundledManifestUrls = bundledPluginManifestUrls();
+  const registryManifestUrls = await registryManifestUrlsForPolicy(
+    policy,
+    [manifestUrl],
+    bundledManifestUrls,
+  );
+  const source = bundledManifestUrls.includes(manifestUrl)
+    ? "bundled"
+    : registryManifestUrls.includes(manifestUrl)
+      ? "registry"
+      : "manifest-url";
+  await reloadExternalUrlPlugin(manager, manifestUrl, createAppAPI(mapControllerRef), {
+    policy,
+    source,
+  });
 }
 
 // Install a plugin from a local `.zip` archive (desktop only). The Rust backend
@@ -553,6 +573,20 @@ export async function installPluginArchive(
 ): Promise<string> {
   if (!isTauriRuntime()) {
     throw new Error("Installing plugin archives requires the desktop app.");
+  }
+  const policy = getDeploymentPolicy();
+  // Reject sideloading before even reading the selected archive, and reject its
+  // manifest id before the install IPC can persist it in the app-data directory.
+  const sideloadDecision = evaluatePlugin("", "zip", policy);
+  if (policy?.plugins?.sideload === false && !sideloadDecision.allowed) {
+    throw new PluginPolicyError(sourcePath, sideloadDecision.reason);
+  }
+  if (policy?.plugins?.allowed !== undefined || policy?.plugins?.blocked?.length) {
+    const bundle = await bundleFromZipBytes(sourcePath, await readFile(sourcePath));
+    const decision = evaluatePlugin(bundle.manifest.id, "zip", policy);
+    if (!decision.allowed) {
+      throw new PluginPolicyError(sourcePath, decision.reason);
+    }
   }
   const pluginId = await invoke<string>("install_external_plugin_archive", {
     sourcePath,
@@ -578,7 +612,25 @@ export async function installPluginArchiveFromFile(
   bytes: Uint8Array,
   mapControllerRef: RefObject<MapEngine | null>,
 ): Promise<string> {
-  return installWebPluginArchive(manager, fileName, bytes, createAppAPI(mapControllerRef));
+  const app = createAppAPI(mapControllerRef);
+  const policy = getDeploymentPolicy();
+  const pluginId = await installWebPluginArchive(
+    manager,
+    fileName,
+    bytes,
+    app,
+    policy,
+  );
+  if (policy?.plugins?.defaultActive?.includes(pluginId)) {
+    // Re-enter the normal ready/restore cycle, just like a desktop archive
+    // install, so defaults apply only when there is no saved project state.
+    await ensureExternalPluginsLoadedWithSettings(
+      useDesktopSettingsStore.getState().desktopSettings,
+      app,
+      { force: true },
+    );
+  }
+  return pluginId;
 }
 
 // Uninstall a plugin that was installed from a file in the browser.
@@ -760,18 +812,20 @@ export function useProjectPluginTrust(): ProjectPluginTrustState {
     (state) => state.desktopSettings.pluginManifestUrls,
   );
   const [dismissedUrls, setDismissedUrls] = useState<ReadonlySet<string>>(() => new Set());
+  const policy = getDeploymentPolicy();
 
   const pendingUrls = useMemo(() => {
     const { untrusted } = partitionProjectPluginManifestUrls(
       projectManifestUrls,
       trustedManifestUrls,
       bundledPluginManifestUrls(),
+      policy,
     );
     return untrusted.filter((url) => !dismissedUrls.has(url));
-  }, [projectManifestUrls, trustedManifestUrls, dismissedUrls]);
+  }, [projectManifestUrls, trustedManifestUrls, dismissedUrls, policy]);
 
   const trust = useCallback(() => {
-    if (pendingUrls.length === 0) return;
+    if (getDeploymentPolicy()?.plugins?.sideload === false || pendingUrls.length === 0) return;
     const current = useDesktopSettingsStore.getState().desktopSettings;
     useDesktopSettingsStore.getState().setDesktopSettings({
       ...current,
@@ -839,6 +893,32 @@ export function bundledPluginManifestUrls(): string[] {
   );
 }
 
+/**
+ * Installed URL settings do not retain their marketplace origin. Under a
+ * no-sideload policy, reclassify them against the current registry rather than
+ * treating a past user trust decision as deployment approval. Bundled URLs
+ * need no registry lookup; a failed lookup leaves all other URLs unapproved.
+ */
+async function registryManifestUrlsForPolicy(
+  policy: DeploymentPolicy | null,
+  manifestUrls: readonly string[],
+  bundledManifestUrls: readonly string[],
+): Promise<string[]> {
+  if (
+    policy?.plugins?.sideload !== false ||
+    !manifestUrls.some((url) => !bundledManifestUrls.includes(url))
+  ) {
+    return [];
+  }
+  try {
+    const registry = await fetchPluginRegistry();
+    return registry.entries.map((entry) => entry.manifestUrl);
+  } catch (error) {
+    console.warn("Could not classify installed plugins against the deployment registry.", error);
+    return [];
+  }
+}
+
 function ensureExternalPluginsLoadedWithSettings(
   desktopSettings: ReturnType<typeof useDesktopSettingsStore.getState>["desktopSettings"],
   app: ReturnType<typeof createAppAPI>,
@@ -850,13 +930,17 @@ function ensureExternalPluginsLoadedWithSettings(
   // reach this scan only after the user trusts them, at which point they are in
   // desktopSettings.pluginManifestUrls (see useProjectPluginTrust / #1062).
   const bundledManifestUrls = bundledPluginManifestUrls();
+  const policy = getDeploymentPolicy();
+  const additionalPluginDirectories =
+    policy?.plugins?.sideload === false ? [] : desktopSettings.additionalPluginDirectories;
   const pluginManifestUrls = mergeStringLists(
     bundledManifestUrls,
     desktopSettings.pluginManifestUrls,
   );
   const loadKey = JSON.stringify({
-    additionalPluginDirectories: desktopSettings.additionalPluginDirectories,
+    additionalPluginDirectories,
     pluginManifestUrls,
+    policy: policy?.plugins,
   });
   // `force` re-scans even when the merged settings are unchanged. Installing a
   // zip writes a new archive into the app-data plugins directory without
@@ -879,7 +963,12 @@ function ensureExternalPluginsLoadedWithSettings(
   // previous scan (which never rejects) keeps at most one scan running.
   const previousLoad = externalPluginsLoadPromise ?? Promise.resolve();
   const loadPromise = previousLoad
-    .then(() => {
+    .then(async () => {
+      const registryManifestUrls = await registryManifestUrlsForPolicy(
+        policy,
+        desktopSettings.pluginManifestUrls,
+        bundledManifestUrls,
+      );
       // Unregister URL plugins whose manifest URL was removed from the merged
       // list (e.g. uninstalled from the marketplace) so the Plugins menu updates
       // and any active control is torn down without a reload. This runs after
@@ -891,11 +980,11 @@ function ensureExternalPluginsLoadedWithSettings(
       }
       return loadExternalPlugins(
         manager,
-        desktopSettings.additionalPluginDirectories,
+        additionalPluginDirectories,
         pluginManifestUrls,
         // Only manifests fetched from the bundled drop-in URLs may use
         // activeByDefault (they are baked into the build, hence trusted).
-        { bundledManifestUrls },
+        { bundledManifestUrls, policy, registryManifestUrls },
       );
     })
     .then((result) => {

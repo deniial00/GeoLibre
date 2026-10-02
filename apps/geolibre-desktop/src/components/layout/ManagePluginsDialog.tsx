@@ -61,6 +61,8 @@ import {
 } from "../../lib/tauri-io";
 import { openExternalLink } from "../../lib/open-external";
 import { pluginDisplayName } from "../../lib/plugin-display-name";
+import { getDeploymentPolicy } from "../../lib/deployment-env";
+import { evaluatePlugin } from "../../lib/plugin-policy";
 
 type ManageSection = "all" | "installed" | "not-installed" | "upgradeable" | "settings";
 
@@ -101,6 +103,8 @@ export function ManagePluginsDialog({
   const { t } = useTranslation();
   const desktopSettings = useDesktopSettingsStore((s) => s.desktopSettings);
   const setDesktopSettings = useDesktopSettingsStore((s) => s.setDesktopSettings);
+  const policy = getDeploymentPolicy();
+  const allowSideload = policy?.plugins?.sideload !== false;
 
   const [section, setSection] = useState<ManageSection>("all");
   const [registry, setRegistry] = useState<RegistryState>({
@@ -241,7 +245,12 @@ export function ManagePluginsDialog({
   const refresh = useCallback(() => setReloadToken((token) => token + 1), []);
 
   const installUrl = useCallback(
-    (url: string) => {
+    (url: string, registryEntry?: PluginRegistryEntry) => {
+      if (registryEntry) {
+        if (!evaluatePlugin(registryEntry.id, "registry", getDeploymentPolicy()).allowed) return;
+      } else if (getDeploymentPolicy()?.plugins?.sideload === false) {
+        return;
+      }
       const current = useDesktopSettingsStore.getState().desktopSettings;
       setDesktopSettings({
         ...current,
@@ -265,6 +274,7 @@ export function ManagePluginsDialog({
 
   const handleUpgrade = useCallback(
     async (entry: PluginRegistryEntry) => {
+      if (!evaluatePlugin(entry.id, "registry", getDeploymentPolicy()).allowed) return;
       setActionError(null);
       setBusyId(entry.id);
       try {
@@ -283,6 +293,7 @@ export function ManagePluginsDialog({
 
   const addDirectory = useCallback(
     (path: string) => {
+      if (getDeploymentPolicy()?.plugins?.sideload === false) return;
       const trimmed = path.trim();
       if (!trimmed) return;
       const current = useDesktopSettingsStore.getState().desktopSettings;
@@ -312,6 +323,7 @@ export function ManagePluginsDialog({
   );
 
   const browseDirectory = useCallback(async () => {
+    if (getDeploymentPolicy()?.plugins?.sideload === false) return;
     try {
       const path = await pickLocalPathWithFallback({ directory: true });
       if (path) addDirectory(path);
@@ -323,6 +335,7 @@ export function ManagePluginsDialog({
   }, [addDirectory]);
 
   const installFromFile = useCallback(async () => {
+    if (getDeploymentPolicy()?.plugins?.sideload === false) return;
     setInstallError(null);
     setInstallNotice(null);
     try {
@@ -376,6 +389,7 @@ export function ManagePluginsDialog({
   );
 
   const addManifestUrl = useCallback(() => {
+    if (getDeploymentPolicy()?.plugins?.sideload === false) return;
     const trimmed = newManifestUrl.trim();
     if (!trimmed) return;
     if (!isAllowedPluginManifestUrl(trimmed)) {
@@ -393,8 +407,10 @@ export function ManagePluginsDialog({
   // id collision. Keep entries that were previously installed by URL visible
   // so users can remove that old installation after a plugin moves built-in.
   const entries = useMemo(
-    () => registryEntries.filter((entry) => isInstalled(entry) || !loadedVersions.has(entry.id)),
-    [isInstalled, loadedVersions, registryEntries],
+    () => registryEntries.filter((entry) =>
+      evaluatePlugin(entry.id, "registry", policy).allowed &&
+      (isInstalled(entry) || !loadedVersions.has(entry.id))),
+    [isInstalled, loadedVersions, registryEntries, policy],
   );
   const installedCount = useMemo(() => entries.filter(isInstalled).length, [entries, isInstalled]);
   const upgradeableCount = useMemo(
@@ -504,6 +520,7 @@ export function ManagePluginsDialog({
           <div className="min-h-0 space-y-3 overflow-y-auto p-6">
             {section === "settings" ? (
               <SettingsTab
+                allowSideload={allowSideload}
                 directories={desktopSettings.additionalPluginDirectories}
                 manifestUrls={desktopSettings.pluginManifestUrls}
                 newDirectory={newDirectory}
@@ -669,7 +686,7 @@ export function ManagePluginsDialog({
                               variant="outline"
                               disabled={!compatible}
                               aria-label={t("managePlugins.installAria", { name: displayName })}
-                              onClick={() => installUrl(entry.manifestUrl)}
+                              onClick={() => installUrl(entry.manifestUrl, entry)}
                             >
                               <Download className="h-3.5 w-3.5" />
                               {t("managePlugins.install")}
@@ -773,6 +790,7 @@ export function ManagePluginsDialog({
 }
 
 interface SettingsTabProps {
+  allowSideload: boolean;
   directories: string[];
   manifestUrls: string[];
   newDirectory: string;
@@ -794,6 +812,7 @@ interface SettingsTabProps {
 }
 
 function SettingsTab({
+  allowSideload,
   directories,
   manifestUrls,
   newDirectory,
@@ -816,185 +835,216 @@ function SettingsTab({
   const { t } = useTranslation();
   return (
     <div className="space-y-5">
-      <div className="rounded-md border bg-muted/40 p-3 text-xs text-muted-foreground">
-        {t("managePlugins.settingsIntro")}
-      </div>
-
-      <div className="space-y-3">
-        <h4 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-          {t("managePlugins.installFromFile")}
-        </h4>
-        <div className="flex flex-wrap items-center gap-2">
-          <Button
-            type="button"
-            size="sm"
-            variant="outline"
-            className="shrink-0"
-            disabled={installing}
-            onClick={onInstallFromFile}
-          >
-            {installing ? (
-              <Loader2 className="h-3.5 w-3.5 animate-spin" />
-            ) : (
-              <Upload className="h-3.5 w-3.5" />
-            )}
-            {t("managePlugins.chooseZip")}
-          </Button>
-          <p className="text-xs text-muted-foreground">
-            {isTauri()
-              ? t("managePlugins.installFromFileHintDesktop")
-              : t("managePlugins.installFromFileHintWeb")}
-          </p>
+      {allowSideload ? (
+        <div className="rounded-md border bg-muted/40 p-3 text-xs text-muted-foreground">
+          {t("managePlugins.settingsIntro")}
         </div>
-        {installError ? <p className="text-xs text-destructive">{installError}</p> : null}
-        {installNotice ? (
-          <p className="text-xs text-emerald-600 dark:text-emerald-400">{installNotice}</p>
-        ) : null}
-        {installedFromFile.length > 0 ? (
-          <div className="space-y-2">
-            {installedFromFile.map((plugin) => (
-              <div key={plugin.id} className="flex items-center gap-2 rounded-md border p-2">
-                <div className="min-w-0 flex-1">
-                  <div className="flex items-center gap-2">
-                    <span className="truncate text-xs font-medium">
-                      {pluginDisplayName(t, plugin)}
-                    </span>
-                    <span className="shrink-0 text-[11px] text-muted-foreground">
-                      v{plugin.version}
+      ) : null}
+
+      {allowSideload || installedFromFile.length > 0 ? (
+        <div className="space-y-3">
+          <h4 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+            {t("managePlugins.installFromFile")}
+          </h4>
+          {allowSideload ? (
+            <div className="flex flex-wrap items-center gap-2">
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                className="shrink-0"
+                disabled={installing}
+                onClick={onInstallFromFile}
+              >
+                {installing ? (
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                ) : (
+                  <Upload className="h-3.5 w-3.5" />
+                )}
+                {t("managePlugins.chooseZip")}
+              </Button>
+              <p className="text-xs text-muted-foreground">
+                {isTauri()
+                  ? t("managePlugins.installFromFileHintDesktop")
+                  : t("managePlugins.installFromFileHintWeb")}
+              </p>
+            </div>
+          ) : null}
+          {installError ? (
+            <p className="text-xs text-destructive">{installError}</p>
+          ) : null}
+          {installNotice ? (
+            <p className="text-xs text-emerald-600 dark:text-emerald-400">
+              {installNotice}
+            </p>
+          ) : null}
+          {installedFromFile.length > 0 ? (
+            <div className="space-y-2">
+              {installedFromFile.map((plugin) => (
+                <div
+                  key={plugin.id}
+                  className="flex items-center gap-2 rounded-md border p-2"
+                >
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-2">
+                      <span className="truncate text-xs font-medium">
+                        {pluginDisplayName(t, plugin)}
+                      </span>
+                      <span className="shrink-0 text-[11px] text-muted-foreground">
+                        v{plugin.version}
+                      </span>
+                    </div>
+                    <span className="truncate text-[11px] text-muted-foreground">
+                      {plugin.archiveName}
                     </span>
                   </div>
-                  <span className="truncate text-[11px] text-muted-foreground">
-                    {plugin.archiveName}
-                  </span>
+                  <Button
+                    type="button"
+                    size="icon"
+                    variant="ghost"
+                    className="h-8 w-8 shrink-0"
+                    aria-label={t("managePlugins.uninstallAria", {
+                      name: pluginDisplayName(t, plugin),
+                    })}
+                    onClick={() => onUninstallFromFile(plugin.id)}
+                  >
+                    <Trash2 className="h-3.5 w-3.5" />
+                  </Button>
                 </div>
-                <Button
-                  type="button"
-                  size="icon"
-                  variant="ghost"
-                  className="h-8 w-8 shrink-0"
-                  aria-label={t("managePlugins.uninstallAria", {
-                    name: pluginDisplayName(t, plugin),
-                  })}
-                  onClick={() => onUninstallFromFile(plugin.id)}
-                >
-                  <Trash2 className="h-3.5 w-3.5" />
-                </Button>
-              </div>
-            ))}
-          </div>
-        ) : null}
-      </div>
-
-      <div className="space-y-3">
-        <h4 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-          {t("managePlugins.localDirectories")}
-        </h4>
-        <div className="flex items-center gap-2">
-          <Input
-            aria-label={t("managePlugins.directoryAria")}
-            placeholder="/path/to/geolibre-plugin"
-            value={newDirectory}
-            onChange={(event) => onNewDirectoryChange(event.target.value)}
-            onKeyDown={(event) => {
-              if (event.key === "Enter") onAddDirectory();
-            }}
-          />
-          <Button
-            type="button"
-            size="icon"
-            variant="ghost"
-            className="h-8 w-8 shrink-0"
-            aria-label={t("managePlugins.browseDirectoryAria")}
-            onClick={onBrowseDirectory}
-          >
-            <FolderOpen className="h-3.5 w-3.5" />
-          </Button>
-          <Button
-            type="button"
-            size="sm"
-            variant="outline"
-            className="shrink-0"
-            onClick={onAddDirectory}
-          >
-            <Plus className="h-3.5 w-3.5" />
-            {t("common.add")}
-          </Button>
+              ))}
+            </div>
+          ) : null}
         </div>
-        {directories.length === 0 ? (
-          <div className="rounded-md border border-dashed p-4 text-sm text-muted-foreground">
-            {t("managePlugins.noDirectories")}
-          </div>
-        ) : (
-          <div className="space-y-2">
-            {directories.map((directory) => (
-              <div key={directory} className="flex items-center gap-2 rounded-md border p-2">
-                <span className="min-w-0 flex-1 truncate text-xs">{directory}</span>
-                <Button
-                  type="button"
-                  size="icon"
-                  variant="ghost"
-                  className="h-8 w-8 shrink-0"
-                  aria-label={t("managePlugins.removeAria", { name: directory })}
-                  onClick={() => onRemoveDirectory(directory)}
-                >
-                  <Trash2 className="h-3.5 w-3.5" />
-                </Button>
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
+      ) : null}
 
-      <div className="space-y-3">
-        <h4 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-          {t("managePlugins.manifestUrls")}
-        </h4>
-        <div className="flex items-center gap-2">
-          <Input
-            aria-label={t("managePlugins.manifestUrlAria")}
-            placeholder="https://example.com/plugin/plugin.json"
-            value={newManifestUrl}
-            onChange={(event) => onNewManifestUrlChange(event.target.value)}
-            onKeyDown={(event) => {
-              if (event.key === "Enter") onAddManifestUrl();
-            }}
-          />
-          <Button
-            type="button"
-            size="sm"
-            variant="outline"
-            className="shrink-0"
-            onClick={onAddManifestUrl}
-          >
-            <Plus className="h-3.5 w-3.5" />
-            {t("common.add")}
-          </Button>
-        </div>
-        {error ? <p className="text-xs text-destructive">{error}</p> : null}
-        {manifestUrls.length === 0 ? (
-          <div className="rounded-md border border-dashed p-4 text-sm text-muted-foreground">
-            {t("managePlugins.noManifestUrls")}
-          </div>
-        ) : (
-          <div className="space-y-2">
-            {manifestUrls.map((url) => (
-              <div key={url} className="flex items-center gap-2 rounded-md border p-2">
-                <span className="min-w-0 flex-1 truncate text-xs">{url}</span>
-                <Button
-                  type="button"
-                  size="icon"
-                  variant="ghost"
-                  className="h-8 w-8 shrink-0"
-                  aria-label={t("managePlugins.removeAria", { name: url })}
-                  onClick={() => onRemoveManifestUrl(url)}
+      {allowSideload || directories.length > 0 ? (
+        <div className="space-y-3">
+          <h4 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+            {t("managePlugins.localDirectories")}
+          </h4>
+          {allowSideload ? (
+            <div className="flex items-center gap-2">
+              <Input
+                aria-label={t("managePlugins.directoryAria")}
+                placeholder="/path/to/geolibre-plugin"
+                value={newDirectory}
+                onChange={(event) => onNewDirectoryChange(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter") onAddDirectory();
+                }}
+              />
+              <Button
+                type="button"
+                size="icon"
+                variant="ghost"
+                className="h-8 w-8 shrink-0"
+                aria-label={t("managePlugins.browseDirectoryAria")}
+                onClick={onBrowseDirectory}
+              >
+                <FolderOpen className="h-3.5 w-3.5" />
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                className="shrink-0"
+                onClick={onAddDirectory}
+              >
+                <Plus className="h-3.5 w-3.5" />
+                {t("common.add")}
+              </Button>
+            </div>
+          ) : null}
+          {directories.length === 0 ? (
+            <div className="rounded-md border border-dashed p-4 text-sm text-muted-foreground">
+              {t("managePlugins.noDirectories")}
+            </div>
+          ) : (
+            <div className="space-y-2">
+              {directories.map((directory) => (
+                <div
+                  key={directory}
+                  className="flex items-center gap-2 rounded-md border p-2"
                 >
-                  <Trash2 className="h-3.5 w-3.5" />
-                </Button>
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
+                  <span className="min-w-0 flex-1 truncate text-xs">
+                    {directory}
+                  </span>
+                  <Button
+                    type="button"
+                    size="icon"
+                    variant="ghost"
+                    className="h-8 w-8 shrink-0"
+                    aria-label={t("managePlugins.removeAria", {
+                      name: directory,
+                    })}
+                    onClick={() => onRemoveDirectory(directory)}
+                  >
+                    <Trash2 className="h-3.5 w-3.5" />
+                  </Button>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      ) : null}
+
+      {allowSideload || manifestUrls.length > 0 ? (
+        <div className="space-y-3">
+          <h4 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+            {t("managePlugins.manifestUrls")}
+          </h4>
+          {allowSideload ? (
+            <div className="flex items-center gap-2">
+              <Input
+                aria-label={t("managePlugins.manifestUrlAria")}
+                placeholder="https://example.com/plugin/plugin.json"
+                value={newManifestUrl}
+                onChange={(event) => onNewManifestUrlChange(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter") onAddManifestUrl();
+                }}
+              />
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                className="shrink-0"
+                onClick={onAddManifestUrl}
+              >
+                <Plus className="h-3.5 w-3.5" />
+                {t("common.add")}
+              </Button>
+            </div>
+          ) : null}
+          {error ? <p className="text-xs text-destructive">{error}</p> : null}
+          {manifestUrls.length === 0 ? (
+            <div className="rounded-md border border-dashed p-4 text-sm text-muted-foreground">
+              {t("managePlugins.noManifestUrls")}
+            </div>
+          ) : (
+            <div className="space-y-2">
+              {manifestUrls.map((url) => (
+                <div
+                  key={url}
+                  className="flex items-center gap-2 rounded-md border p-2"
+                >
+                  <span className="min-w-0 flex-1 truncate text-xs">{url}</span>
+                  <Button
+                    type="button"
+                    size="icon"
+                    variant="ghost"
+                    className="h-8 w-8 shrink-0"
+                    aria-label={t("managePlugins.removeAria", { name: url })}
+                    onClick={() => onRemoveManifestUrl(url)}
+                  >
+                    <Trash2 className="h-3.5 w-3.5" />
+                  </Button>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      ) : null}
     </div>
   );
 }
