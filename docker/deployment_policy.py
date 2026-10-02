@@ -152,6 +152,45 @@ def _invalid_json_constant(value):
     raise ValueError("non-finite JSON number")
 
 
+def check_service_entry(entry, seen_ids, problem):
+    """Validate one service catalog entry and return its normalized form.
+
+    Shared by GEOLIBRE_SERVICES_FILE and the services.catalog policy field so the
+    two can never disagree. ``problem(kind, key)`` must raise; each caller words
+    the message for its own source. ``kind`` is one of object, nonblank,
+    duplicate, kind, category or fields.
+    """
+    if not isinstance(entry, dict):
+        problem("object", None)
+    for key in ("id", "name"):
+        if not isinstance(entry.get(key), str) or not entry[key].strip():
+            problem("nonblank", key)
+    service_id = entry["id"].strip()
+    if service_id in seen_ids:
+        problem("duplicate", "id")
+    if entry.get("kind") not in SERVICE_KINDS:
+        problem("kind", "kind")
+    if "category" in entry and not isinstance(entry["category"], str):
+        problem("category", "category")
+    fields = entry.get("fields")
+    if (
+        not isinstance(fields, dict)
+        or not fields
+        or not all(is_valid_field_value(value) for value in fields.values())
+    ):
+        problem("fields", "fields")
+    seen_ids.add(service_id)
+    service = {
+        "id": service_id,
+        "name": entry["name"].strip(),
+        "kind": entry["kind"],
+        "fields": fields,
+    }
+    if "category" in entry:
+        service["category"] = entry["category"]
+    return service
+
+
 def read_services_file(path):
     """Read and validate a GEOLIBRE_SERVICES_FILE catalog; return its services."""
     try:
@@ -174,41 +213,20 @@ def read_services_file(path):
     service_ids = set()
     for index, entry in enumerate(catalog["services"], start=1):
         prefix = f"ERROR: GEOLIBRE_SERVICES_FILE services entry {index}"
-        if not isinstance(entry, dict):
-            raise SystemExit(prefix + " must be an object.")
-        for key in ("id", "name"):
-            if not isinstance(entry.get(key), str) or not entry[key].strip():
-                raise SystemExit(prefix + f" must have a nonblank string {key}.")
-        service_id = entry["id"].strip()
-        if service_id in service_ids:
-            raise SystemExit(
-                prefix + " has a duplicate trimmed id; give every service a unique stable id."
-            )
-        if entry.get("kind") not in SERVICE_KINDS:
-            raise SystemExit(prefix + " kind must be one of: " + ", ".join(SERVICE_KINDS) + ".")
-        if "category" in entry and not isinstance(entry["category"], str):
-            raise SystemExit(prefix + " category must be a string when present.")
-        fields = entry.get("fields")
-        if (
-            not isinstance(fields, dict)
-            or not fields
-            or not all(is_valid_field_value(value) for value in fields.values())
-        ):
-            raise SystemExit(
-                prefix
-                + " fields must be a nonempty object of strings, booleans, or finite numbers "
-                "with integers within the safe-integer range."
-            )
-        service_ids.add(service_id)
-        service = {
-            "id": service_id,
-            "name": entry["name"].strip(),
-            "kind": entry["kind"],
-            "fields": fields,
-        }
-        if "category" in entry:
-            service["category"] = entry["category"]
-        services.append(service)
+
+        def problem(kind, key, prefix=prefix):
+            messages = {
+                "object": " must be an object.",
+                "nonblank": f" must have a nonblank string {key}.",
+                "duplicate": " has a duplicate trimmed id; give every service a unique stable id.",
+                "kind": " kind must be one of: " + ", ".join(SERVICE_KINDS) + ".",
+                "category": " category must be a string when present.",
+                "fields": " fields must be a nonempty object of strings, booleans, or finite "
+                "numbers with integers within the safe-integer range.",
+            }
+            raise SystemExit(prefix + messages[kind])
+
+        services.append(check_service_entry(entry, service_ids, problem))
     return services
 
 
@@ -252,15 +270,24 @@ def parse_embed_origins(raw):
     return list(dict.fromkeys(origins))
 
 
+def _reject_whitespace(name, raw):
+    # Whitespace in a path or query is not caught by service_url, which only checks
+    # the host. Fail here so the error names the env var, not the generated policy.
+    if re.search(r"\s", raw):
+        raise SystemExit(f"ERROR: {name} must not contain whitespace.")
+
+
 def normalize_share_url(raw):
     """Validate a stripped, nonblank GEOLIBRE_SHARE_URL ("off" or an https URL)."""
     if raw.lower() == "off":
         return "off"
+    _reject_whitespace("GEOLIBRE_SHARE_URL", raw)
     return service_url("GEOLIBRE_SHARE_URL", raw, ("https",), ("http",), SHARE_LOOPBACK)
 
 
 def normalize_collab_url(raw):
     """Validate a stripped, nonblank GEOLIBRE_COLLAB_URL (a wss URL)."""
+    _reject_whitespace("GEOLIBRE_COLLAB_URL", raw)
     return service_url("GEOLIBRE_COLLAB_URL", raw, ("wss",), ("ws",), LOOPBACK)
 
 
@@ -269,6 +296,7 @@ def normalize_geolens_url(raw):
     setting = raw.lower()
     if setting in ("off", "same-origin"):
         return setting
+    _reject_whitespace("GEOLIBRE_GEOLENS_URL", raw)
     if re.fullmatch(r"[A-Za-z0-9.-]+(?::[0-9]+)?(?:/.*)?", raw):
         raw = f"https://{raw}"
     parsed = _urlsplit("GEOLIBRE_GEOLENS_URL", raw)
@@ -348,43 +376,32 @@ def _validate_catalog(label, path, value):
     out = []
     for index, entry in enumerate(value):
         here = f"{path}[{index}]"
-        if not isinstance(entry, dict):
-            fail(label, here, "must be an object")
-        for key in entry:
-            if key not in CATALOG_ENTRY_KEYS:
-                fail(label, f"{here}.{key}", "is not a known key")
-        for key in ("id", "name"):
-            if not isinstance(entry.get(key), str) or not entry[key].strip():
-                fail(label, f"{here}.{key}", "must be a nonblank string")
-        if entry.get("kind") not in SERVICE_KINDS:
-            fail(label, f"{here}.kind", "must be one of: " + ", ".join(SERVICE_KINDS))
-        if "category" in entry and not isinstance(entry["category"], str):
-            fail(label, f"{here}.category", "must be a string")
-        fields = entry.get("fields")
-        if (
-            not isinstance(fields, dict)
-            or not fields
-            or not all(is_valid_field_value(v) for v in fields.values())
-        ):
-            fail(
-                label,
-                f"{here}.fields",
-                "must be a nonempty object of strings, booleans, or finite numbers "
+        if isinstance(entry, dict):
+            for key in entry:
+                if key not in CATALOG_ENTRY_KEYS:
+                    fail(label, f"{here}.{key}", "is not a known key")
+
+        def problem(kind, key, here=here):
+            where = here if key is None else f"{here}.{key}"
+            messages = {
+                "object": "must be an object",
+                "nonblank": "must be a nonblank string",
+                "duplicate": "is a duplicate after trimming",
+                "kind": "must be one of: " + ", ".join(SERVICE_KINDS),
+                "category": "must be a string",
+                "fields": "must be a nonempty object of strings, booleans, or finite numbers "
                 "with integers within the safe-integer range",
-            )
-        service_id = entry["id"].strip()
-        if service_id in seen:
-            fail(label, f"{here}.id", "is a duplicate after trimming")
-        seen.add(service_id)
-        service = {**entry, "id": service_id, "name": entry["name"].strip()}
-        out.append(service)
+            }
+            fail(label, where, messages[kind])
+
+        out.append(check_service_entry(entry, seen, problem))
     return out
 
 
 def _loggable(url):
     """Drop any query or fragment before a URL is logged, since it may carry a token."""
     clean = re.split(r"[?#]", url, maxsplit=1)[0]
-    return clean if clean == url else clean + "?..."
+    return clean if clean == url else clean + "[redacted]"
 
 
 def _is_origin(item):

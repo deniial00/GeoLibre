@@ -211,3 +211,8 @@ def test_url_errors_do_not_echo_a_query_token(url):
     assert "SECRET" not in error_of(dp.normalize_collab_url, url)
     doc = {"version": 1, "sharing": {"collabUrl": url}}
     assert "SECRET" not in error_of(dp.validate_policy, doc, LABEL)
+
+
+def test_whitespace_in_env_url_names_the_env_var():
+    message = error_of(dp.normalize_share_url, "https://example.com/some path")
+    assert message == "ERROR: GEOLIBRE_SHARE_URL must not contain whitespace."

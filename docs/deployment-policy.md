@@ -233,7 +233,7 @@ docker run -p 8080:80 \
 
 The boot log has one `Deployment policy: <path> from <VAR> = <value>` line per
 override. Tokens never appear in it, and a query string or fragment on a URL is
-replaced with `?...`.
+replaced with `[redacted]`.
 
 Invalid input stops the boot with an `ERROR:` line that names the JSON path (for
 example `ERROR: GEOLIBRE_DEPLOYMENT_FILE capabilities[1] must be one of: ...`),
