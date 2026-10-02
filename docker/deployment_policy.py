@@ -85,7 +85,8 @@ def _urlsplit(name, value):
     try:
         return urlsplit(value)
     except ValueError as error:
-        raise SystemExit(f"ERROR: {name} is not a valid URL, not {value!r}.") from error
+        # The value is left out: it may carry a token in its query string.
+        raise SystemExit(f"ERROR: {name} is not a valid URL.") from error
 
 
 def service_url(name, value, schemes, loopback_schemes, loopback_hosts):
@@ -127,7 +128,7 @@ def service_url(name, value, schemes, loopback_schemes, loopback_hosts):
         allowed_hosts = "/".join(loopback_hosts)
         raise SystemExit(
             f"ERROR: {name} must be a {schemes[0]}:// URL "
-            f"(or {loopback_schemes[0]}:// on {allowed_hosts}), not {value!r}."
+            f"(or {loopback_schemes[0]}:// on {allowed_hosts}), not {_loggable(value)!r}."
         )
     return value
 
@@ -243,7 +244,7 @@ def parse_embed_origins(raw):
             or parsed.password
         ):
             raise SystemExit(
-                f"ERROR: GEOLIBRE_EMBED_ORIGINS entry {entry!r} must be an http(s) "
+                f"ERROR: GEOLIBRE_EMBED_ORIGINS entry {_loggable(entry)!r} must be an http(s) "
                 "origin such as https://portal.example.com."
             )
         origins.append(f"{parsed.scheme}://{parsed.netloc}")

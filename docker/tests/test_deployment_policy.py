@@ -202,3 +202,12 @@ def test_embed_origins_env_is_deduplicated():
         "https://a.example",
         "*",
     ]
+
+
+@pytest.mark.parametrize(
+    "url", ["wss://[bogus]?token=SECRET", "ftp://relay.example.com/?token=SECRET"]
+)
+def test_url_errors_do_not_echo_a_query_token(url):
+    assert "SECRET" not in error_of(dp.normalize_collab_url, url)
+    doc = {"version": 1, "sharing": {"collabUrl": url}}
+    assert "SECRET" not in error_of(dp.validate_policy, doc, LABEL)
