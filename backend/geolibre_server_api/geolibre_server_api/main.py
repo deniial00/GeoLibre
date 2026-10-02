@@ -7,6 +7,7 @@ import os
 import re
 import secrets
 import shutil
+import threading
 import time
 import uuid
 from contextlib import asynccontextmanager, suppress
@@ -3579,7 +3580,38 @@ def create_app(
         session.commit()
         return body
 
-    access_failures: dict[tuple[str, str], list[float]] = {}
+    access_attempts: dict[tuple[str, str], list[float]] = {}
+    access_attempts_lock = threading.Lock()
+
+    def reserve_access_attempt(key: tuple[str, str]) -> float:
+        """Count one attempt against ``key`` or raise 429, atomically.
+
+        The attempt is reserved before the password is checked so concurrent
+        requests cannot all pass the limit check ahead of any recorded failure.
+        """
+        stamp = time.monotonic()
+        cutoff = stamp - SHARE_ACCESS_WINDOW_SECONDS
+        with access_attempts_lock:
+            if len(access_attempts) > 1024:
+                for stale in [
+                    other
+                    for other, stamps in access_attempts.items()
+                    if not stamps or stamps[-1] <= cutoff
+                ]:
+                    del access_attempts[stale]
+            recent = [seen for seen in access_attempts.get(key, []) if seen > cutoff]
+            if len(recent) >= SHARE_ACCESS_MAX_FAILURES:
+                access_attempts[key] = recent
+                raise HTTPException(429, "too many incorrect passwords; try again later")
+            access_attempts[key] = [*recent, stamp]
+        return stamp
+
+    def release_access_attempt(key: tuple[str, str], stamp: float) -> None:
+        """Give back a reserved attempt that was not a wrong password."""
+        with access_attempts_lock:
+            stamps = access_attempts.get(key, [])
+            if stamp in stamps:
+                stamps.remove(stamp)
 
     def share_access_response(
         request: Request,
@@ -3595,17 +3627,14 @@ def create_app(
         """
         project = visible(session, project, principal)
         key = (project.id, str(client_ip(request) or ""))
-        cutoff = time.monotonic() - SHARE_ACCESS_WINDOW_SECONDS
-        recent = [stamp for stamp in access_failures.get(key, []) if stamp > cutoff]
-        if len(recent) >= SHARE_ACCESS_MAX_FAILURES:
-            access_failures[key] = recent
-            raise HTTPException(429, "too many incorrect passwords; try again later")
+        stamp = reserve_access_attempt(key)
         try:
             project = visible_read(session, project, principal, password)
         except HTTPException as error:
-            if error.status_code == 401:
-                access_failures[key] = [*recent, time.monotonic()]
+            if error.status_code != 401:
+                release_access_attempt(key, stamp)
             raise
+        release_access_attempt(key, stamp)
         try:
             content = object_storage.get(project.versions[-1].object_key)
         except KeyError:

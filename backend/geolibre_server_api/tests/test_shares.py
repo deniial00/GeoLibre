@@ -199,3 +199,19 @@ def test_invalid_share_settings_are_rejected(client):
             json={"filename": "f.json", "content": content, "visibility": "unlisted", **extra},
         )
         assert response.status_code == 422, extra
+
+
+def test_concurrent_wrong_passwords_cannot_exceed_the_limit(client):
+    from concurrent.futures import ThreadPoolExecutor
+
+    ada = account(client, "ada")
+    project, _ = share(client, ada, password="pw")
+    access = f"/ada/{project['slug']}/access"
+
+    with ThreadPoolExecutor(max_workers=12) as pool:
+        statuses = list(
+            pool.map(lambda _: client.post(access, json={"password": "bad"}).status_code, range(30))
+        )
+
+    assert statuses.count(401) == 10
+    assert statuses.count(429) == 20
