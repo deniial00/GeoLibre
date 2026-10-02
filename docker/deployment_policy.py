@@ -3,8 +3,10 @@
 ``entrypoint.sh`` runs this module on every boot to write
 ``/usr/share/nginx/html/deployment.json``: the mounted ``GEOLIBRE_DEPLOYMENT_FILE``
 (or an empty ``{"version": 1}``) with environment overrides applied per field. The
-rules mirror ``schema/deployment.schema.json``, which stays the source of truth;
-``docker/tests/test_deployment_policy.py`` fails when the two drift.
+rules follow ``schema/deployment.schema.json``, which stays the source of truth, and
+are slightly stricter where the schema cannot express a rule (``version`` must be the
+integer ``1``, not ``1.0``). ``docker/tests/test_deployment_policy.py`` fails when the
+two drift.
 
 The client parser is lenient (it drops what it does not understand); this
 validator is strict, so a bad file fails the boot with an ``ERROR:`` naming the
