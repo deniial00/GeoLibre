@@ -10,6 +10,7 @@ from fastapi.testclient import TestClient
 from geolibre_server_api import auth as server_auth
 from geolibre_server_api.auth_models import Account
 from geolibre_server_api.enterprise_models import ScimUser
+from geolibre_server_api.org_models import OrganizationMember
 from geolibre_server_api.policy import deactivate_account
 from helpers import (
     add_member,
@@ -107,6 +108,21 @@ def test_scim_token_admin_routes(oauth_client):
     assert denied.status_code == 403
 
 
+def test_scim_token_stops_working_when_creator_loses_admin(oauth_client):
+    token, org_id, scim_token = _scim_org(oauth_client)
+    ensure_account(oauth_client, "otheradmin")
+    add_member(oauth_client, token, org_id, "otheradmin", role="administrator")
+    removed = oauth_client.put(
+        f"/api/organizations/{org_id}/members",
+        json={"username": "ada", "role": "member"},
+        headers=auth(token),
+    )
+    assert removed.status_code == 200
+    response = _scim(oauth_client, scim_token, "GET", org_id, "/Users")
+    assert response.status_code == 401
+    assert response.json()["detail"] == "invalid SCIM token"
+
+
 def test_provisioned_user_links_to_sso_and_deactivation_revokes_everything(oauth_client, fake_idp):
     _, org_id, scim_token = _scim_org(oauth_client)
     created = _scim(
@@ -175,6 +191,140 @@ def test_provisioned_user_links_to_sso_and_deactivation_revokes_everything(oauth
     assert _status(oauth_client, tokens["access_token"]) == 401
     assert refresh(oauth_client, tokens["refresh_token"]).status_code == 400
     assert _status(oauth_client, personal_token) == 401
+
+
+def test_scim_post_adopts_existing_managed_sso_account(oauth_client, fake_idp):
+    _, org_id, scim_token = _scim_org(oauth_client)
+    claims = fake_idp.base_claims(
+        "existing-sso-sub",
+        preferred_username="existing@example.org",
+        email="existing@example.org",
+        email_verified=True,
+    )
+    tokens = _sso_tokens(oauth_client, *sso_sign_in(oauth_client, fake_idp, "acme", claims))
+    account_id = oauth_client.get("/api/users/me", headers=auth(tokens["access_token"])).json()[
+        "user"
+    ]["id"]
+    provisioned = _scim(
+        oauth_client,
+        scim_token,
+        "POST",
+        org_id,
+        "/Users",
+        {"userName": "existing@example.org"},
+    )
+    assert provisioned.status_code == 201, provisioned.text
+    assert provisioned.json()["id"] == account_id
+    deactivated = _scim(
+        oauth_client,
+        scim_token,
+        "PATCH",
+        org_id,
+        f"/Users/{account_id}",
+        _patch({"op": "replace", "path": "active", "value": False}),
+    )
+    assert deactivated.status_code == 200
+    assert _status(oauth_client, tokens["access_token"]) == 401
+
+
+def test_scim_email_link_requires_verified_email_and_never_double_links(oauth_client, fake_idp):
+    _, org_id, scim_token = _scim_org(oauth_client)
+    provisioned = _create_user(oauth_client, scim_token, org_id, "mail@example.org")
+    unverified = fake_idp.base_claims(
+        "unverified-email-sub",
+        preferred_username="different@example.org",
+        email="mail@example.org",
+        email_verified=False,
+    )
+    first = _sso_tokens(oauth_client, *sso_sign_in(oauth_client, fake_idp, "acme", unverified))
+    first_id = oauth_client.get("/api/users/me", headers=auth(first["access_token"])).json()[
+        "user"
+    ]["id"]
+    assert first_id != provisioned["id"]
+
+    verified = fake_idp.base_claims(
+        "first-link-sub",
+        preferred_username="mail@example.org",
+        email="mail@example.org",
+        email_verified=True,
+    )
+    linked = _sso_tokens(oauth_client, *sso_sign_in(oauth_client, fake_idp, "acme", verified))
+    linked_id = oauth_client.get("/api/users/me", headers=auth(linked["access_token"])).json()[
+        "user"
+    ]["id"]
+    assert linked_id == provisioned["id"]
+    second_subject = {**verified, "sub": "second-link-sub"}
+    separate = _sso_tokens(
+        oauth_client, *sso_sign_in(oauth_client, fake_idp, "acme", second_subject)
+    )
+    separate_id = oauth_client.get("/api/users/me", headers=auth(separate["access_token"])).json()[
+        "user"
+    ]["id"]
+    assert separate_id not in {provisioned["id"], first_id}
+
+
+def test_deleted_sso_user_can_be_reprovisioned_without_resurrecting_credentials(
+    oauth_client, fake_idp
+):
+    _, org_id, scim_token = _scim_org(oauth_client)
+    claims = fake_idp.base_claims("reprovision-sub", preferred_username="reprovision@example.org")
+    old_tokens = _sso_tokens(oauth_client, *sso_sign_in(oauth_client, fake_idp, "acme", claims))
+    old_id = oauth_client.get("/api/users/me", headers=auth(old_tokens["access_token"])).json()[
+        "user"
+    ]["id"]
+    created = _scim(
+        oauth_client,
+        scim_token,
+        "POST",
+        org_id,
+        "/Users",
+        {"userName": "reprovision@example.org"},
+    )
+    assert created.status_code == 201
+    assert created.json()["id"] == old_id
+    deleted = _scim(oauth_client, scim_token, "DELETE", org_id, f"/Users/{old_id}")
+    assert deleted.status_code == 204
+    assert _status(oauth_client, old_tokens["access_token"]) == 401
+    blocked, _ = sso_sign_in(oauth_client, fake_idp, "acme", claims)
+    assert blocked.status_code == 403
+    with oauth_client.app.state.session_factory() as session:
+        assert session.get(OrganizationMember, (org_id, old_id)) is None
+    reprovisioned = _scim(
+        oauth_client,
+        scim_token,
+        "POST",
+        org_id,
+        "/Users",
+        {"userName": "reprovision@example.org"},
+    )
+    assert reprovisioned.status_code == 201, reprovisioned.text
+    assert reprovisioned.json()["id"] == old_id
+    fresh_callback, verifier = sso_sign_in(oauth_client, fake_idp, "acme", claims)
+    fresh = _sso_tokens(oauth_client, fresh_callback, verifier)
+    assert _status(oauth_client, fresh["access_token"]) == 200
+
+
+def test_group_add_rejects_scim_user_removed_from_organization(oauth_client):
+    token, org_id, scim_token = _scim_org(oauth_client)
+    user = _create_user(oauth_client, scim_token, org_id, "former@example.org")
+    group = _scim(oauth_client, scim_token, "POST", org_id, "/Groups", {"displayName": "Team"})
+    assert group.status_code == 201
+    with oauth_client.app.state.session_factory() as session:
+        account_name = session.get(Account, user["id"]).username
+    removed = oauth_client.delete(
+        f"/api/organizations/{org_id}/members/{account_name}", headers=auth(token)
+    )
+    assert removed.status_code == 204
+    rejected = _scim(
+        oauth_client,
+        scim_token,
+        "PATCH",
+        org_id,
+        f"/Groups/{group.json()['id']}",
+        _patch({"op": "add", "path": "members", "value": [{"value": user["id"]}]}),
+    )
+    assert rejected.status_code == 400
+    assert rejected.json()["detail"] == "member is not provisioned in this organization"
 
 
 def test_deactivating_an_unmanaged_account_only_removes_its_memberships(oauth_client):
@@ -431,12 +581,24 @@ def test_group_membership_provisioning(oauth_client):
     assert gone.status_code == 404
 
 
-def test_last_administrator_cannot_be_removed(oauth_client):
+def test_last_administrator_cannot_be_removed(oauth_client, fake_idp):
     token, org_id, scim_token = _scim_org(oauth_client)
     admin = _create_user(oauth_client, scim_token, org_id, "root@example.org")
     with oauth_client.app.state.session_factory() as session:
         username = session.get(Account, admin["id"]).username
     add_member(oauth_client, token, org_id, username, role="administrator")
+    claims = fake_idp.base_claims("root-sub", preferred_username="root@example.org")
+    owner_token = _sso_tokens(
+        oauth_client,
+        *sso_sign_in(oauth_client, fake_idp, "acme", claims, scope="read:projects write:projects"),
+    )["access_token"]
+    minted = oauth_client.post(
+        f"/api/organizations/{org_id}/scim-tokens",
+        json={"label": "Root"},
+        headers=auth(owner_token),
+    )
+    assert minted.status_code == 201
+    scim_token = minted.json()["token"]
     # ada steps down, leaving the provisioned account as the only administrator.
     stepped_down = oauth_client.put(
         f"/api/organizations/{org_id}/members",
@@ -445,6 +607,19 @@ def test_last_administrator_cannot_be_removed(oauth_client):
     )
     assert stepped_down.status_code == 200, stepped_down.text
 
+    refused_deactivation = _scim(
+        oauth_client,
+        scim_token,
+        "PATCH",
+        org_id,
+        f"/Users/{admin['id']}",
+        _patch({"op": "replace", "path": "active", "value": False}),
+    )
+    assert refused_deactivation.status_code == 409
+    assert refused_deactivation.json()["scimType"] == "mutability"
+    assert (
+        refused_deactivation.json()["detail"] == "cannot remove the last organization administrator"
+    )
     refused = _scim(oauth_client, scim_token, "DELETE", org_id, f"/Users/{admin['id']}")
     assert refused.status_code == 409
     assert refused.json()["scimType"] == "mutability"
@@ -471,6 +646,20 @@ def test_break_glass_administrator_cannot_be_removed(oauth_client):
     add_member(oauth_client, token, org_id, username, role="administrator")
     configured = configure_idp(oauth_client, token, org_id, breakGlassUsername=username)
     assert configured.status_code == 200, configured.text
+
+    refused_deactivation = _scim(
+        oauth_client,
+        scim_token,
+        "PATCH",
+        org_id,
+        f"/Users/{admin['id']}",
+        _patch({"op": "replace", "path": "active", "value": False}),
+    )
+    assert refused_deactivation.status_code == 409
+    assert (
+        refused_deactivation.json()["detail"]
+        == "cannot remove the organization's break-glass administrator"
+    )
 
     refused = _scim(oauth_client, scim_token, "DELETE", org_id, f"/Users/{admin['id']}")
     assert refused.status_code == 409

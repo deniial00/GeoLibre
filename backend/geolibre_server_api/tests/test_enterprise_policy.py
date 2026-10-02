@@ -180,18 +180,30 @@ def test_strictest_policy_wins_across_organizations(oauth_client):
     assert "at least 14 characters" in response.json()["error"]
 
 
-def test_sqlite_schema_upgrade_adds_authenticated_at(oauth_client, tmp_path, clock):
+def test_sqlite_schema_upgrade_adds_legacy_columns(oauth_client, tmp_path, clock):
     ensure_account(oauth_client)
     engine = oauth_client.app.state.engine
     with engine.begin() as connection:
-        for table in ("oauth_authorization_codes", "oauth_sessions"):
-            connection.execute(text(f"ALTER TABLE {table} DROP COLUMN authenticated_at"))
+        connection.execute(text("DROP INDEX ix_federated_identities_claimed_username"))
+        connection.execute(text("DROP INDEX ix_federated_identities_claimed_email"))
+        for table, column in (
+            ("oauth_authorization_codes", "authenticated_at"),
+            ("oauth_sessions", "authenticated_at"),
+            ("federated_identities", "claimed_username"),
+            ("federated_identities", "claimed_email"),
+        ):
+            connection.execute(text(f"ALTER TABLE {table} DROP COLUMN {column}"))
 
     upgraded = _make_app(tmp_path, PUBLIC_URL, clock=clock.now)
     try:
-        for table in ("oauth_authorization_codes", "oauth_sessions"):
+        for table, expected in (
+            ("oauth_authorization_codes", "authenticated_at"),
+            ("oauth_sessions", "authenticated_at"),
+            ("federated_identities", "claimed_username"),
+            ("federated_identities", "claimed_email"),
+        ):
             columns = {c["name"] for c in inspect(upgraded.state.engine).get_columns(table)}
-            assert "authenticated_at" in columns
+            assert expected in columns
         with TestClient(upgraded, base_url=PUBLIC_URL) as client:
             assert sign_in(client)["access_token"]
     finally:

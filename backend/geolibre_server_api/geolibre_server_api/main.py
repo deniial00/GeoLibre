@@ -34,7 +34,6 @@ from sqlalchemy import (
 from sqlalchemy.exc import IntegrityError, OperationalError
 from sqlalchemy.orm import Session, selectinload, sessionmaker
 
-from geolibre_server_api import enterprise_models  # noqa: F401
 from geolibre_server_api.auth import (
     AuthPrincipal,
     InsufficientScopeError,
@@ -52,6 +51,7 @@ from geolibre_server_api.auth import (
 )
 from geolibre_server_api.auth_models import OAUTH_INDEXES, Account, Base
 from geolibre_server_api.enterprise_admin import build_enterprise_admin_router
+from geolibre_server_api.enterprise_models import FEDERATED_IDENTITY_INDEXES
 from geolibre_server_api.oidc import build_http_client, build_transport
 from geolibre_server_api.org_models import (
     Group,
@@ -64,6 +64,7 @@ from geolibre_server_api.org_models import (
     OrganizationRole,
 )
 from geolibre_server_api.policy import (
+    is_last_active_admin,
     organization_role,
     require_not_break_glass,
     require_organization_admin,
@@ -426,6 +427,8 @@ def postgresql_upgrade_statements() -> list[str]:
         """,
         "ALTER TABLE oauth_authorization_codes ADD COLUMN IF NOT EXISTS authenticated_at INTEGER",
         "ALTER TABLE oauth_sessions ADD COLUMN IF NOT EXISTS authenticated_at INTEGER",
+        "ALTER TABLE federated_identities ADD COLUMN IF NOT EXISTS claimed_username VARCHAR(255)",
+        "ALTER TABLE federated_identities ADD COLUMN IF NOT EXISTS claimed_email VARCHAR(320)",
     ]
 
 
@@ -446,6 +449,10 @@ def upgrade_sqlite_schema(engine) -> None:
     tables = set(inspector.get_table_names())
     additions = {
         "accounts": [("email", "VARCHAR(320)")],
+        "federated_identities": [
+            ("claimed_username", "VARCHAR(255)"),
+            ("claimed_email", "VARCHAR(320)"),
+        ],
         "oauth_authorization_codes": [("authenticated_at", "INTEGER")],
         "oauth_sessions": [("authenticated_at", "INTEGER")],
         "projects": [
@@ -678,6 +685,9 @@ def create_app(
         index.create(engine, checkfirst=True)
     # create_all does not add an index to an already-existing transfer table.
     PENDING_TRANSFER_INDEX.create(engine, checkfirst=True)
+    # Nor the federated identity indexes to a table from an earlier release.
+    for index in FEDERATED_IDENTITY_INDEXES:
+        index.create(engine, checkfirst=True)
     sessions = sessionmaker(engine, expire_on_commit=False)
     oauth_config = make_oauth_config(public_url)
     clock_fn = clock or (lambda: int(datetime.now(UTC).timestamp()))
@@ -1779,15 +1789,7 @@ def create_app(
             session.add(member)
         else:
             if member.role == "administrator" and body.role != "administrator":
-                admin_count = session.scalar(
-                    select(func.count())
-                    .select_from(OrganizationMember)
-                    .where(
-                        OrganizationMember.organization_id == organization_id,
-                        OrganizationMember.role == "administrator",
-                    )
-                )
-                if admin_count == 1:
+                if is_last_active_admin(session, organization_id, target.id):
                     raise HTTPException(409, "organization must have an administrator")
                 require_not_break_glass(session, organization_id, target.id)
             member.role = body.role
@@ -1833,17 +1835,8 @@ def create_app(
         member = session.get(OrganizationMember, (organization_id, target.id)) if target else None
         if member is None:
             raise HTTPException(404, "organization member not found")
-        if member.role == "administrator":
-            admin_count = session.scalar(
-                select(func.count())
-                .select_from(OrganizationMember)
-                .where(
-                    OrganizationMember.organization_id == organization_id,
-                    OrganizationMember.role == "administrator",
-                )
-            )
-            if admin_count == 1:
-                raise HTTPException(409, "organization must have an administrator")
+        if is_last_active_admin(session, organization_id, target.id):
+            raise HTTPException(409, "organization must have an administrator")
         require_not_break_glass(session, organization_id, target.id)
         session.delete(member)
         detach_from_organization_groups(session, organization_id, target, account)

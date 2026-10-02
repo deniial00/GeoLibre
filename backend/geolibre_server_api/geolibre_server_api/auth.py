@@ -2203,6 +2203,8 @@ def build_oauth_router(config: OAuthConfig) -> APIRouter:
             or code_row.account_id is None
             or code_row.code_expires_at is None
             or code_row.code_expires_at <= now_ts
+            # Deactivated between approval and exchange.
+            or is_deactivated(session, code_row.account_id)
         ):
             return oauth_token_error(400, "invalid_grant")
 

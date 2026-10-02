@@ -20,7 +20,7 @@ import uuid
 
 from fastapi import APIRouter, Depends, Request, Response
 from fastapi.responses import JSONResponse
-from sqlalchemy import and_, delete, func, select, update
+from sqlalchemy import and_, delete, func, or_, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -29,6 +29,7 @@ from geolibre_server_api.auth import get_clock, get_session, iso_ts, token_diges
 from geolibre_server_api.auth_models import Account
 from geolibre_server_api.enterprise_models import (
     AccountSecurity,
+    FederatedIdentity,
     OrganizationIdentityProvider,
     ScimGroup,
     ScimToken,
@@ -36,7 +37,13 @@ from geolibre_server_api.enterprise_models import (
 )
 from geolibre_server_api.oidc import SSO_PASSWORD_HASH, derive_username
 from geolibre_server_api.org_models import Group, GroupMember, Organization, OrganizationMember
-from geolibre_server_api.policy import deactivate_account, reactivate_account
+from geolibre_server_api.policy import (
+    deactivate_account,
+    is_deactivated,
+    is_last_active_admin,
+    organization_role,
+    reactivate_account,
+)
 from geolibre_server_api.projects import demote_disallowed_public_projects
 
 SCIM_MEDIA_TYPE = "application/scim+json"
@@ -114,6 +121,13 @@ def scim_organization(
                 ScimToken.revoked_at.is_(None),
             )
         )
+    # The token acts for its creator (who owns SCIM groups): it stops working
+    # while the creator is not an active administrator of the organization.
+    if row is not None and (
+        organization_role(session, organization_id, row.created_by_id) != "administrator"
+        or is_deactivated(session, row.created_by_id)
+    ):
+        row = None
     if row is None:
         raise ScimError(401, "invalid SCIM token", None, {"WWW-Authenticate": "Bearer"})
     now_ts = get_clock(request)()
@@ -299,23 +313,9 @@ def _default_role(session: Session, organization_id: str) -> str:
     return role or "member"
 
 
-def _is_last_admin(session: Session, organization_id: str, account_id: str) -> bool:
-    member = session.get(OrganizationMember, (organization_id, account_id))
-    if member is None or member.role != "administrator":
-        return False
-    admin_count = session.scalar(
-        select(func.count())
-        .select_from(OrganizationMember)
-        .where(
-            OrganizationMember.organization_id == organization_id,
-            OrganizationMember.role == "administrator",
-        )
-    )
-    return admin_count == 1
-
-
 def _guard_removal(session: Session, organization_id: str, account_id: str) -> None:
-    if _is_last_admin(session, organization_id, account_id):
+    """Refuse to remove or deactivate the last active administrator or the break-glass account."""
+    if is_last_active_admin(session, organization_id, account_id):
         raise ScimError(409, "cannot remove the last organization administrator", "mutability")
     break_glass = session.scalar(
         select(OrganizationIdentityProvider.id).where(
@@ -330,8 +330,10 @@ def _guard_removal(session: Session, organization_id: str, account_id: str) -> N
 
 
 def _remove_memberships(session: Session, organization_id: str, account_id: str) -> None:
-    """Drop the account's membership in the organization and its groups (not ownership)."""
-    _guard_removal(session, organization_id, account_id)
+    """Drop the account's membership in the organization and its groups (not ownership).
+
+    The caller runs ``_guard_removal`` first.
+    """
     session.execute(
         delete(OrganizationMember).where(
             OrganizationMember.organization_id == organization_id,
@@ -364,6 +366,7 @@ def _is_managed(session: Session, organization_id: str, account_id: str) -> bool
 
 
 def _deactivate(session: Session, organization_id: str, account_id: str, now_ts: int) -> None:
+    _guard_removal(session, organization_id, account_id)
     if _is_managed(session, organization_id, account_id):
         deactivate_account(session, account_id, now_ts)
     else:
@@ -371,9 +374,7 @@ def _deactivate(session: Session, organization_id: str, account_id: str, now_ts:
         _remove_memberships(session, organization_id, account_id)
 
 
-def _activate(session: Session, organization_id: str, account_id: str) -> None:
-    if _is_managed(session, organization_id, account_id):
-        reactivate_account(session, account_id)
+def _ensure_member(session: Session, organization_id: str, account_id: str) -> None:
     if session.get(OrganizationMember, (organization_id, account_id)) is None:
         session.add(
             OrganizationMember(
@@ -383,6 +384,12 @@ def _activate(session: Session, organization_id: str, account_id: str) -> None:
                 created_at=auth.now(),
             )
         )
+
+
+def _activate(session: Session, organization_id: str, account_id: str, now_ts: int) -> None:
+    if _is_managed(session, organization_id, account_id):
+        reactivate_account(session, account_id, now_ts)
+    _ensure_member(session, organization_id, account_id)
 
 
 # ---------------------------------------------------------------------------
@@ -455,6 +462,69 @@ def _duplicate_user_name() -> ScimError:
     return ScimError(409, "userName already exists", "uniqueness")
 
 
+def _adoptable_account(session: Session, organization_id: str, user_name: str) -> str | None:
+    """The one account this organization's single sign-on created for ``user_name``.
+
+    Users who signed in before SCIM was set up already have an account: SCIM
+    takes it over instead of creating a second one. Only accounts this
+    organization manages, linked to its provider, and not yet provisioned here
+    qualify, so another organization's, password, or proxy accounts never do.
+    The username claim decides first, then the verified email claim; an
+    ambiguous match adopts nothing.
+    """
+    provider_id = session.scalar(
+        select(OrganizationIdentityProvider.id).where(
+            OrganizationIdentityProvider.organization_id == organization_id
+        )
+    )
+    if provider_id is None:
+        return None
+    candidates = (
+        select(FederatedIdentity.account_id)
+        .distinct()
+        .join(AccountSecurity, AccountSecurity.account_id == FederatedIdentity.account_id)
+        .where(
+            FederatedIdentity.provider_id == provider_id,
+            AccountSecurity.managed_by_organization_id == organization_id,
+            FederatedIdentity.account_id.not_in(
+                select(ScimUser.account_id).where(ScimUser.organization_id == organization_id)
+            ),
+        )
+        .limit(2)
+    )
+    for claimed in (FederatedIdentity.claimed_username, FederatedIdentity.claimed_email):
+        matches = session.scalars(candidates.where(claimed == user_name)).all()
+        if matches:
+            return matches[0] if len(matches) == 1 else None
+    return None
+
+
+def _new_scim_user(organization_id: str, account_id: str, changes: dict, now_ts: int) -> ScimUser:
+    return ScimUser(
+        organization_id=organization_id,
+        account_id=account_id,
+        user_name=changes["user_name"],
+        external_id=changes["external_id"],
+        email=changes["email"],
+        display_name=changes["display_name"],
+        created_at=now_ts,
+        updated_at=now_ts,
+    )
+
+
+def _adopt_account(
+    session: Session, organization_id: str, account_id: str, changes: dict, now_ts: int
+) -> None:
+    """Provision an existing single sign-on account instead of creating one."""
+    session.add(_new_scim_user(organization_id, account_id, changes, now_ts))
+    session.flush()
+    if changes["active"]:
+        _activate(session, organization_id, account_id, now_ts)
+    else:
+        _ensure_member(session, organization_id, account_id)
+        _deactivate(session, organization_id, account_id, now_ts)
+
+
 def _apply_user_changes(session: Session, scim_user: ScimUser, changes: dict, now_ts: int) -> None:
     organization_id = scim_user.organization_id
     user_name = changes.get("user_name")
@@ -467,7 +537,7 @@ def _apply_user_changes(session: Session, scim_user: ScimUser, changes: dict, no
             setattr(scim_user, column, changes[column])
     if "active" in changes:
         if changes["active"]:
-            _activate(session, organization_id, scim_user.account_id)
+            _activate(session, organization_id, scim_user.account_id, now_ts)
         else:
             _deactivate(session, organization_id, scim_user.account_id, now_ts)
     scim_user.updated_at = now_ts
@@ -536,13 +606,24 @@ def _load_group(session: Session, organization_id: str, group_id: str) -> tuple[
 
 
 def _require_provisioned(session: Session, organization_id: str, account_ids: list[str]) -> None:
+    """Group members must be provisioned users who are active members of the organization."""
     if not account_ids:
         return
     found = set(
         session.scalars(
-            select(ScimUser.account_id).where(
+            select(ScimUser.account_id)
+            .join(
+                OrganizationMember,
+                and_(
+                    OrganizationMember.organization_id == ScimUser.organization_id,
+                    OrganizationMember.account_id == ScimUser.account_id,
+                ),
+            )
+            .outerjoin(AccountSecurity, AccountSecurity.account_id == ScimUser.account_id)
+            .where(
                 ScimUser.organization_id == organization_id,
                 ScimUser.account_id.in_(account_ids),
+                or_(AccountSecurity.status.is_(None), AccountSecurity.status != "deactivated"),
             )
         )
     )
@@ -774,11 +855,25 @@ def build_scim_router() -> APIRouter:
             raise ScimError(400, "userName is required", "invalidValue")
         user_name = changes["user_name"]
         now_ts = get_clock(request)()
-        # A concurrent request may win the userName (409) or the derived
-        # account username (retried with a fresh one).
+
+        def created(account_id: str):
+            resource = _user_json(request, _load_user(session, organization_id, account_id))
+            return scim_response(resource, 201, headers={"Location": resource["meta"]["location"]})
+
+        # A concurrent request may win the userName (409), the adopted account
+        # (re-checked), or the derived account username (retried with a fresh one).
         for _ in range(3):
             if _user_name_taken(session, organization_id, user_name):
                 raise _duplicate_user_name()
+            adopted_id = _adoptable_account(session, organization_id, user_name)
+            if adopted_id is not None:
+                try:
+                    _adopt_account(session, organization_id, adopted_id, changes, now_ts)
+                    session.commit()
+                except IntegrityError:
+                    session.rollback()
+                    continue
+                return created(adopted_id)
             account = Account(
                 id=str(uuid.uuid4()),
                 username=derive_username(session, user_name),
@@ -798,18 +893,7 @@ def build_scim_router() -> APIRouter:
                         managed_by_organization_id=organization_id,
                     )
                 )
-                session.add(
-                    ScimUser(
-                        organization_id=organization_id,
-                        account_id=account.id,
-                        user_name=user_name,
-                        external_id=changes["external_id"],
-                        email=changes["email"],
-                        display_name=changes["display_name"],
-                        created_at=now_ts,
-                        updated_at=now_ts,
-                    )
-                )
+                session.add(_new_scim_user(organization_id, account.id, changes, now_ts))
                 session.add(
                     OrganizationMember(
                         organization_id=organization_id,
@@ -822,8 +906,7 @@ def build_scim_router() -> APIRouter:
             except IntegrityError:
                 session.rollback()
                 continue
-            resource = _user_json(request, _load_user(session, organization_id, account.id))
-            return scim_response(resource, 201, headers={"Location": resource["meta"]["location"]})
+            return created(account.id)
         if _user_name_taken(session, organization_id, user_name):
             raise _duplicate_user_name()
         raise ScimError(409, "could not allocate an account for this user", "uniqueness")
@@ -897,7 +980,9 @@ def build_scim_router() -> APIRouter:
         session: Session = Depends(get_session),
     ):
         scim_user = _load_user(session, organization_id, user_id)[0]
-        _guard_removal(session, organization_id, user_id)
+        # The account keeps its single sign-on link, so a deprovisioned user who
+        # can still authenticate at the provider reaches this deactivated account
+        # (403) instead of a new one.
         _deactivate(session, organization_id, user_id, get_clock(request)())
         _remove_memberships(session, organization_id, user_id)
         session.delete(scim_user)

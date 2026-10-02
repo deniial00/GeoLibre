@@ -716,10 +716,11 @@ re-authentication for `POST` and `DELETE`) and respond with
 Configure the identity provider with `baseUrl` as the tenant/SCIM URL and the
 token as a Bearer secret. Every SCIM request needs
 `Authorization: Bearer <token>` for that organization; a missing, revoked, or
-other organization's token is `401` with `WWW-Authenticate: Bearer`. SCIM
-requests are machine-to-machine, so the organization's administrator IP
-allowlist and re-authentication window do not apply to them; revoke a token to
-cut off a provider.
+other organization's token is `401` with `WWW-Authenticate: Bearer`. Tokens
+also stop working when their creator is deactivated or ceases to be an active
+organization administrator. SCIM requests are machine-to-machine, so the
+organization's administrator IP allowlist and re-authentication window do not
+apply to them; revoke a token to cut off a provider.
 
 Request bodies are `application/scim+json` (or `application/json`); responses
 are `application/scim+json`. Errors use the SCIM error message:
@@ -729,7 +730,7 @@ are `application/scim+json`. Errors use the SCIM error message:
 | --- | --- |
 | `GET /ServiceProviderConfig`, `/ResourceTypes`, `/Schemas` | Discovery. PATCH and filtering are supported (up to 100 results); bulk, sort, ETags, and password changes are not. |
 | `GET /Users` | `startIndex` (default 1) and `count` (0–100, default 100), ordered by creation. `filter` only `userName eq "…"` (case-insensitive) or `externalId eq "…"`; anything else is `400 invalidFilter`. |
-| `POST /Users` | Creates an account. `userName` (1–255 characters, stored lowercased) is required and unique per organization (`409 uniqueness`). |
+| `POST /Users` | Creates an account, or adopts the existing SSO account when this organization's enabled identity provider has a unique matching lowercased username claim or verified email claim. Password accounts, proxy identities, accounts managed by another organization, and ambiguous matches are not adopted. `userName` (1–255 characters, stored lowercased) is required and unique per organization (`409 uniqueness`). |
 | `GET`/`PUT`/`PATCH`/`DELETE /Users/{id}` | `id` is the account id. `PUT` replaces `userName`, `externalId`, `displayName`, `emails`, and (when present) `active`. |
 | `GET /Groups` | `filter` only `displayName eq "…"` (case-insensitive) or `externalId eq "…"`. |
 | `POST /Groups` | Creates an organization group owned by the token's creator, with `join_policy` `invite`. Every member must be a user provisioned in this organization (`400 invalidValue`). |
@@ -745,6 +746,22 @@ without a provider). A group resource's `members` lists only plain accepted
 members; the owner and managers are never listed or changed by SCIM. Only users
 and groups created through SCIM are visible to it (`404 resource not found`
 otherwise).
+
+SCIM identity claims are refreshed on every OIDC sign-in. An email claim is
+eligible for matching only when the provider asserts `email_verified: true`.
+When a previously signed-in account has no SCIM resource and a matching SCIM
+resource belongs to an unused SCIM-created account, the next sign-in reconciles
+the SCIM resource onto the real account, transfers only member-role entries in
+this organization's SCIM groups (without duplicates), then deactivates the
+orphan and removes its organization membership and group-member rows. The
+orphan account record is retained. A deactivated SCIM resource remains
+deactivated after reconciliation.
+
+Deleting a managed SCIM user deactivates the account and revokes its OAuth and
+personal-token credentials, but retains its federated identity. Reprovisioning
+the same username adopts that deactivated account and reactivates it without
+restoring old credentials; an authorization code approved before deactivation
+cannot be exchanged afterward.
 
 **PATCH** bodies need the `urn:ietf:params:scim:api:messages:2.0:PatchOp`
 schema and an `Operations` list (else `400 invalidSyntax`). `op` is

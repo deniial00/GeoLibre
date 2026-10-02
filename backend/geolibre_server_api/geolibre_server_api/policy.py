@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from fastapi import HTTPException, Request
-from sqlalchemy import func, select, update
+from sqlalchemy import func, or_, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -227,16 +227,41 @@ def is_deactivated(session: Session, account_id: str) -> bool:
     return status == "deactivated"
 
 
-def deactivate_account(session: Session, account_id: str, now_ts: int) -> None:
-    """Deactivate the account and revoke every OAuth family and personal token.
+def active_admin_count(
+    session: Session, organization_id: str, *, excluding: str | None = None
+) -> int:
+    """The organization's administrators whose accounts are not deactivated."""
+    query = (
+        select(func.count())
+        .select_from(OrganizationMember)
+        .outerjoin(AccountSecurity, AccountSecurity.account_id == OrganizationMember.account_id)
+        .where(
+            OrganizationMember.organization_id == organization_id,
+            OrganizationMember.role == "administrator",
+            or_(AccountSecurity.status.is_(None), AccountSecurity.status != "deactivated"),
+        )
+    )
+    if excluding is not None:
+        query = query.where(OrganizationMember.account_id != excluding)
+    return session.scalar(query) or 0
 
-    The caller commits, so the status flip and the revocations land together.
+
+def is_last_active_admin(session: Session, organization_id: str, account_id: str) -> bool:
+    """True when the account is an administrator and no other active administrator remains.
+
+    Demoting, removing, or deactivating it would leave the organization without
+    an administrator who can sign in.
     """
+    return (
+        organization_role(session, organization_id, account_id) == "administrator"
+        and active_admin_count(session, organization_id, excluding=account_id) == 0
+    )
+
+
+def _revoke_credentials(session: Session, account_id: str, now_ts: int) -> None:
+    """Revoke every live OAuth family and personal token of the account."""
     from geolibre_server_api.auth import backfill_account_policies
 
-    security = ensure_account_security(session, account_id)
-    security.status = "deactivated"
-    security.deactivated_at = now_ts
     session.execute(
         update(OAuthSession)
         .where(OAuthSession.account_id == account_id, OAuthSession.revoked_at.is_(None))
@@ -256,8 +281,28 @@ def deactivate_account(session: Session, account_id: str, now_ts: int) -> None:
     )
 
 
-def reactivate_account(session: Session, account_id: str) -> None:
-    """Allow sign-in again; credentials revoked by the deactivation stay revoked."""
+def deactivate_account(session: Session, account_id: str, now_ts: int) -> None:
+    """Deactivate the account and revoke every OAuth family and personal token.
+
+    The caller commits, so the status flip and the revocations land together.
+    """
     security = ensure_account_security(session, account_id)
-    security.status = "active"
-    security.deactivated_at = None
+    security.status = "deactivated"
+    security.deactivated_at = now_ts
+    _revoke_credentials(session, account_id, now_ts)
+
+
+def reactivate_account(session: Session, account_id: str, now_ts: int) -> None:
+    """Allow sign-in again; nothing issued before or during the deactivation survives.
+
+    Only a deactivated account changes: credentials minted while it was
+    deactivated (a code exchange racing the deactivation) are revoked too, and
+    an already active account keeps its sessions.
+    """
+    reactivated = session.execute(
+        update(AccountSecurity)
+        .where(AccountSecurity.account_id == account_id, AccountSecurity.status == "deactivated")
+        .values(status="active", deactivated_at=None)
+    ).rowcount
+    if reactivated:
+        _revoke_credentials(session, account_id, now_ts)

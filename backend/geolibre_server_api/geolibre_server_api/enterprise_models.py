@@ -5,7 +5,7 @@ Foreign keys are plain strings with no relationships, like ``auth_models``.
 
 from __future__ import annotations
 
-from sqlalchemy import Boolean, ForeignKey, Integer, String, Text, UniqueConstraint
+from sqlalchemy import Boolean, ForeignKey, Index, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
 from geolibre_server_api.auth_models import Base
@@ -106,6 +106,34 @@ class FederatedIdentity(Base):
     subject: Mapped[str] = mapped_column(String(255))
     created_at: Mapped[int] = mapped_column(Integer)
     last_login_at: Mapped[int] = mapped_column(Integer)
+    # Refreshed at every OIDC sign-in so SCIM can adopt the account (never set
+    # for proxy identities): the lowercased username claim, and the lowercased
+    # email claim only while the provider asserts ``email_verified``.
+    claimed_username: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    claimed_email: Mapped[str | None] = mapped_column(String(320), nullable=True)
+
+
+# Separate metadata objects so startup can add them to an existing table too.
+FEDERATED_IDENTITY_INDEXES = (
+    # One link per account and provider: SSO never links a second subject to an
+    # account (a concurrent second link fails here).
+    Index(
+        "uq_federated_identity_account_provider",
+        FederatedIdentity.__table__.c.account_id,
+        FederatedIdentity.__table__.c.provider_key,
+        unique=True,
+    ),
+    Index(
+        "ix_federated_identities_claimed_username",
+        FederatedIdentity.__table__.c.provider_id,
+        FederatedIdentity.__table__.c.claimed_username,
+    ),
+    Index(
+        "ix_federated_identities_claimed_email",
+        FederatedIdentity.__table__.c.provider_id,
+        FederatedIdentity.__table__.c.claimed_email,
+    ),
+)
 
 
 class OidcLoginState(Base):
