@@ -4,6 +4,7 @@ import { describe, it } from "node:test";
 // Desktop (Tauri) runtime whose keychain read fails (locked or unavailable).
 const storage = new Map<string, string>([
   ["geolibre.pluginCredentials.accounts", JSON.stringify(["plugin.ext-plugin.api-key"])],
+  ["geolibre:mapillary-access-token", "MLY|legacy"],
 ]);
 const invoked: string[] = [];
 
@@ -40,5 +41,10 @@ describe("app.credentials when the keychain is unavailable", () => {
     assert.equal(invoked.length, readCalls, "no further keychain commands after the failed read");
     assert.ok(![...storage.values()].some((value) => value.includes("hf_new")));
     assert.notEqual(useCredentialStorageStatus.getState().error, null);
+  });
+
+  it("keeps a legacy built-in token usable and in place when the keychain read fails", () => {
+    assert.equal(pluginCredentialHost.get("access-token", "maplibre-gl-mapillary"), "MLY|legacy");
+    assert.equal(storage.get("geolibre:mapillary-access-token"), "MLY|legacy");
   });
 });

@@ -100,7 +100,7 @@ export async function hydrateDesktopCredentials(): Promise<void> {
     await hydratePostgresConnections(postgresIds, stored);
     await hydrateSettingsSecrets(stored);
     hydrateProjectCredentials(projectAccounts, stored);
-    hydratePluginCredentials(pluginAccounts, stored);
+    await hydratePluginCredentials(pluginAccounts, stored);
   } catch (error) {
     // Unforeseen failure: fall back to a session-only state that never writes
     // plaintext and never drops the legacy values.
@@ -108,7 +108,7 @@ export async function hydrateDesktopCredentials(): Promise<void> {
     setPostgresKeychainWritable(false);
     setSettingsKeychainWritable(false);
     setProjectCredentialsWritable(false);
-    hydratePluginCredentials(null, null);
+    await hydratePluginCredentials(null, null);
     setKeychainPostgresConnections(withNewIds(readBrowserPostgresConnections()));
     const { secrets } = splitDesktopSettingsSecrets(
       useDesktopSettingsStore.getState().desktopSettings,
@@ -120,7 +120,10 @@ export async function hydrateDesktopCredentials(): Promise<void> {
 }
 
 function withNewIds(connections: string[]): KeychainPostgresConnection[] {
-  return connections.map((connection) => ({ id: crypto.randomUUID(), connection }));
+  return connections.map((connection) => ({
+    id: crypto.randomUUID(),
+    connection,
+  }));
 }
 
 async function hydratePostgresConnections(
@@ -229,7 +232,10 @@ async function hydrateSettingsSecrets(
     return;
   }
 
-  const merged = mergeDesktopSettingsSecrets(publicSettings, { ...stored, ...legacy });
+  const merged = mergeDesktopSettingsSecrets(publicSettings, {
+    ...stored,
+    ...legacy,
+  });
   try {
     for (const [account, value] of Object.entries(legacy)) {
       await writeSecureCredential(account, value);

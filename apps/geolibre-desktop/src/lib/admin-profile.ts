@@ -13,6 +13,7 @@ import {
   type ExperienceLevel,
   type UiProfileSettings,
 } from "../hooks/useDesktopSettings";
+import { getDeploymentPolicy } from "./deployment-env";
 import { OPTIONAL_RESOURCE_HEADER } from "./diagnostics";
 import { isTauri } from "./is-tauri";
 import { normalizeStringList } from "./string-lists";
@@ -43,6 +44,13 @@ interface AdminProfileFile {
 export async function loadAdminProfile(
   pluginIds: readonly string[],
 ): Promise<Partial<UiProfileSettings> | null> {
+  // A deployment.json `interface` section that configures something replaces
+  // admin-profile.json whole. An empty `{}` sets nothing, so it is treated as
+  // absent rather than silently discarding the admin profile.
+  const policyInterface = getDeploymentPolicy()?.interface;
+  if (policyInterface && Object.keys(policyInterface).length > 0) {
+    return resolveAdminProfile(policyInterface, pluginIds);
+  }
   const file = await readAdminProfileFile();
   if (!file) return null;
   return resolveAdminProfile(file, pluginIds);
@@ -82,7 +90,8 @@ async function readAdminProfileFile(): Promise<AdminProfileFile | null> {
   try {
     // The admin file is optional; a 404 here is the normal "no admin profile"
     // case, so flag the request benign to keep it out of the error diagnostics.
-    const response = await fetch(`${import.meta.env.BASE_URL}admin-profile.json`, {
+    const meta = import.meta as ImportMeta & { env?: { BASE_URL?: string } };
+    const response = await fetch(`${meta.env?.BASE_URL ?? "/"}admin-profile.json`, {
       headers: { [OPTIONAL_RESOURCE_HEADER]: "1" },
     });
     if (!response.ok) return null;

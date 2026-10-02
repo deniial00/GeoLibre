@@ -112,6 +112,7 @@ function makeGlobe(startingMultiplier = 0) {
     },
   };
   let handles = 0;
+  const credentialValues = new Map<string, string>();
   // The panel is plain DOM, so it renders only when the host calls `render`.
   const { document } = parseHTML('<html><body><div id="panel"></div></body></html>');
   const panel = document.getElementById("panel") as unknown as HTMLElement;
@@ -153,6 +154,15 @@ function makeGlobe(startingMultiplier = 0) {
     },
     openRightPanel: () => {},
     onLocaleChange: () => () => {},
+    credentials: {
+      get: (name: string) => credentialValues.get(name) ?? "",
+      set: (name: string, value: string) => {
+        if (value) credentialValues.set(name, value);
+        else credentialValues.delete(name);
+        return true;
+      },
+      location: () => "browser" as const,
+    },
   } as unknown as GeoLibreAppAPI;
   return {
     app,
@@ -160,6 +170,7 @@ function makeGlobe(startingMultiplier = 0) {
     panel,
     points,
     handleCount: () => handles,
+    credentialValues,
     setViewBounds: (bounds: [number, number, number, number]) => {
       viewBounds = bounds;
     },
@@ -999,16 +1010,6 @@ describe("God's Eye View reattach", () => {
 
 describe("God's Eye View keyed feeds", () => {
   it("streams AIS vessels only once a key is saved in the panel, never into the project", async () => {
-    const values = new Map<string, string>();
-    const storageDescriptor = Object.getOwnPropertyDescriptor(globalThis, "localStorage");
-    Object.defineProperty(globalThis, "localStorage", {
-      configurable: true,
-      value: {
-        getItem: (key: string) => values.get(key) ?? null,
-        setItem: (key: string, value: string) => void values.set(key, value),
-        removeItem: (key: string) => void values.delete(key),
-      },
-    });
     const sockets: Array<{
       url: string;
       readyState: number;
@@ -1068,7 +1069,7 @@ describe("God's Eye View keyed feeds", () => {
       save?.dispatchEvent(new (Event())("click"));
       for (let i = 0; i < 4; i++) await flush();
 
-      assert.equal(values.get("geolibre.godsEyeView.apiKey.aisstream"), "secret-ais-key");
+      assert.equal(globe.credentialValues.get("aisstream"), "secret-ais-key");
       assert.equal(sockets.length, 1);
       assert.equal(sockets[0].url, "wss://stream.aisstream.io/v0/stream");
       assert.match(row()?.textContent ?? "", /Connecting to AISStream/);
@@ -1107,7 +1108,13 @@ describe("God's Eye View keyed feeds", () => {
             time_utc: new Date().toISOString().replace("T", " "),
           },
           Message: {
-            PositionReport: { UserID: 123456789, Latitude: 40.7, Longitude: -74, Sog: 5, Cog: 90 },
+            PositionReport: {
+              UserID: 123456789,
+              Latitude: 40.7,
+              Longitude: -74,
+              Sog: 5,
+              Cog: 90,
+            },
           },
         }),
       });
@@ -1138,8 +1145,6 @@ describe("God's Eye View keyed feeds", () => {
       godsEyeViewPlugin.deactivate?.(globe.app);
       net.restore();
       globalThis.WebSocket = originalWebSocket;
-      if (storageDescriptor) Object.defineProperty(globalThis, "localStorage", storageDescriptor);
-      else delete (globalThis as { localStorage?: unknown }).localStorage;
     }
   });
 });

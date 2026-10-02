@@ -407,7 +407,10 @@ export function TopToolbar({
       adding: (title) => t("arcgisHub.adding", { title }),
       added: (title) => t("arcgisHub.added", { title }),
       addedCapped: (title, limit) =>
-        t("arcgisHub.addedCapped", { title, limit: limit.toLocaleString(i18n.language) }),
+        t("arcgisHub.addedCapped", {
+          title,
+          limit: limit.toLocaleString(i18n.language),
+        }),
       addError: t("arcgisHub.addError"),
       zoom: t("arcgisHub.zoom"),
       download: t("arcgisHub.download"),
@@ -416,7 +419,10 @@ export function TopToolbar({
         t("arcgisHub.downloading", { completed, total, title }),
       downloadStarted: (title) => t("arcgisHub.downloadStarted", { title }),
       downloadCapped: (title, limit) =>
-        t("arcgisHub.downloadCapped", { title, limit: limit.toLocaleString(i18n.language) }),
+        t("arcgisHub.downloadCapped", {
+          title,
+          limit: limit.toLocaleString(i18n.language),
+        }),
       downloadFirstLayer: (title, layerCount) =>
         t("arcgisHub.downloadFirstLayer", { title, layerCount }),
       downloadError: t("arcgisHub.downloadError"),
@@ -672,6 +678,7 @@ export function TopToolbar({
       tooLargeToOpen: (size, limit) => t("huggingFace.tooLargeToOpen", { size, limit }),
       tokenLabel: t("huggingFace.tokenLabel"),
       tokenHint: t("huggingFace.tokenHint"),
+      tokenHintKeychain: t("huggingFace.tokenHintKeychain"),
       tokenPlaceholder: t("huggingFace.tokenPlaceholder"),
       tokenSave: t("huggingFace.tokenSave"),
       tokenClear: t("huggingFace.tokenClear"),

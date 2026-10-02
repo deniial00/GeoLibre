@@ -50,7 +50,8 @@ const COVERAGE_COLOR = "#05cb63";
 const SELECTED_COLOR = "#f5811f";
 const SEQUENCE_HIGHLIGHT_COLOR = "#e91e63";
 
-const TOKEN_STORAGE_KEY = "geolibre:mapillary-access-token";
+/** The `app.credentials` name the user's access token is saved under. */
+const TOKEN_CREDENTIAL_NAME = "access-token";
 const ATTRIBUTION =
   '<a href="https://www.mapillary.com/" target="_blank" rel="noopener noreferrer">© Mapillary</a>';
 
@@ -121,12 +122,7 @@ function readEnvToken(): string | undefined {
 
 /** A token the user pasted into the panel overrides the build/runtime default. */
 function readUserToken(): string | undefined {
-  if (typeof localStorage === "undefined") return undefined;
-  try {
-    return localStorage.getItem(TOKEN_STORAGE_KEY)?.trim() || undefined;
-  } catch {
-    return undefined;
-  }
+  return appRef?.credentials?.get(TOKEN_CREDENTIAL_NAME).trim() || undefined;
 }
 
 function activeToken(): string | undefined {
@@ -134,13 +130,9 @@ function activeToken(): string | undefined {
 }
 
 function saveUserToken(token: string): void {
-  if (typeof localStorage === "undefined") return;
-  try {
-    if (token) localStorage.setItem(TOKEN_STORAGE_KEY, token);
-    else localStorage.removeItem(TOKEN_STORAGE_KEY);
-  } catch {
-    /* storage may be unavailable (private mode); ignore */
-  }
+  // The result is ignored: on a failed write the host keeps the token for this
+  // session and raises the credential-storage warning on desktop.
+  appRef?.credentials?.set(TOKEN_CREDENTIAL_NAME, token);
 }
 
 // ---------------------------------------------------------------------------
@@ -360,7 +352,10 @@ function setSelectedMarker(lngLat: { lng: number; lat: number } | null): void {
           features: [
             {
               type: "Feature",
-              geometry: { type: "Point", coordinates: [lngLat.lng, lngLat.lat] },
+              geometry: {
+                type: "Point",
+                coordinates: [lngLat.lng, lngLat.lat],
+              },
               properties: {},
             },
           ],

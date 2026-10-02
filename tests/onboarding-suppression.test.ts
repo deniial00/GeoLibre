@@ -141,4 +141,13 @@ describe("shouldSuppressOnboarding", () => {
     // No env at all (the node test runtime has no import.meta.env).
     assert.equal(shouldSuppressOnboarding(undefined), false);
   });
+
+  it("lets deployment.json branding.welcome override the build env", () => {
+    withSearch("");
+    const off = { version: 1, branding: { welcome: false } } as const;
+    const on = { version: 1, branding: { welcome: true } } as const;
+    assert.equal(shouldSuppressOnboarding({}, off), true);
+    assert.equal(shouldSuppressOnboarding({ VITE_WELCOME_DISABLED: "1" }, on), false);
+    assert.equal(shouldSuppressOnboarding({ VITE_WELCOME_DISABLED: "1" }, null), true);
+  });
 });

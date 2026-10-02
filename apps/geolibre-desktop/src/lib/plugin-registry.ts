@@ -5,6 +5,7 @@
 // trust path. See docs/plugin-api.md and docs/roadmap.md.
 
 import { isAllowedPluginManifestUrl } from "@geolibre/core";
+import { getDeploymentPolicy } from "./deployment-env";
 
 /** A single curated plugin in the marketplace registry. */
 export interface PluginRegistryEntry {
@@ -33,12 +34,14 @@ export interface PluginRegistry {
 const DEFAULT_REGISTRY_URL = "https://plugins.geolibre.app/plugin-registry.json";
 
 /**
- * Resolve the registry URL. Honors VITE_GEOLIBRE_PLUGIN_REGISTRY_URL (resolved
- * against the app origin so a relative value works) and otherwise falls back to
- * the hosted default registry.
+ * Resolve the registry URL. Honors deployment.json `plugins.registryUrl`, then
+ * VITE_GEOLIBRE_PLUGIN_REGISTRY_URL (resolved against the app origin so a
+ * relative value works) and otherwise falls back to the hosted default registry.
  */
 export function resolveRegistryUrl(): string {
-  const configured = import.meta.env.VITE_GEOLIBRE_PLUGIN_REGISTRY_URL;
+  const configured =
+    getDeploymentPolicy()?.plugins?.registryUrl ??
+    import.meta.env.VITE_GEOLIBRE_PLUGIN_REGISTRY_URL;
   // Resolving a configured value needs window.location as its base; outside a
   // browser (tests, SSR, Node scripts) fall back to the absolute default, the
   // same way bundledPluginManifestUrls guards window access.

@@ -81,6 +81,7 @@ import {
 import { parseDeploymentCapabilities, useAppStore } from "@geolibre/core";
 import { readConfiguredAppName } from "./lib/app-name";
 import { readDeploymentEnvValue } from "./lib/deployment-env";
+import { loadDeploymentPolicy } from "./lib/deployment-policy";
 import { initializeNativeProjectOpen } from "./lib/native-project-open";
 
 import { initializeNativeCoordinateOpen } from "./lib/native-coordinate-open";
@@ -88,6 +89,50 @@ import { initializeNativeShareAuth } from "./lib/native-share-auth";
 import { configureShareOAuthReadiness, markColdShareCallback } from "./lib/share-oauth";
 
 installDiagnosticsCapture();
+
+// A deployment-configured app name also titles the browser tab; index.html's
+// static <title> stays the fallback when none is set. Best effort: a title
+// failure must not stop the app from rendering. Applied once up front from the
+// env so the tab is right while deployment.json is in flight, and again once
+// the policy (which can set branding.appName) has been applied.
+function applyConfiguredAppName(): void {
+  try {
+    const configuredAppName = readConfiguredAppName();
+    if (configuredAppName) document.title = configuredAppName;
+  } catch (error) {
+    console.error("[GeoLibre] Failed to apply the configured app name", error);
+  }
+}
+applyConfiguredAppName();
+
+// deployment.json (issue #2783): the deployment's policy, fetched before the
+// app renders so nothing paints with settings it then retracts. Absent
+// (404/HTML fallback/error/timeout) means today's env-driven behavior. The
+// fetch goes through the diagnostics wrapper installed above, whose optional
+// marker keeps a 404 at info level.
+const deploymentPolicyReady = loadDeploymentPolicy().then((policy) => {
+  applyConfiguredAppName();
+  // Capability application below is deliberately NOT guarded: if it throws, the
+  // app must fail to start rather than render with the default full grant.
+
+  // What this deployment is allowed to do (issue #1673). Applied before the
+  // app renders, so no surface ever paints with the full grant and then
+  // retracts it. Comes from deployment.json or the deployment/build env only —
+  // never from a URL parameter or a project file — because a capability a
+  // visitor can hand themselves is not a restriction. `capabilities: []` grants
+  // none; an omitted value falls through to the env, then to the default full
+  // grant, so existing deployments are unchanged.
+  if (policy?.capabilities !== undefined) {
+    useAppStore.getState().setDeploymentCapabilities(policy.capabilities);
+    return;
+  }
+  const configuredCapabilities = readDeploymentEnvValue("VITE_GEOLIBRE_CAPABILITIES");
+  if (configuredCapabilities) {
+    useAppStore
+      .getState()
+      .setDeploymentCapabilities(parseDeploymentCapabilities(configuredCapabilities));
+  }
+});
 
 const nativeShareAuthReady = isDesktopRuntime()
   ? initializeNativeShareAuth(markColdShareCallback)
@@ -152,7 +197,9 @@ if (isTauri()) {
 }
 if (isDesktopRuntime()) {
   configureShareOAuthReadiness(
-    Promise.all([nativeShareAuthReady, nativeShareFetchReady]).then(() => undefined),
+    Promise.all([nativeShareAuthReady, nativeShareFetchReady, deploymentPolicyReady]).then(
+      () => undefined,
+    ),
   );
 } else {
   void nativeShareFetchReady.catch(() => {
@@ -162,24 +209,6 @@ if (isDesktopRuntime()) {
 // Recover from chunks orphaned by a web redeploy (stale lazy import → 404). A
 // no-op in the desktop build, whose chunks are bundled locally.
 installStaleChunkReload();
-
-// A deployment-configured app name also titles the browser tab; index.html's
-// static <title> stays the fallback when none is set.
-const configuredAppName = readConfiguredAppName();
-if (configuredAppName) document.title = configuredAppName;
-
-// What this deployment is allowed to do (issue #1673). Read once, before the
-// app renders, so no surface ever paints with the full grant and then retracts
-// it. Comes from the deployment/build env only — never from a URL parameter or
-// a project file — because a capability a visitor can hand themselves is not a
-// restriction. An absent value keeps the default full grant, so existing
-// deployments are unchanged.
-const configuredCapabilities = readDeploymentEnvValue("VITE_GEOLIBRE_CAPABILITIES");
-if (configuredCapabilities) {
-  useAppStore
-    .getState()
-    .setDeploymentCapabilities(parseDeploymentCapabilities(configuredCapabilities));
-}
 
 // "Web app" here means the *build*, never anything the visitor controls: the
 // desktop shell and the Jupyter embed wheel are compiled without the gate, but a
@@ -340,7 +369,18 @@ if (isDesktopRuntime()) {
 // after App resolves — a free win, and it matters over the network in the web
 // build where these are separate fetches.
 void Promise.all([
-  import("./App"),
+  // Start App's chunk downloading and evaluating while deployment.json is in
+  // flight, then apply the policy-dependent module setup once both are done.
+  // Nothing in App's module graph reads deployment settings at import time
+  // (the GeoLens default URL is seeded by initGeoLensDefaultUrl below), so the
+  // chunk can evaluate before the policy is applied; nothing renders until the
+  // policy has been.
+  Promise.all([import("./App"), import("./hooks/usePlugins"), deploymentPolicyReady]).then(
+    ([app, plugins]) => {
+      plugins.initGeoLensDefaultUrl();
+      return app;
+    },
+  ),
   import("./components/common/error-boundaries"),
   loadAuthGate(authGate),
   // Sidecar-dependent panels can issue a request as soon as App mounts. On

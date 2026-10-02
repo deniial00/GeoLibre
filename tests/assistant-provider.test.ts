@@ -17,6 +17,7 @@ import {
   type RuntimeEnv,
 } from "../apps/geolibre-desktop/src/lib/assistant/provider";
 import { configForProfile } from "../apps/geolibre-desktop/src/lib/assistant/profiles";
+import { setDeploymentPolicy } from "../apps/geolibre-desktop/src/lib/deployment-env";
 
 describe("build-time AI proxy", () => {
   it("does not configure a managed proxy unless its URL is explicitly set", () => {
@@ -126,6 +127,34 @@ describe("build-time AI proxy", () => {
       assert.equal(env.OPENAI_COMPATIBLE_MODEL, "anthropic/claude-opus-5");
       assert.equal(env.GEOLIBRE_AI_PROXY_OMIT_AUTHORIZATION, "1");
     } finally {
+      globalThis.window = originalWindow;
+    }
+  });
+
+  it("lets deployment.json switch the managed proxy off, on, and pick the model", () => {
+    const build = {
+      VITE_GEOLIBRE_AI_URL: "https://ai.example.com",
+      VITE_GEOLIBRE_AI_MODEL: "m2",
+    };
+    const originalWindow = globalThis.window;
+    try {
+      setDeploymentPolicy({ version: 1, ai: { enabled: false } });
+      assert.deepEqual(readBuildTimeAssistantEnv(build), {});
+      assert.equal(hasManagedAssistantProxy(build), false);
+
+      setDeploymentPolicy({ version: 1, ai: { model: "m1" } });
+      assert.equal(readBuildTimeAssistantEnv(build).OPENAI_COMPATIBLE_MODEL, "m1");
+
+      globalThis.window = {
+        location: { origin: "https://app.example" },
+      } as unknown as Window & typeof globalThis;
+      setDeploymentPolicy({ version: 1, ai: { enabled: true } });
+      assert.equal(
+        readDeploymentAssistantEnv().GEOLIBRE_AI_PROXY_BASE_URL,
+        "https://app.example/ai/v1",
+      );
+    } finally {
+      setDeploymentPolicy(null);
       globalThis.window = originalWindow;
     }
   });

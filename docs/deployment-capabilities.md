@@ -67,14 +67,21 @@ docker build \
   -t geolibre-classroom .
 ```
 
-!!! note "Build time only, for now"
-    Unlike `GEOLIBRE_SHARE_URL`, `GEOLIBRE_EMBED_ORIGINS`, and the other
-    deployment settings, this cannot yet be set with `-e` on a **prebuilt**
-    image — `docker/entrypoint.sh` does not publish it into the runtime
-    configuration, so it has to be baked in. Configuring a published image with
-    `-e GEOLIBRE_MODE=kiosk`, and having nginx refuse the corresponding
-    requests, is tracked in
-    [#1673](https://github.com/opengeos/GeoLibre/issues/1673).
+!!! note "Runtime configuration"
+    A [`deployment.json`](deployment-policy.md) with a `capabilities` array,
+    served next to the app, restricts a **prebuilt** deployment without a
+    rebuild and takes precedence over `VITE_GEOLIBRE_CAPABILITIES`. `-e` on a
+    prebuilt image still cannot set this variable, because `docker/entrypoint.sh`
+    does not publish it into the runtime configuration.
+
+!!! warning "A late or blocked `deployment.json` fails open"
+    The browser waits at most 3 seconds for `deployment.json`. If the request
+    is dropped, blocked or slower than that, the session starts **without** the
+    policy, and the capabilities then come from `VITE_GEOLIBRE_CAPABILITIES` or,
+    absent that, the full default grant. This is the same client-side gate as
+    everything on this page: it limits what the interface offers and is not
+    access control. Do not rely on it where someone can interfere with the
+    request; enforce restrictions on the server instead.
 
 ### Defaults and parsing
 

@@ -2,9 +2,12 @@
 // a host page (a portal, an ERP, a dashboard) has with a framed GeoLibre at
 // runtime, instead of encoding everything in the initial URL (issue #1462).
 //
-// This module is deliberately pure — no window, no store, no map — so the
-// envelope, the origin allowlist, and every verb payload are unit-testable. The
-// runtime wiring lives in `hooks/useEmbedApi.ts`.
+// This module has no store or map dependency, and its readers take their inputs
+// as parameters, so the envelope, the origin allowlist, and every verb payload
+// are unit-testable. The defaults of `readEmbedOrigins` do consult `window`, the
+// build env and the active deployment policy (`getDeploymentPolicy`), which
+// tests bypass by passing explicit arguments. The runtime wiring lives in
+// `hooks/useEmbedApi.ts`.
 //
 // Relationship to the other bridges: `useEmbedBridge`/`useCommandBridge` speak an
 // unversioned, fully-trusted protocol with the GeoLibre Jupyter widget, which
@@ -20,6 +23,7 @@ import {
   validateMapExpression,
 } from "@geolibre/core";
 import type { GeoLibreLayer } from "@geolibre/core";
+import { getDeploymentPolicy } from "./deployment-env";
 import { EMBED_API_SOURCE, EMBED_API_VERSION, type AddLayerSpec } from "@geolibre/embed";
 
 export { EMBED_API_SOURCE, EMBED_API_VERSION };
@@ -85,7 +89,13 @@ export function parseEmbedOrigins(raw: unknown): string[] {
  *   writes onto `window`.
  * @returns The allowed origins, empty when the API is not enabled.
  */
-export function readEmbedOrigins(viteEnv?: EnvRecord, deploymentEnv?: EnvRecord): string[] {
+export function readEmbedOrigins(
+  viteEnv?: EnvRecord,
+  deploymentEnv?: EnvRecord,
+  policyOrigins: readonly string[] | undefined = getDeploymentPolicy()?.sharing?.embedOrigins,
+): string[] {
+  // deployment.json wins outright; an empty list turns the embed API off.
+  if (policyOrigins !== undefined) return parseEmbedOrigins(policyOrigins.join(","));
   const runtime =
     deploymentEnv ??
     (typeof window === "undefined"

@@ -9,7 +9,9 @@
  * cannot be enumerated, so the accounts that have an entry are indexed in
  * localStorage (non-secret). As with project credentials, the index is written
  * before the credential so a crash cannot leave an unindexed entry behind, and
- * a malformed index fails hydration rather than being partially read.
+ * a malformed index fails hydration rather than being partially read. The
+ * built-in plugins' pre-#2729 keys are migrated here: on desktop during startup
+ * hydration, on the web on first read.
  *
  * The plugin id is injected by `PluginManager`'s scoped app; a plugin passes
  * only `name`. Failures never fall back to plaintext on desktop: the value
@@ -23,6 +25,7 @@ import {
   queueCredentialChanges,
   reportCredentialStorageError,
   useCredentialStorageStatus,
+  writeSecureCredential,
 } from "./credential-store";
 
 /** Desktop: non-secret JSON array of accounts that have a stored value. */
@@ -31,6 +34,27 @@ export const PLUGIN_CREDENTIAL_ACCOUNTS_STORAGE_KEY = "geolibre.pluginCredential
 export const PLUGIN_CREDENTIAL_BROWSER_KEY_PREFIX = "geolibre.pluginCredential.";
 
 const NAME_PATTERN = /^[A-Za-z0-9_-]{1,64}$/;
+
+/** Plaintext localStorage keys the built-in plugins used before app.credentials (issue #2729), by account. */
+const LEGACY_PLUGIN_CREDENTIAL_KEYS: Readonly<Record<string, string>> = {
+  "plugin.maplibre-gl-huggingface.token": "geolibre:huggingface-token",
+  "plugin.maplibre-gl-mapillary.access-token": "geolibre:mapillary-access-token",
+  "plugin.gods-eye-view.tomtom": "geolibre.godsEyeView.apiKey.tomtom",
+  "plugin.gods-eye-view.aisstream": "geolibre.godsEyeView.apiKey.aisstream",
+};
+
+function readLegacyPluginCredentials(): Record<string, { key: string; value: string }> {
+  const found: Record<string, { key: string; value: string }> = {};
+  for (const [account, key] of Object.entries(LEGACY_PLUGIN_CREDENTIAL_KEYS)) {
+    try {
+      const value = window.localStorage.getItem(key)?.trim();
+      if (value) found[account] = { key, value };
+    } catch {
+      // Unreadable: nothing to migrate for this entry.
+    }
+  }
+  return found;
+}
 
 /** Names cannot contain ".", so the last segment of an account is unambiguous. */
 export function pluginCredentialAccount(pluginId: string, name: string): string {
@@ -70,30 +94,48 @@ export function readPluginCredentialIndex(): string[] {
 }
 
 /**
- * Loads the indexed plugin credentials from the startup keychain read.
+ * Loads the indexed plugin credentials from the startup keychain read, and
+ * moves the built-in plugins' pre-#2729 localStorage values into the keychain.
  * `index` or `stored` is `null` when reading it failed (the caller reported
- * it): plugin credentials then stay in memory for the session.
+ * it): plugin credentials then stay in memory for the session, and legacy
+ * values stay where they are.
  */
-export function hydratePluginCredentials(
+export async function hydratePluginCredentials(
   index: readonly string[] | null,
   stored: Readonly<Record<string, string>> | null,
-): void {
+): Promise<void> {
   if (credentialStorageLocation() !== "keychain") return;
+  const legacy = readLegacyPluginCredentials();
   if (index === null || stored === null) {
+    values = Object.fromEntries(
+      Object.entries(legacy).map(([account, { value }]) => [account, value]),
+    );
+    persisted = {};
     writable = false;
     return;
   }
   const present = index.filter((account) => stored[account] !== undefined);
   values = Object.fromEntries(present.map((account) => [account, stored[account]]));
-  if (present.length !== index.length) {
-    // An indexed write that never landed (crash, failed write): drop it.
-    try {
-      window.localStorage.setItem(PLUGIN_CREDENTIAL_ACCOUNTS_STORAGE_KEY, JSON.stringify(present));
-    } catch (error) {
-      reportCredentialStorageError(error);
-      writable = false;
-      return;
+  // Legacy wins over the keychain: it is what the user last saw (same rule as Settings).
+  for (const [account, { value }] of Object.entries(legacy)) values[account] = value;
+  const nextIndex = [...new Set([...present, ...Object.keys(legacy)])];
+  try {
+    // Index first, so a crash cannot leave an unindexed keychain entry. This
+    // also drops an indexed write that never landed (crash, failed write).
+    if (nextIndex.length !== index.length || nextIndex.some((account, i) => account !== index[i])) {
+      window.localStorage.setItem(
+        PLUGIN_CREDENTIAL_ACCOUNTS_STORAGE_KEY,
+        JSON.stringify(nextIndex),
+      );
     }
+    for (const [account, { key, value }] of Object.entries(legacy)) {
+      if (stored[account] !== value) await writeSecureCredential(account, value);
+      window.localStorage.removeItem(key);
+    }
+  } catch (error) {
+    reportCredentialStorageError(error);
+    writable = false;
+    return;
   }
   persisted = { ...values };
   writable = true;
@@ -174,10 +216,25 @@ function getBrowser(account: string, key: string): string {
   const override = sessionOverrides.get(account);
   if (override !== undefined) return override;
   try {
-    return window.localStorage.getItem(key) ?? "";
+    return window.localStorage.getItem(key) ?? migrateLegacyBrowserCredential(account, key);
   } catch {
     return "";
   }
+}
+
+/** Web: moves a built-in plugin's pre-#2729 key to its app.credentials key on first read. */
+function migrateLegacyBrowserCredential(account: string, key: string): string {
+  const legacyKey = LEGACY_PLUGIN_CREDENTIAL_KEYS[account];
+  if (!legacyKey) return "";
+  const value = window.localStorage.getItem(legacyKey)?.trim() ?? "";
+  if (!value) return "";
+  try {
+    window.localStorage.setItem(key, value);
+    window.localStorage.removeItem(legacyKey);
+  } catch {
+    // Write failed: the legacy key stays and the next read retries.
+  }
+  return value;
 }
 
 function setBrowser(account: string, key: string, value: string): boolean {
@@ -187,6 +244,18 @@ function setBrowser(account: string, key: string, value: string): boolean {
   } catch {
     sessionOverrides.set(account, value);
     return false;
+  }
+  // A cleared or replaced token must not resurface from its pre-#2729 key.
+  const legacyKey = LEGACY_PLUGIN_CREDENTIAL_KEYS[account];
+  if (legacyKey) {
+    try {
+      window.localStorage.removeItem(legacyKey);
+    } catch {
+      // Cleanup failed: without the override a later read would migrate the
+      // legacy value back over a cleared or replaced token.
+      sessionOverrides.set(account, value);
+      return false;
+    }
   }
   sessionOverrides.delete(account);
   return true;

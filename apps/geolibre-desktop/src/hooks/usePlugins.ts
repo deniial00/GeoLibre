@@ -228,7 +228,16 @@ interface TauriRuntimeWindow extends Window {
 }
 
 const manager = new PluginManager();
-setGeoLensDefaultServerUrl(readDeploymentEnvValue("VITE_GEOLENS_DEFAULT_URL"));
+
+/**
+ * Seeds the GeoLens plugin's default server URL from the deployment settings.
+ * Called once at startup after deployment.json has been applied, not at import
+ * time, because the policy is fetched while this module loads.
+ */
+export function initGeoLensDefaultUrl(): void {
+  setGeoLensDefaultServerUrl(readDeploymentEnvValue("VITE_GEOLENS_DEFAULT_URL"));
+}
+
 const BUILT_IN_PLUGINS: GeoLibrePlugin[] = [
   maplibreLayerControlPlugin,
   maplibreGeoEditorPlugin,

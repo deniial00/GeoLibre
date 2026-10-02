@@ -4,6 +4,7 @@ import { describe, it } from "node:test";
 // Web build: no Tauri runtime, so values live in localStorage.
 const storage = new Map<string, string>();
 let failWrites = false;
+let failLegacyRemoval = false;
 
 (globalThis as { window?: unknown }).window = {
   localStorage: {
@@ -12,7 +13,10 @@ let failWrites = false;
       if (failWrites) throw new Error("quota");
       storage.set(key, value);
     },
-    removeItem: (key: string) => void storage.delete(key),
+    removeItem: (key: string) => {
+      if (failLegacyRemoval && key.startsWith("geolibre:")) throw new Error("denied");
+      storage.delete(key);
+    },
   },
 };
 
@@ -40,5 +44,26 @@ describe("app.credentials on the web build", () => {
     failWrites = false;
     assert.equal(pluginCredentialHost.set("token", "saved", "plugin-c"), true);
     assert.equal(pluginCredentialHost.get("token", "plugin-c"), "saved");
+  });
+
+  it("moves a built-in plugin's pre-app.credentials key on first read", () => {
+    storage.set("geolibre:huggingface-token", " hf_web ");
+    assert.equal(pluginCredentialHost.get("token", "maplibre-gl-huggingface"), "hf_web");
+    assert.equal(storage.get("geolibre.pluginCredential.maplibre-gl-huggingface.token"), "hf_web");
+    assert.equal(storage.has("geolibre:huggingface-token"), false);
+  });
+
+  it("does not resurrect a legacy key after the token is cleared", () => {
+    storage.set("geolibre.godsEyeView.apiKey.tomtom", "old");
+    assert.equal(pluginCredentialHost.set("tomtom", "", "gods-eye-view"), true);
+    assert.equal(pluginCredentialHost.get("tomtom", "gods-eye-view"), "");
+  });
+
+  it("keeps a cleared token cleared when the legacy key cannot be removed", () => {
+    storage.set("geolibre:mapillary-access-token", "old");
+    failLegacyRemoval = true;
+    assert.equal(pluginCredentialHost.set("access-token", "", "maplibre-gl-mapillary"), false);
+    failLegacyRemoval = false;
+    assert.equal(pluginCredentialHost.get("access-token", "maplibre-gl-mapillary"), "");
   });
 });

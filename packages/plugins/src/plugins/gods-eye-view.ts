@@ -1,6 +1,6 @@
 import { createCzmlLayer, useAppStore } from "@geolibre/core";
 import type { CesiumSceneHandle } from "@geolibre/map";
-import type { GeoLibreAppAPI, GeoLibrePlugin } from "../types";
+import type { GeoLibreAppAPI, GeoLibrePlugin, GeoLibrePluginCredentials } from "../types";
 import {
   czmlPacketsToAttributeGeoJson,
   CELESTRAK_CORE_SAMPLE_STEP_SECONDS,
@@ -216,7 +216,7 @@ const FEED_DESCRIPTORS = {
       viewportBoundsKey(bounds, AIS_MAX_VIEW_SPAN_DEGREES, AIS_QUERY_SNAP_DEGREES),
     hasQueryableViewport: (bounds) => aisQueryBounds(bounds) !== null,
     status(enabled) {
-      if (!resolveGodsEyeViewKey("aisstream")) {
+      if (!resolveGodsEyeViewKey(credentials, "aisstream")) {
         return [
           "panel.godsEyeView.vesselsKeyRequired",
           "Add an AISStream API key under API keys to stream vessels.",
@@ -241,7 +241,7 @@ const FEED_DESCRIPTORS = {
     },
     dispose: () => aisClient.stop(),
     async fetch({ bounds, window }) {
-      const key = resolveGodsEyeViewKey("aisstream")?.key;
+      const key = resolveGodsEyeViewKey(credentials, "aisstream")?.key;
       const queryBounds = aisQueryBounds(bounds);
       if (!key || !queryBounds) {
         aisClient.stop();
@@ -269,13 +269,14 @@ const FEED_DESCRIPTORS = {
       "Simulated vehicle positions on © OpenStreetMap contributors, ODbL 1.0; live flow: © TomTom",
     // Road geometry changes slowly, but live flow is worth re-reading. The roads
     // are cached per viewport, so the faster cadence only re-reads TomTom.
-    refreshIntervalMs: () => (resolveGodsEyeViewKey("tomtom") ? 5 * 60_000 : 2 * 60 * 60_000),
+    refreshIntervalMs: () =>
+      resolveGodsEyeViewKey(credentials, "tomtom") ? 5 * 60_000 : 2 * 60 * 60_000,
     timeoutMs: OVERPASS_REQUEST_TIMEOUT_MS,
     flag: GODS_EYE_VIEW_STREET_TRAFFIC_FLAG,
     defaultEnabled: false,
     usesKeys: ["tomtom"],
     status(enabled) {
-      if (!enabled || !resolveGodsEyeViewKey("tomtom")) return null;
+      if (!enabled || !resolveGodsEyeViewKey(credentials, "tomtom")) return null;
       if (trafficFlowStatus === "keyRejected") {
         return [
           "panel.godsEyeView.trafficFlowKeyRejected",
@@ -296,7 +297,7 @@ const FEED_DESCRIPTORS = {
       viewportQueryBounds(bounds, TRAFFIC_MAX_VIEW_SPAN_DEGREES, TRAFFIC_QUERY_SNAP_DEGREES) !==
       null,
     fetch: ({ bounds, signal, window }) => {
-      const tomtomKey = resolveGodsEyeViewKey("tomtom")?.key;
+      const tomtomKey = resolveGodsEyeViewKey(credentials, "tomtom")?.key;
       if (!tomtomKey) trafficFlowStatus = null;
       return fetchStreetTrafficCzml(bounds, window, {
         signal,
@@ -408,11 +409,18 @@ const FEED_DESCRIPTORS = {
     flag: GODS_EYE_VIEW_CCTV_FLAG,
     defaultEnabled: false,
     viewportKey: (bounds, zoom) =>
-      `${viewportBoundsKey(bounds, CCTV_MAX_VIEW_SPAN_DEGREES, CCTV_QUERY_SNAP_DEGREES)}|preview:${cctvPreviewsVisibleAtZoom(zoom)}`,
+      `${viewportBoundsKey(
+        bounds,
+        CCTV_MAX_VIEW_SPAN_DEGREES,
+        CCTV_QUERY_SNAP_DEGREES,
+      )}|preview:${cctvPreviewsVisibleAtZoom(zoom)}`,
     hasQueryableViewport: (bounds) =>
       viewportQueryBounds(bounds, CCTV_MAX_VIEW_SPAN_DEGREES, CCTV_QUERY_SNAP_DEGREES) !== null,
     fetch: ({ bounds, signal, zoom }) =>
-      fetchCctvCzml(bounds, { signal, showPreviews: cctvPreviewsVisibleAtZoom(zoom) }),
+      fetchCctvCzml(bounds, {
+        signal,
+        showPreviews: cctvPreviewsVisibleAtZoom(zoom),
+      }),
   },
   radio: {
     group: "utilities",
@@ -491,6 +499,7 @@ let savedState: GodsEyeViewProjectState = {
 } as GodsEyeViewProjectState;
 
 let appRef: GeoLibreAppAPI | null = null;
+let credentials: GeoLibrePluginCredentials | undefined;
 let cesiumRef: CesiumSceneHandle | null = null;
 let unregisterPanel: (() => void) | null = null;
 let unsubscribeLocale: (() => void) | null = null;
@@ -735,7 +744,7 @@ async function refreshFeed(feed: FeedId, force = true): Promise<void> {
   const descriptor: FeedDescriptor = FEED_DESCRIPTORS[feed];
   // Without its key the layer has nothing to show, and a request would only be
   // refused. A key cleared while the layer was on takes the layer down with it.
-  if (descriptor.requiresKey && !resolveGodsEyeViewKey(descriptor.requiresKey)) {
+  if (descriptor.requiresKey && !resolveGodsEyeViewKey(credentials, descriptor.requiresKey)) {
     if (state.layerId || ownedLayer(feed)) removeFeedLayer(feed);
     else descriptor.dispose?.();
     state.failed = false;
@@ -1000,7 +1009,7 @@ const KEY_PROVIDER_DETAILS: Record<
 };
 
 /** Apply a saved or cleared key to every feed whose output depends on it. */
-function onKeyChanged(provider: GodsEyeViewKeyProvider): void {
+function onKeyChanged(provider: GodsEyeViewKeyProvider, notice?: string): void {
   if (provider === "tomtom") trafficFlowStatus = null;
   for (const feed of FEED_IDS) {
     const descriptor: FeedDescriptor = FEED_DESCRIPTORS[feed];
@@ -1016,14 +1025,16 @@ function onKeyChanged(provider: GodsEyeViewKeyProvider): void {
   // text in the other key field.
   panelFrame?.keys
     .querySelector(`[data-key-provider="${provider}"]`)
-    ?.replaceWith(keyRow(provider));
+    ?.replaceWith(keyRow(provider, notice));
   renderPanel();
 }
 
 function keyStatusText(provider: GodsEyeViewKeyProvider): string {
-  const resolved = resolveGodsEyeViewKey(provider);
+  const resolved = resolveGodsEyeViewKey(credentials, provider);
   if (resolved?.source === "panel") {
-    return translate("panel.godsEyeView.apiKeys.fromPanel", "Saved in this browser");
+    return credentials?.location() === "keychain"
+      ? translate("panel.godsEyeView.apiKeys.fromPanelKeychain", "Saved in your system keychain")
+      : translate("panel.godsEyeView.apiKeys.fromPanel", "Saved in this browser");
   }
   if (resolved?.source === "environment") {
     return translate(
@@ -1034,7 +1045,7 @@ function keyStatusText(provider: GodsEyeViewKeyProvider): string {
   return translate("panel.godsEyeView.apiKeys.notSet", "Not set");
 }
 
-function keyRow(provider: GodsEyeViewKeyProvider): HTMLElement {
+function keyRow(provider: GodsEyeViewKeyProvider, notice?: string): HTMLElement {
   const details = KEY_PROVIDER_DETAILS[provider];
   const row = document.createElement("div");
   row.dataset.keyProvider = provider;
@@ -1052,7 +1063,7 @@ function keyRow(provider: GodsEyeViewKeyProvider): HTMLElement {
   input.autocomplete = "off";
   input.spellcheck = false;
   input.placeholder = translate("panel.godsEyeView.apiKeys.placeholder", "Paste API key");
-  input.value = readStoredGodsEyeViewKey(provider);
+  input.value = readStoredGodsEyeViewKey(credentials, provider);
   input.style.cssText =
     "flex:1;min-width:0;padding:4px 6px;border:1px solid hsl(var(--border));border-radius:4px;background:hsl(var(--background));color:hsl(var(--foreground));font-size:12px";
   const buttonStyle =
@@ -1065,11 +1076,11 @@ function keyRow(provider: GodsEyeViewKeyProvider): HTMLElement {
   clear.type = "button";
   clear.textContent = translate("panel.godsEyeView.apiKeys.clear", "Clear");
   clear.style.cssText = buttonStyle;
-  clear.disabled = !readStoredGodsEyeViewKey(provider);
+  clear.disabled = !readStoredGodsEyeViewKey(credentials, provider);
   const status = document.createElement("div");
   status.className = "geolibre-gods-eye-view-key-status";
   status.style.cssText = "font-size:11px;color:hsl(var(--muted-foreground))";
-  status.textContent = keyStatusText(provider);
+  status.textContent = notice ?? keyStatusText(provider);
   const signup = document.createElement("a");
   signup.href = details.signupUrl;
   signup.target = "_blank";
@@ -1077,14 +1088,21 @@ function keyRow(provider: GodsEyeViewKeyProvider): HTMLElement {
   signup.textContent = translate("panel.godsEyeView.apiKeys.getKey", "Get a free key");
   signup.style.cssText = "font-size:11px;color:hsl(var(--primary))";
   const store = (value: string) => {
-    if (!writeStoredGodsEyeViewKey(provider, value)) {
-      status.textContent = translate(
-        "panel.godsEyeView.apiKeys.saveFailed",
-        "Could not save the key in this browser.",
-      );
-      return;
-    }
-    onKeyChanged(provider);
+    const persisted = writeStoredGodsEyeViewKey(credentials, provider, value);
+    onKeyChanged(
+      provider,
+      persisted
+        ? undefined
+        : credentials?.location() === "keychain"
+          ? translate(
+              "panel.godsEyeView.apiKeys.saveFailedKeychain",
+              "Could not save the key in your system keychain. It works until GeoLibre closes.",
+            )
+          : translate(
+              "panel.godsEyeView.apiKeys.saveFailed",
+              "Could not save the key in this browser.",
+            ),
+    );
   };
   save.addEventListener("click", () => store(input.value));
   input.addEventListener("keydown", (event) => {
@@ -1110,12 +1128,18 @@ function renderKeysSection(): void {
   const body = document.createElement("div");
   body.style.cssText = "display:flex;flex-direction:column;gap:10px;margin-top:8px";
   const note = document.createElement("p");
-  note.textContent = translate(
-    "panel.godsEyeView.apiKeys.description",
-    "Keys are kept in this browser only and are never saved with the project.",
-  );
+  note.textContent =
+    credentials?.location() === "keychain"
+      ? translate(
+          "panel.godsEyeView.apiKeys.descriptionKeychain",
+          "Keys are kept in your system keychain and are never saved with the project.",
+        )
+      : translate(
+          "panel.godsEyeView.apiKeys.description",
+          "Keys are kept in this browser only and are never saved with the project.",
+        );
   note.style.cssText = "margin:0;color:hsl(var(--muted-foreground))";
-  body.append(note, ...GODS_EYE_VIEW_KEY_PROVIDERS.map(keyRow));
+  body.append(note, ...GODS_EYE_VIEW_KEY_PROVIDERS.map((provider) => keyRow(provider)));
   section.append(summary, body);
   host.replaceChildren(section);
 }
@@ -1263,6 +1287,9 @@ function resetRuntime(): void {
 
 function activate(app: GeoLibreAppAPI): void {
   appRef = app;
+  // The scoped app only: `appRef` can be swapped for the host's unscoped app
+  // by `reattachGodsEyeView`, whose `credentials` refuses plugin calls.
+  credentials = app.credentials;
   const globe = app.getCesiumScene?.() ?? null;
   cesiumRef = globe?.primary ? globe : null;
   for (const feed of FEED_IDS) {
@@ -1395,6 +1422,7 @@ function deactivate(): void {
   clearStreetTrafficRoadCache();
   cesiumRef = null;
   appRef = null;
+  credentials = undefined;
 }
 
 export const godsEyeViewPlugin: GeoLibrePlugin = {
