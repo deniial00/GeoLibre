@@ -27,7 +27,7 @@
     "test:e2e": "playwright test",
     "test:e2e:core": "playwright test --project=core",
     "test:e2e:features": "playwright test --project=features",
-    "test:e2e:sso": "playwright test -c playwright.enterprise-sso.config.ts",
+    "test:e2e:sso": "playwright test -c e2e/enterprise-sso/playwright.config.ts",
     "check:rust": "cargo check --manifest-path apps/geolibre-desktop/src-tauri/Cargo.toml",
     "check:gis-portals": "node --import tsx scripts/check-gis-portals.mjs",
     "audit:ci": "node scripts/audit-check.mjs",

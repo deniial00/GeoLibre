@@ -93,7 +93,7 @@ export default defineConfig({
   projects: [
     { name: "core", testMatch: coreMatch, use: chromium },
     // `e2e/enterprise-sso/` needs a live API and Keycloak; it has its own
-    // config (`playwright.enterprise-sso.config.ts`) and nightly job.
+    // config (`e2e/enterprise-sso/playwright.config.ts`) and nightly job.
     { name: "features", testIgnore: [...coreMatch, "**/enterprise-sso/**"], use: chromium },
   ],
   webServer: {
