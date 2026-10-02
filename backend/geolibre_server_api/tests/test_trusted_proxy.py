@@ -52,6 +52,16 @@ def test_trusted_proxy_user_signs_in_without_a_password(proxied_app):
         assert _proxy_sign_in(proxy)["id"] == user["id"]
 
 
+def test_trusted_proxy_identity_cannot_start_single_sign_on(proxied_app):
+    with TestClient(
+        proxied_app, base_url=PUBLIC_URL, client=("10.0.0.5", 5000), headers=PROXY_USER
+    ) as proxy:
+        _, _, interaction, csrf = start_authorize(proxy)
+        rejected = approve(proxy, interaction, csrf, username="", password="", decision="sso")
+        assert rejected.status_code == 400
+        assert "single sign-on is unavailable behind the proxy" in rejected.text
+
+
 def test_untrusted_peer_identity_headers_are_ignored(proxied_app):
     with TestClient(
         proxied_app, base_url=PUBLIC_URL, client=("192.0.2.1", 5000), headers=PROXY_USER

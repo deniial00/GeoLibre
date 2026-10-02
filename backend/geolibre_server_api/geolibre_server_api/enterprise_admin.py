@@ -13,6 +13,7 @@ import httpx
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from pydantic import BaseModel, Field
 from sqlalchemy import delete, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from geolibre_server_api.auth import (
@@ -384,7 +385,12 @@ def build_enterprise_admin_router() -> APIRouter:
         provider.enabled = body.enabled
         provider.break_glass_account_id = break_glass_id
         provider.updated_at = now_ts
-        session.commit()
+        try:
+            session.commit()
+        except IntegrityError:
+            # A concurrent first PUT created this organization's provider.
+            session.rollback()
+            raise HTTPException(409, "identity provider changed concurrently; retry") from None
         return {"identityProvider": identity_provider_json(session, request, provider)}
 
     @router.delete("/api/organizations/{organization_id}/identity-provider", status_code=204)

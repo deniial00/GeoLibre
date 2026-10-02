@@ -253,7 +253,12 @@ def validate_id_token(
     audiences = [audience] if isinstance(audience, str) else audience
     if not isinstance(audiences, list) or provider.client_id not in audiences:
         raise OidcError("audience")
-    if len(audiences) > 1 and claims.get("azp") != provider.client_id:
+    # OIDC Core 3.1.3.7: azp is required with several audiences and must match
+    # whenever present.
+    authorized_party = claims.get("azp")
+    if (len(audiences) > 1 or authorized_party is not None) and (
+        authorized_party != provider.client_id
+    ):
         raise OidcError("authorized party")
     expires = claims.get("exp")
     if not _is_int(expires) or expires <= now_ts - CLOCK_LEEWAY_SECONDS:

@@ -44,8 +44,12 @@ def _internal(address: Address) -> bool:
 def address_allowed(address: Address, allowed: Networks) -> bool:
     """True when *address* is public or inside an operator-allowed network."""
     forms = [address]
-    if isinstance(address, IPv6Address) and address.ipv4_mapped is not None:
-        forms.append(address.ipv4_mapped)
+    if isinstance(address, IPv6Address):
+        if address.ipv4_mapped is not None:
+            forms.append(address.ipv4_mapped)
+        elif address in _NAT64:
+            # Mirror _internal: an allowed IPv4 network admits its NAT64 form too.
+            forms.append(IPv4Address(int(address) & 0xFFFFFFFF))
     if any(form in network for form in forms for network in allowed):
         return True
     return not _internal(address)

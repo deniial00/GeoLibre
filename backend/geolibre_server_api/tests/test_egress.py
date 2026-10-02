@@ -49,6 +49,8 @@ def test_allowlist_admits_internal_networks():
     loopback = (ipaddress.ip_network("127.0.0.0/8"),)
     assert egress.address_allowed(ipaddress.ip_address("127.0.0.1"), loopback)
     assert egress.address_allowed(ipaddress.ip_address("::ffff:127.0.0.1"), loopback)
+    assert egress.address_allowed(ipaddress.ip_address("64:ff9b::7f00:1"), loopback)
+    assert not egress.address_allowed(ipaddress.ip_address("64:ff9b::a00:1"), loopback)
     assert not egress.address_allowed(ipaddress.ip_address("10.0.0.1"), loopback)
 
 

@@ -556,7 +556,7 @@ respond with `Cache-Control: private, no-store`. `PUT` body:
 | `defaultRole` | Organization role when no role mapping matches. Default `member`. |
 | `roleMappings` | Up to 100 `{"value", "role"}` entries. |
 | `groupMappings` | Up to 100 `{"value", "groupId"}` entries; each group must belong to this organization. |
-| `requireMfa` | Require `"mfa"` in the ID token's `amr`. Default `false`. |
+| `requireMfa` | Require `"mfa"` in the ID token's `amr`. Default `false`. Providers that list only the individual factors (for example `["pwd", "otp"]`) need a claim mapper that adds `"mfa"`, or every sign-in is rejected. |
 | `allowBuiltinAccounts` | `false` disables password sign-in for the organization's members. Default `true`. |
 | `breakGlassUsername` | A current administrator of this organization who keeps password sign-in. Required when `allowBuiltinAccounts` is `false`. |
 | `enabled` | A disabled provider is neither offered nor accepted. Default `true`. |

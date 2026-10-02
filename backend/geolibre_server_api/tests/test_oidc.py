@@ -238,6 +238,7 @@ def test_unknown_organization_rerenders_consent(oauth_client):
     [
         ("wrong_nonce", "nonce"),
         ("wrong_audience", "audience"),
+        ("foreign_azp", "authorized party"),
         ("expired", "expired"),
         ("hs256", "signature"),
     ],
@@ -249,6 +250,9 @@ def test_invalid_id_tokens_are_rejected(oauth_client, fake_idp, caplog, case, re
         fake_idp.next_id_token = lambda issued: fake_idp.sign({**issued, "nonce": "wrong"})
     elif case == "wrong_audience":
         claims["aud"] = "someone-else"
+    elif case == "foreign_azp":
+        # A single audience still pins a present azp to this client.
+        claims["azp"] = "someone-else"
     elif case == "expired":
         claims["exp"] = fake_idp.now() - 61
     elif case == "hs256":

@@ -1827,6 +1827,12 @@ def build_oauth_router(config: OAuthConfig) -> APIRouter:
         proxy_user = identity.user if identity is not None else None
 
         if decision == "sso":
+            if identity is not None:
+                # The proxy's identity is authoritative; the consent form never
+                # offers organization sign-in alongside it.
+                return oauth_error_page(
+                    400, "invalid_request", "single sign-on is unavailable behind the proxy"
+                )
             return _start_single_sign_on(
                 session,
                 interaction,
