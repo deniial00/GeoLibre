@@ -155,6 +155,8 @@ Settings that matter for a private deployment:
 | `GEOLIBRE_APP_NAME` | optional, e.g. `Acme Maps` | Replaces "GeoLibre" at the start of the toolbar and in the browser tab title. Whitespace runs collapse to one space and the name is capped at 60 characters. `VITE_GEOLIBRE_APP_NAME` is the equivalent build arg. |
 | `VITE_WELCOME_DISABLED=1` (build arg) | optional | Skips the first-launch wizard for every visitor. |
 | `VITE_GEOLIBRE_CAPABILITIES` (build arg) | unset, or the capabilities to grant | Unset grants everything (today's behavior). Naming a subset — or `none` — pins what the interface offers: adding data, processing, export, plugins, settings, project authoring. Removes affordances only; it is not a server-side restriction. See [Deployment Capabilities](deployment-capabilities.md). |
+| `GEOLIBRE_DEPLOYMENT_FILE` | unset, or a mounted policy file | Path to a [`deployment.json`](deployment-policy.md#docker) inside the container. The entrypoint validates it, applies the `GEOLIBRE_*` overrides per field, and writes `/deployment.json` on every boot. An invalid file stops the container. |
+| `GEOLIBRE_CAPABILITIES` | unset, or the capabilities to grant | Same as `VITE_GEOLIBRE_CAPABILITIES`, but set at run time with `-e` on a prebuilt image. Unset leaves the file or build value in force; `none` grants nothing. An unknown name stops the container and lists the accepted values. See [Deployment Capabilities](deployment-capabilities.md). |
 
 See [Getting Started](getting-started.md#run-with-docker) for the full list.
 

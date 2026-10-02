@@ -78,9 +78,9 @@ ARG GEOLIBRE_NO_EXTERNAL_CDN=
 # (project:edit, data:add, processing:run, export:data, plugins:install,
 # settings:manage), or "none" to grant nothing — for a kiosk or classroom
 # instance. Unset grants everything, so an existing build is unchanged. See
-# docs/deployment-capabilities.md. Build-time only: unlike the embed/share/
-# collab URLs, the entrypoint does not yet publish this into the runtime
-# config, so it cannot be flipped with -e on a prebuilt image (issue #1673).
+# docs/deployment-capabilities.md. Build-time default; at run time
+# -e GEOLIBRE_CAPABILITIES=... overrides it on a prebuilt image through the
+# deployment.json and runtime config the entrypoint writes (issue #2783).
 ARG VITE_GEOLIBRE_CAPABILITIES=
 ENV GEOLIBRE_APP_BASE=${GEOLIBRE_APP_BASE}
 ENV VITE_GEE_OAUTH_CLIENT_ID=${VITE_GEE_OAUTH_CLIENT_ID}
@@ -170,6 +170,7 @@ RUN mkdir -p /data
 # per-launch sidecar token, so a container restart never keeps a stale token.
 COPY docker/nginx.conf /etc/nginx/nginx.conf.template
 COPY docker/entrypoint.sh /usr/local/bin/entrypoint.sh
+COPY docker/deployment_policy.py /usr/local/lib/geolibre/deployment_policy.py
 RUN chmod +x /usr/local/bin/entrypoint.sh \
   # Default auth snippet (disabled). entrypoint.sh rewrites it at start based
   # on GEOLIBRE_AUTH_USER/GEOLIBRE_AUTH_PASSWORD; baking a valid default keeps

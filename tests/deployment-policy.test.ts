@@ -89,6 +89,8 @@ interface BadCase {
   input: unknown;
   /** Whether JSON Schema alone rejects it; "accept" marks rules only the parser enforces. */
   schema: "reject" | "accept";
+  /** Substring the container entrypoint error must contain (docker/deployment_policy.py). */
+  container: string;
   parser: "null" | { dropped: string[] };
 }
 

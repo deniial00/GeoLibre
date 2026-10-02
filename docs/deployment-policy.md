@@ -12,8 +12,9 @@ URL (`<base>/deployment.json`) before the first render, so nothing paints with a
 setting the policy then changes. No policy applies when the file is absent
 (404 or an HTML fallback page), unreachable, not JSON, of an unknown `version`,
 or does not arrive within 3 seconds. In those cases the app behaves exactly as
-it does without the file. Reading the file from a container mount or the
-desktop config directory arrives in a later release.
+it does without the file. The container image writes the file on every boot
+(see [Docker](#docker)); reading it from the desktop config directory arrives in
+a later release.
 
 What each section does today:
 
@@ -198,9 +199,49 @@ The client parser is lenient and works section by section:
 - Unknown top-level keys are ignored with one warning.
 - Non-JSON content or a non-object is ignored silently.
 
-A stricter container-side validator is planned. The schema cannot express some
-rules that the parser enforces: duplicate service ids after trimming, and
-numeric service field values beyond the safe-integer range.
+The container validates strictly: it rejects unknown keys, duplicate or invalid
+ids, service ids that collide after trimming, and numeric service field values
+beyond the safe-integer range, none of which JSON Schema alone can all express.
+
+## Docker
+
+The image writes a validated `/usr/share/nginx/html/deployment.json` on every
+boot, served `Cache-Control: no-store`. The source is the file mounted at
+`GEOLIBRE_DEPLOYMENT_FILE`, or an empty `{"version": 1}` when none is mounted.
+Environment variables then override it field by field; a blank variable counts
+as unset.
+
+```bash
+docker run -p 8080:80 \
+  -v ./deployment.json:/etc/geolibre/deployment.json:ro \
+  -e GEOLIBRE_DEPLOYMENT_FILE=/etc/geolibre/deployment.json \
+  -e GEOLIBRE_CAPABILITIES=data:add,export:data \
+  ghcr.io/opengeos/geolibre
+```
+
+| Variable | Policy field |
+| --- | --- |
+| `GEOLIBRE_CAPABILITIES` | `capabilities`: comma-separated names, or `none` for no grants |
+| `GEOLIBRE_SERVICES_FILE` | `services.catalog` |
+| `GEOLIBRE_BUILTIN_SERVICES=off` | `services.builtins: false` |
+| `GEOLIBRE_SHARE_URL` | `sharing.shareUrl` |
+| `GEOLIBRE_COLLAB_URL` | `sharing.collabUrl` |
+| `GEOLIBRE_EMBED_ORIGINS` | `sharing.embedOrigins` |
+| `GEOLIBRE_GEOLENS_URL` | `geolens.url` |
+| `GEOLIBRE_APP_NAME` | `branding.appName`: whitespace collapsed, cut to 60 characters |
+| `GEOLIBRE_AI_URL` / `GEOLIBRE_AI_MODEL` | `ai.enabled: true` / `ai.model` |
+
+The boot log has one `Deployment policy: <path> from <VAR> = <value>` line per
+override. Tokens never appear in it.
+
+Invalid input stops the boot with an `ERROR:` line that names the JSON path (for
+example `ERROR: GEOLIBRE_DEPLOYMENT_FILE capabilities[1] must be one of: ...`),
+so nginx never starts with a weaker policy than you asked for. A file with
+`ai.enabled: true` also needs `GEOLIBRE_AI_URL`, `GEOLIBRE_AI_PROXY_URL` and
+`GEOLIBRE_AI_PROXY_TOKEN`, otherwise the boot fails.
+
+`GEOLIBRE_CAPABILITIES` is also published into the runtime config, so the grant
+holds even if `deployment.json` is blocked or arrives late.
 
 !!! warning "Public file, no secrets"
     `deployment.json` is served to every browser. Never put secrets in it. The

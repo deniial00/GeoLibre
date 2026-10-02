@@ -23,6 +23,13 @@ case "$GEOLIBRE_SIDECAR_TOKEN" in
     ;;
 esac
 
+# deployment.json (issue #2783): GEOLIBRE_DEPLOYMENT_FILE plus per-field env
+# overrides, strictly validated and rewritten on every boot. Runs before the AI
+# block below so it sees the raw GEOLIBRE_AI_MODEL, not the exported default.
+# set -e stops the boot on an invalid file, so nginx never starts with a bad
+# policy. See docs/deployment-policy.md.
+python /usr/local/lib/geolibre/deployment_policy.py /usr/share/nginx/html/deployment.json
+
 # Optional AI proxy. All three values are required together so merely setting a
 # model never embeds or enables ai.geolibre.app. GEOLIBRE_AI_URL is deliberately
 # restricted to the same-origin /ai route; the remote Worker URL and instance
@@ -129,12 +136,25 @@ fi
 # Python JSON-encodes the values, so nothing an operator passes can break out of
 # the generated script.
 python -c '
+import base64
 import json
-import math
 import os
 import re
-import base64
-from urllib.parse import urlsplit
+import sys
+
+# The env validators live next to the policy builder so GEOLIBRE_* variables and
+# the matching deployment.json fields cannot disagree about what is valid.
+sys.path.insert(0, "/usr/local/lib/geolibre")
+from deployment_policy import (
+    builtin_services_hidden,
+    normalize_collab_url,
+    normalize_geolens_url,
+    normalize_share_url,
+    parse_capabilities_env,
+    parse_embed_origins,
+    read_services_file,
+    service_url,
+)
 
 deployment = {}
 # Values published as bare globals rather than inside __GEOLIBRE_DEPLOYMENT_ENV__.
@@ -148,71 +168,11 @@ if os.environ.get("GEOLIBRE_AI_URL"):
     deployment["VITE_GEOLIBRE_AI_MODEL"] = os.environ["GEOLIBRE_AI_MODEL"]
 
 # Optional deployment service catalog. Read the mounted file on every startup;
-# only the catalog fields below are public, never the file path or other keys.
+# only the catalog fields are public, never the file path or other keys.
 services_file = os.environ.get("GEOLIBRE_SERVICES_FILE", "")
-builtins_hidden = os.environ.get("GEOLIBRE_BUILTIN_SERVICES", "").strip().lower() == "off"
 if services_file:
-    def invalid_json_constant(value):
-        raise ValueError("non-finite JSON number")
-
-    try:
-        with open(services_file, encoding="utf-8") as source:
-            catalog = json.load(source, parse_constant=invalid_json_constant)
-    except OSError as error:
-        raise SystemExit(
-            "ERROR: GEOLIBRE_SERVICES_FILE cannot be read. Check the mounted file path and read permissions."
-        ) from error
-    except (ValueError, UnicodeError) as error:
-        raise SystemExit(
-            "ERROR: GEOLIBRE_SERVICES_FILE must contain valid UTF-8 JSON with a services array."
-        ) from error
-    if not isinstance(catalog, dict) or not isinstance(catalog.get("services"), list):
-        raise SystemExit(
-            "ERROR: GEOLIBRE_SERVICES_FILE must contain an object with a services array."
-        )
-    services = []
-    service_ids = set()
-    service_kinds = ("wms", "wfs", "wmts", "xyz", "arcgis", "csw")
-    for index, entry in enumerate(catalog["services"], start=1):
-        prefix = f"ERROR: GEOLIBRE_SERVICES_FILE services entry {index}"
-        if not isinstance(entry, dict):
-            raise SystemExit(prefix + " must be an object.")
-        for key in ("id", "name"):
-            if not isinstance(entry.get(key), str) or not entry[key].strip():
-                raise SystemExit(prefix + f" must have a nonblank string {key}.")
-        service_id = entry["id"].strip()
-        if service_id in service_ids:
-            raise SystemExit(prefix + " has a duplicate trimmed id; give every service a unique stable id.")
-        if entry.get("kind") not in service_kinds:
-            raise SystemExit(prefix + " kind must be one of: " + ", ".join(service_kinds) + ".")
-        if "category" in entry and not isinstance(entry["category"], str):
-            raise SystemExit(prefix + " category must be a string when present.")
-        fields = entry.get("fields")
-        if not isinstance(fields, dict) or not fields or any(
-            not isinstance(value, (str, int, float, bool))
-            or (
-                isinstance(value, int)
-                and not isinstance(value, bool)
-                and abs(value) > 2**53 - 1
-            )
-            or (isinstance(value, float) and not math.isfinite(value))
-            for value in fields.values()
-        ):
-            raise SystemExit(
-                prefix + " fields must be a nonempty object of strings, booleans, or finite numbers with integers within the safe-integer range."
-            )
-        service_ids.add(service_id)
-        service = {
-            "id": service_id,
-            "name": entry["name"].strip(),
-            "kind": entry["kind"],
-            "fields": fields,
-        }
-        if "category" in entry:
-            service["category"] = entry["category"]
-        services.append(service)
     deployment["VITE_GEOLIBRE_SERVICES"] = json.dumps(
-        {"services": services}, separators=(",", ":"), allow_nan=False
+        {"services": read_services_file(services_file)}, separators=(",", ":"), allow_nan=False
     )
 
 # Optional hide of the built-in starter service library: with
@@ -221,11 +181,7 @@ if services_file:
 # deployment never offers the built-in presets. Any other nonempty value fails
 # the boot rather than silently keeping the built-ins (same discipline as
 # GEOLIBRE_SERVICES_FILE).
-if os.environ.get("GEOLIBRE_BUILTIN_SERVICES", "").strip() and not builtins_hidden:
-    raise SystemExit(
-        "ERROR: GEOLIBRE_BUILTIN_SERVICES must be \"off\" to hide the built-in starter services, or unset to keep them."
-    )
-if builtins_hidden:
+if builtin_services_hidden(os.environ.get("GEOLIBRE_BUILTIN_SERVICES", "")):
     deployment["VITE_GEOLIBRE_BUILTIN_SERVICES"] = "off"
 
 # Optional Clerk sign-in gate. The publishable key is intentionally public and
@@ -310,79 +266,9 @@ if auth0_domain or auth0_client_id:
 # Origins allowed to drive a framed app over the embed postMessage API. Unset
 # means the API stays off, so a public deployment can never be driven by the
 # page that frames it. "*" allows any origin: private networks only.
-origins = []
-for entry in os.environ.get("GEOLIBRE_EMBED_ORIGINS", "").replace(",", " ").split():
-    if entry == "*":
-        origins.append(entry)
-        continue
-    parsed = urlsplit(entry)
-    # postMessage can only be scoped to an origin, so a path/query/fragment on an
-    # otherwise valid URL is dropped rather than rejected (matching how the app
-    # parses the same value). Credentials and other schemes are a mistake worth
-    # failing the boot for, since they can never match a real host.
-    if (
-        parsed.scheme not in ("http", "https")
-        or not parsed.netloc
-        or parsed.username
-        or parsed.password
-    ):
-        raise SystemExit(
-            f"ERROR: GEOLIBRE_EMBED_ORIGINS entry {entry!r} must be an http(s) "
-            "origin such as https://portal.example.com."
-        )
-    origins.append(f"{parsed.scheme}://{parsed.netloc}")
+origins = parse_embed_origins(os.environ.get("GEOLIBRE_EMBED_ORIGINS", ""))
 if origins:
     deployment["VITE_GEOLIBRE_EMBED_ORIGINS"] = ",".join(origins)
-
-
-def service_url(name, value, schemes, loopback_schemes, loopback_hosts):
-    """Validate a self-hosted service URL, or exit with an explanation.
-
-    Every caller sends a credential to the value it is given -- the share and
-    collab URLs carry a Bearer token, and a news proxy fronting a Tavily key is
-    only worth pointing at over TLS whatever it asks for -- so a plaintext scheme
-    is only allowed on loopback (development). The app applies the same rule and
-    *refuses* a value it rejects rather than falling back to the public hosted
-    service — so a value that reaches the app unvalidated becomes a silently
-    disabled feature. Failing the boot instead puts the error where an operator
-    will actually see it.
-    """
-    parsed = urlsplit(value)
-    # Both checks below run before the loopback shortcut, so their guarantees hold
-    # for every accepted value. That ordering is load-bearing: urlsplit() parses
-    # ws://localhost:8080"; ... with hostname "localhost", which would match the
-    # loopback allowlist while netloc still carried the rest.
-    #
-    # Service URLs are echoed to stdout further down, so a credentialed
-    # URL would also land in the container logs.
-    if parsed.username or parsed.password:
-        raise SystemExit(f"ERROR: {name} must not embed credentials.")
-    # Character set: netloc is substituted unescaped into the double-quoted CSP
-    # add_header value in nginx.conf.template, so anything outside a hostname,
-    # port, or IPv6 literal could break out of that string and inject nginx
-    # directives. urlsplit() puts everything up to the next /, ? or # into netloc,
-    # quotes and semicolons included. Same discipline as GEOLIBRE_TRUSTED_PROXIES
-    # (parsed through ipaddress) and GEOLIBRE_AI_PROXY_URL (no path/query/fragment).
-    if re.search(r"[^A-Za-z0-9.\-:\[\]]", parsed.netloc):
-        raise SystemExit(
-            f"ERROR: {name} host may contain only letters, digits, dots, hyphens, "
-            f"colons, and brackets, not {parsed.netloc!r}."
-        )
-    if parsed.scheme in loopback_schemes and parsed.hostname in loopback_hosts:
-        return value
-    if parsed.scheme not in schemes or not parsed.netloc:
-        # Joined outside the f-string, and with double quotes. This whole program
-        # is one single-quoted `python -c` argument, so a literal apostrophe here
-        # would close that argument in the shell; Python would then receive
-        # `{/.join(...)}` and die of a SyntaxError. Note -c compiles as a unit, so
-        # that failure hits every deployment at boot, not just an invalid URL.
-        allowed_hosts = "/".join(loopback_hosts)
-        raise SystemExit(
-            f"ERROR: {name} must be a {schemes[0]}:// URL "
-            f"(or {loopback_schemes[0]}:// on {allowed_hosts}), not {value!r}."
-        )
-    return value
-
 
 # The externally loaded NASA OPERA plugin can share the authenticated /ai route
 # when the managed Worker exposes a search route. Operators using a separate
@@ -434,12 +320,7 @@ if news_endpoint:
 # Share and the Project Gallery from the UI entirely.
 share_url = os.environ.get("GEOLIBRE_SHARE_URL", "").strip()
 if share_url:
-    if share_url.lower() == "off":
-        deployment["VITE_GEOLIBRE_SHARE_URL"] = "off"
-    else:
-        deployment["VITE_GEOLIBRE_SHARE_URL"] = service_url(
-            "GEOLIBRE_SHARE_URL", share_url, ("https",), ("http",), ("localhost", "127.0.0.1")
-        )
+    deployment["VITE_GEOLIBRE_SHARE_URL"] = normalize_share_url(share_url)
 
 # Display name for the app chrome (toolbar label, browser tab). Unset keeps
 # "GeoLibre". It is rendered as text, never markup, and json.dump below escapes
@@ -451,32 +332,20 @@ if app_name:
 # Live collaboration relay. Unset leaves collaboration dark.
 collab_url = os.environ.get("GEOLIBRE_COLLAB_URL", "").strip()
 if collab_url:
-    deployment["VITE_GEOLIBRE_COLLAB_URL"] = service_url(
-        "GEOLIBRE_COLLAB_URL", collab_url, ("wss",), ("ws",), ("localhost", "127.0.0.1", "::1")
-    )
+    deployment["VITE_GEOLIBRE_COLLAB_URL"] = normalize_collab_url(collab_url)
 
 # Default GeoLens catalog. Unset lets the plugin try the browser origin, which
 # is the zero-config path when GeoLibre and GeoLens share a reverse proxy.
 geolens_url = os.environ.get("GEOLIBRE_GEOLENS_URL", "").strip()
 if geolens_url:
-    geolens_setting = geolens_url.lower()
-    if geolens_setting in ("off", "same-origin"):
-        deployment["VITE_GEOLENS_DEFAULT_URL"] = geolens_setting
-    else:
-        if re.fullmatch(r"[A-Za-z0-9.-]+(?::[0-9]+)?(?:/.*)?", geolens_url):
-            geolens_url = f"https://{geolens_url}"
-        parsed_geolens_url = urlsplit(geolens_url)
-        if parsed_geolens_url.query or parsed_geolens_url.fragment:
-            raise SystemExit(
-                "ERROR: GEOLIBRE_GEOLENS_URL must not include query parameters or a fragment."
-            )
-        deployment["VITE_GEOLENS_DEFAULT_URL"] = service_url(
-            "GEOLIBRE_GEOLENS_URL",
-            geolens_url,
-            ("https",),
-            ("http",),
-            ("localhost", "127.0.0.1", "::1"),
-        )
+    deployment["VITE_GEOLENS_DEFAULT_URL"] = normalize_geolens_url(geolens_url)
+
+# Capabilities also ride in the runtime config, which loads synchronously, so an
+# env-set grant survives a blocked or late deployment.json. "none" grants nothing.
+capabilities_env = os.environ.get("GEOLIBRE_CAPABILITIES", "").strip()
+if capabilities_env:
+    capabilities = parse_capabilities_env(capabilities_env)
+    deployment["VITE_GEOLIBRE_CAPABILITIES"] = ",".join(capabilities) or "none"
 
 with open("/usr/share/nginx/html/geolibre-runtime-config.js", "w") as output:
     output.write("window.__GEOLIBRE_DEPLOYMENT_ENV__ = ")
@@ -564,6 +433,7 @@ fi
 # Python's str.replace handles the token literally (no shell/sed metacharacter
 # surprises).
 python -c '
+import json
 import os
 import re
 import base64
@@ -574,18 +444,20 @@ token = os.environ["GEOLIBRE_SIDECAR_TOKEN"]
 # A self-hosted relay has to be allowed in connect-src or the browser blocks its
 # WebSocket: the directive has a bare "https:" (so any share host works) but no
 # bare "wss:". Only the origin is inserted -- CSP source expressions do not take a
-# path, and the value was already validated above.
-collab = os.environ.get("GEOLIBRE_COLLAB_URL", "").strip()
+# path. The value comes from the deployment.json written (and validated) above, so
+# a relay set only in a mounted GEOLIBRE_DEPLOYMENT_FILE is covered too.
+with open("/usr/share/nginx/html/deployment.json", encoding="utf-8") as policy_file:
+    collab = json.load(policy_file).get("sharing", {}).get("collabUrl", "")
 # Carries its own leading space so the header is byte-identical to the template
 # when no relay is configured.
 collab_src = ""
 if collab:
     parsed = urlsplit(collab)
     origin = f"{parsed.scheme}://{parsed.netloc}"
-    # Re-checked here rather than trusting service_url(): this string goes into a
+    # Re-checked here rather than trusting the validator: this string goes into a
     # quoted nginx directive, so it must be a plain origin or nothing at all.
     if not re.fullmatch(r"[A-Za-z]+://[A-Za-z0-9.\-:\[\]]+", origin):
-        raise SystemExit(f"ERROR: GEOLIBRE_COLLAB_URL is not a plain origin: {collab!r}.")
+        raise SystemExit(f"ERROR: deployment.json sharing.collabUrl is not a plain origin: {collab!r}.")
     collab_src = f" {origin}"
 
 # Clerk loads its browser SDK from the Frontend API hostname encoded in the

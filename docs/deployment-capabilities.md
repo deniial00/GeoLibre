@@ -70,9 +70,9 @@ docker build \
 !!! note "Runtime configuration"
     A [`deployment.json`](deployment-policy.md) with a `capabilities` array,
     served next to the app, restricts a **prebuilt** deployment without a
-    rebuild and takes precedence over `VITE_GEOLIBRE_CAPABILITIES`. `-e` on a
-    prebuilt image still cannot set this variable, because `docker/entrypoint.sh`
-    does not publish it into the runtime configuration.
+    rebuild and takes precedence over `VITE_GEOLIBRE_CAPABILITIES`. On the
+    container image, `-e GEOLIBRE_CAPABILITIES=data:add,export:data` (or `none`)
+    writes that file for you; see [Docker](deployment-policy.md#docker).
 
 !!! warning "A late or blocked `deployment.json` fails open"
     The browser waits at most 3 seconds for `deployment.json`. If the request
