@@ -763,7 +763,8 @@ a non-administrator may list only that organization's groups. When `visibility`
 is omitted, the organization's `defaultVisibility` applies, or `private` for a
 personal project.
 
-Optional share-link settings: `role` (`view`, `comment`, or `edit`; default
+Optional share-link settings (only for `public` or `unlisted` projects; any other
+visibility answers `422` when one is set): `role` (`view`, `comment`, or `edit`; default
 `edit`), `expiresIn` (`24h`, `7d`, `30d`, or `never`), and `password`. They are
 echoed in every project representation as `role`, `expiresAt` (ISO timestamp or
 `null`), and `hasPassword`. `role` is metadata for viewers; the server enforces

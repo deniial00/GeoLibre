@@ -211,7 +211,7 @@ class ForkRequest(BaseModel):
 
 
 class ShareAccessRequest(BaseModel):
-    password: str = Field(max_length=200)
+    password: str = Field(min_length=1, max_length=200)
 
 
 class ProjectTransferCreate(BaseModel):
@@ -2624,6 +2624,15 @@ def create_app(
         )
         if visibility == "public":
             ensure_scope(principal, "share:public")
+        if visibility not in {"public", "unlisted"} and (
+            body.password or body.role != "edit" or body.expires_in not in (None, "never")
+        ):
+            # Link settings gate readers who reach the project through the link.
+            # On an organization or private project they would lock out members
+            # who have no way to learn the password.
+            raise HTTPException(
+                422, "role, expiry, and password apply only to public or unlisted shares"
+            )
         delta = SHARE_EXPIRY_DELTAS.get(body.expires_in or "never")
         expires_at = (
             (datetime.now(UTC) + delta).isoformat().replace("+00:00", "Z") if delta else None

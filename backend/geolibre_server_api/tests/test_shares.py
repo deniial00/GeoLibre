@@ -215,3 +215,24 @@ def test_concurrent_wrong_passwords_cannot_exceed_the_limit(client):
 
     assert statuses.count(401) == 10
     assert statuses.count(429) == 20
+
+
+def test_link_settings_are_refused_on_non_link_visibility(client):
+    ada = account(client, "ada")
+    organization = client.post(
+        "/api/organizations", headers=auth(ada), json={"slug": "lab", "name": "Lab"}
+    ).json()["organization"]
+    content = json.dumps({"version": "1.0", "title": "T", "layers": []})
+    for visibility, extra in (
+        ("organization", {"organizationId": organization["id"], "password": "pw"}),
+        ("private", {"expiresIn": "7d"}),
+        ("private", {"role": "view"}),
+    ):
+        response = client.post(
+            "/api/projects",
+            headers=auth(ada),
+            json={"filename": "f.json", "content": content, "visibility": visibility, **extra},
+        )
+        assert response.status_code == 422, (visibility, extra)
+    # Defaults are fine on any visibility.
+    assert share(client, ada, visibility="private")[0]["hasPassword"] is False
