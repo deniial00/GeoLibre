@@ -373,7 +373,7 @@ def _validate_origins(label, path, value):
         ok = isinstance(item, str) and (
             item == "*"
             or (
-                re.fullmatch(r"https?://[^/\s]+", item)
+                re.fullmatch(r"https?://[^/\s?#]+", item)
                 and not urlsplit(item).username
                 and not urlsplit(item).password
             )
@@ -529,7 +529,7 @@ def build_policy(env: Mapping[str, str]):
             "capabilities", "GEOLIBRE_CAPABILITIES", capabilities, ",".join(capabilities) or "none"
         )
     if get("GEOLIBRE_SERVICES_FILE"):
-        catalog = read_services_file(env["GEOLIBRE_SERVICES_FILE"])
+        catalog = read_services_file(get("GEOLIBRE_SERVICES_FILE"))
         override("services.catalog", "GEOLIBRE_SERVICES_FILE", catalog, f"{len(catalog)} entries")
     if builtin_services_hidden(get("GEOLIBRE_BUILTIN_SERVICES")):
         override("services.builtins", "GEOLIBRE_BUILTIN_SERVICES", False, "false")

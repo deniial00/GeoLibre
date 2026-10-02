@@ -148,3 +148,9 @@ def test_write_policy_is_atomic_and_world_readable(tmp_path):
     assert target.read_text(encoding="utf-8") == json.dumps({"version": 1}, indent=2) + "\n"
     assert stat.S_IMODE(os.stat(target).st_mode) == 0o644
     assert not (tmp_path / "deployment.json.tmp").exists()
+
+
+@pytest.mark.parametrize("origin", ["https://a.example?x=1", "https://a.example#frag"])
+def test_file_embed_origin_with_query_or_fragment_is_rejected(origin):
+    doc = {"version": 1, "sharing": {"embedOrigins": [origin]}}
+    assert "sharing.embedOrigins[0]" in error_of(dp.validate_policy, doc, LABEL)
