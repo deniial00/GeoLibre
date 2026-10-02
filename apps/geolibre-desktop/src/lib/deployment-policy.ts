@@ -1,11 +1,12 @@
 // Typed, lenient parser for deployment.json (policy format v1).
 //
-// Pure: no fetch, no window access. It only turns already-loaded JSON into a
-// typed policy. Each section is validated independently; a section with any
-// invalid field is dropped whole (with a console warning) and the others still
-// apply. See docs/deployment-policy.md and schema/deployment.schema.json.
+// Each section is validated independently; a section with any invalid field is
+// dropped whole (with a console warning) and the others still apply. Delivery
+// reads the desktop config directory first, then the optional web file.
+// See docs/deployment-policy.md and schema/deployment.schema.json.
 
 import { isDeploymentCapability, type DeploymentCapability } from "@geolibre/core";
+import { invoke } from "@tauri-apps/api/core";
 import {
   SERVICE_KINDS,
   type ServiceFieldValue,
@@ -14,6 +15,7 @@ import {
 import { EXPERIENCE_LEVELS, type ExperienceLevel } from "../hooks/useDesktopSettings";
 import { setDeploymentPolicy } from "./deployment-env";
 import { OPTIONAL_RESOURCE_HEADER } from "./diagnostics";
+import { isTauri } from "./is-tauri";
 import { normalizeStringList } from "./string-lists";
 
 /** The only deployment.json format version this build understands. */
@@ -391,7 +393,7 @@ export function parseDeploymentPolicy(contents: string | null): DeploymentPolicy
   if (!contents) return null;
   let parsed: unknown;
   try {
-    parsed = JSON.parse(contents);
+    parsed = JSON.parse(contents.replace(/^\uFEFF/, ""));
   } catch {
     return null;
   }
@@ -442,11 +444,25 @@ export async function fetchDeploymentPolicy(
   }
 }
 
+async function readDeploymentPolicy(): Promise<DeploymentPolicy | null> {
+  if (isTauri()) {
+    try {
+      const contents = await invoke<string | null>("read_deployment_policy");
+      // An existing config-dir file owns the whole policy, even when invalid.
+      // Only absence or a failed read permits the bundled web-file fallback.
+      if (contents !== null) return parseDeploymentPolicy(contents);
+    } catch (error) {
+      console.warn("[deployment-policy] read_deployment_policy failed:", error);
+    }
+  }
+  return fetchDeploymentPolicy();
+}
+
 let loading: Promise<DeploymentPolicy | null> | null = null;
 
-/** Fetches deployment.json once and installs it as the active policy. */
+/** Loads deployment.json once and installs it before the first render. */
 export function loadDeploymentPolicy(): Promise<DeploymentPolicy | null> {
-  loading ??= fetchDeploymentPolicy().then((policy) => {
+  loading ??= readDeploymentPolicy().then((policy) => {
     setDeploymentPolicy(policy);
     return policy;
   });
