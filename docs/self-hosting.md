@@ -149,14 +149,15 @@ Settings that matter for a private deployment:
 | `GEOLIBRE_AUTH0_DOMAIN` / `GEOLIBRE_AUTH0_CLIENT_ID` | unset, or both, if you use Auth0 instead of Clerk | The same sign-in gate backed by Auth0 Universal Login. Both are required together, and the container refuses to start if Clerk is configured as well — pick one provider. |
 | `GEOLIBRE_CONVERSION_ROOTS` | `/data` (the image default) | Confines every sidecar read and write to the mounted directory. |
 | `GEOLIBRE_POSTGIS_HOSTS` | unset unless needed | The sidecar's PostGIS endpoints refuse every destination until this names the allowed databases, so a caller cannot aim them at hosts only the container can reach. |
-| `GEOLIBRE_DISABLE_SIDECAR` | `1` if you do not need it | Runs nginx only. |
+| `GEOLIBRE_DISABLE_SIDECAR` | `1` if you do not need it | Skips uvicorn regardless of capabilities; every `/sidecar/` request returns HTTP 403 with an `application/json` detail response. |
 | `GEOLIBRE_EMBED_ORIGINS` | unset, or the exact host page origin | Off by default, so a framed deployment cannot be driven by whoever frames it. |
 | `GEOLIBRE_NO_EXTERNAL_CDN` (build arg) | `1` for restricted deployments | Strips GeoLibre's own references to external CDNs (`unpkg.com`, `cdn.jsdelivr.net`) from the build output. Features whose assets are only available from a CDN are disabled or degraded: storymap HTML export, built-in object detection models, ONNX WASM, 3D Tiles Draco/KTX2 decoders, and gdal3.js export. Pyodide is not hard-disabled — the flag drops only its default index URL, so setting `VITE_PYODIDE_INDEX_URL` to an approved mirror keeps it working. Also forces `GEOLIBRE_PGLITE_CDN=0`, `GEOLIBRE_CEREUS_CDN=0`, `GEOLIBRE_GDAL_CDN=0`, and `GEOLIBRE_DUCKDB_WASM_CDN=0` — so PGlite/PostGIS, CereusDB, and DuckDB-WASM stay **available**, vendored into the build under `/assets/` (at a larger build size) rather than fetched. Note that some third-party packages (DuckDB-WASM, loaders.gl, maplibre-gl-3d-tiles) carry their own internal CDN URLs that this flag cannot remove; see [architecture.md](architecture.md) for the details. Intended for deployments that cannot reference untrusted external CDNs (e.g. enterprise environments with strict CSP requirements). |
 | `GEOLIBRE_APP_NAME` | optional, e.g. `Acme Maps` | Replaces "GeoLibre" at the start of the toolbar and in the browser tab title. Whitespace runs collapse to one space and the name is capped at 60 characters. `VITE_GEOLIBRE_APP_NAME` is the equivalent build arg. |
 | `VITE_WELCOME_DISABLED=1` (build arg) | optional | Skips the first-launch wizard for every visitor. |
-| `VITE_GEOLIBRE_CAPABILITIES` (build arg) | unset, or the capabilities to grant | Unset grants everything (today's behavior). Naming a subset — or `none` — pins what the interface offers: adding data, processing, export, plugins, settings, project authoring. Removes affordances only; it is not a server-side restriction. See [Deployment Capabilities](deployment-capabilities.md). |
+| `VITE_GEOLIBRE_CAPABILITIES` (build arg) | unset, or the capabilities to grant | Unset grants everything (today's behavior). Naming a subset — or `none` — pins what the interface offers: adding data, processing, export, plugins, settings, project authoring. Build-time client grants do not configure nginx guards; set `GEOLIBRE_CAPABILITIES` or mount a policy for container enforcement. See [Deployment Capabilities](deployment-capabilities.md). |
 | `GEOLIBRE_DEPLOYMENT_FILE` | unset, or a mounted policy file | Path to a [`deployment.json`](deployment-policy.md#docker) inside the container. The entrypoint validates it, applies the `GEOLIBRE_*` overrides per field, and writes `/deployment.json` on every boot. An invalid file stops the container. |
-| `GEOLIBRE_CAPABILITIES` | unset, or the capabilities to grant | Same as `VITE_GEOLIBRE_CAPABILITIES`, but set at run time with `-e` on a prebuilt image. Unset leaves the file or build value in force; `none` grants nothing. An unknown name stops the container and lists the accepted values. See [Deployment Capabilities](deployment-capabilities.md). |
+| `GEOLIBRE_CAPABILITIES` | unset, or the capabilities to grant | Same as `VITE_GEOLIBRE_CAPABILITIES`, but set at run time with `-e` on a prebuilt image. Unset leaves the file or build value in force; `none` grants nothing. An unknown name stops the container and lists the accepted values. The final policy controls nginx sidecar guards and whether uvicorn starts. See [Deployment Capabilities](deployment-capabilities.md). |
+| `GEOLIBRE_AI_URL` / `GEOLIBRE_AI_PROXY_URL` / `GEOLIBRE_AI_PROXY_TOKEN` | unset, or the approved proxy trio | `GEOLIBRE_AI_URL=/ai` overrides the policy to enable AI. All three values must be configured together under the existing proxy validation rules. The upstream URL and token stay private to the server, not in `deployment.json`. |
 
 See [Getting Started](getting-started.md#run-with-docker) for the full list.
 
@@ -166,6 +167,51 @@ See [Getting Started](getting-started.md#run-with-docker) for the full list.
     another port. On a public host that lets the served JavaScript probe each
     visitor's loopback interface. Drop those allowances from the CSP for a
     public deployment.
+
+### Container policy enforcement
+
+The container uses the final deployment policy, after environment overrides,
+to guard these route families at nginx. Each row is an **any-of** check: at
+least one listed capability must be granted.
+
+| Sidecar route prefix | Required capability (any of) |
+| --- | --- |
+| `/sidecar/whitebox` | `processing:run` |
+| `/sidecar/raster` | `processing:run` |
+| `/sidecar/vector` | `processing:run` |
+| `/sidecar/pointcloud` | `processing:run` |
+| `/sidecar/ml` | `processing:run` |
+| `/sidecar/sql` | `processing:run` |
+| `/sidecar/postgis` | `data:add` |
+| `/sidecar/conversion` | `processing:run` **or** `data:add` |
+
+A denied route returns HTTP 403 with an `application/json` body containing
+`detail`, rather than reaching the sidecar. Omitting `capabilities` grants all
+capabilities. If the final grant contains neither `processing:run` nor
+`data:add`, uvicorn is not started and all `/sidecar/` requests return that JSON
+403 response. `GEOLIBRE_DISABLE_SIDECAR=1` does the same regardless of the grant.
+
+When uvicorn runs, existing utility routes such as `/health`, `/algorithms`,
+`/run`, and `/shutdown` remain unguarded by capabilities; this is a route-family
+policy, not per-endpoint authorization. Guards use nginx's normalized URI,
+including duplicate-slash merging and percent-decoded prefixes.
+
+The final policy also controls `/ai`: `ai.enabled: false`, or an absent
+`ai.enabled`, disables the proxy. `ai.enabled: true` requires the approved
+proxy environment trio (`GEOLIBRE_AI_URL=/ai`, `GEOLIBRE_AI_PROXY_URL`, and
+`GEOLIBRE_AI_PROXY_TOKEN`); missing or invalid configuration stops boot.
+The existing environment override is preserved: setting
+`GEOLIBRE_AI_URL=/ai` enables AI even if a mounted policy says false. Merely
+setting the upstream URL or token does not enable AI. Proxy infrastructure,
+including its upstream URL and token, remains server-private.
+
+!!! warning "Container guards are not general authorization"
+    These restrictions apply only to the bundled container's nginx routes.
+    They do not enforce capabilities on browser WASM engines, desktop
+    processing, or separately exposed services. Keep the sidecar and AI
+    upstream private behind nginx, retain filesystem confinement, and use
+    Basic Auth or a real auth proxy for user authentication. Client-side
+    hiding alone is not an authorization boundary.
 
 ### Putting both behind one auth layer
 

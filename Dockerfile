@@ -171,12 +171,15 @@ RUN mkdir -p /data
 COPY docker/nginx.conf /etc/nginx/nginx.conf.template
 COPY docker/entrypoint.sh /usr/local/bin/entrypoint.sh
 COPY docker/deployment_policy.py /usr/local/lib/geolibre/deployment_policy.py
+COPY docker/sidecar_policy.py /usr/local/lib/geolibre/sidecar_policy.py
 RUN chmod +x /usr/local/bin/entrypoint.sh \
   # Default auth snippet (disabled). entrypoint.sh rewrites it at start based
   # on GEOLIBRE_AUTH_USER/GEOLIBRE_AUTH_PASSWORD; baking a valid default keeps
   # `nginx -t` and non-entrypoint invocations working.
   && printf '# Basic Auth disabled (GEOLIBRE_AUTH_USER/GEOLIBRE_AUTH_PASSWORD not set).\n' > /etc/nginx/geolibre-auth.conf \
-  && printf '# AI proxy disabled (GEOLIBRE_AI_URL not set).\n' > /etc/nginx/geolibre-ai-proxy.conf
+  && printf '# AI proxy disabled (GEOLIBRE_AI_URL not set).\n' > /etc/nginx/geolibre-ai-proxy.conf \
+  && printf '# Sidecar guards generated at boot.\n' > /etc/nginx/geolibre-sidecar-guards.conf \
+  && printf '# Sidecar off switch generated at boot.\n' > /etc/nginx/geolibre-sidecar-off.conf
 COPY --from=build /app/apps/geolibre-desktop/dist /usr/share/nginx/html
 
 EXPOSE 80
