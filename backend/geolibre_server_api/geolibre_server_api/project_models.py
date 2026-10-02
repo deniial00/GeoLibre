@@ -37,6 +37,11 @@ class Project(Base):
     # Owner opt-in: while true the project refuses DELETE with a 409 naming this
     # switch. Off by default, per GeoLibre#1670.
     delete_protected: Mapped[bool] = mapped_column(Boolean, default=False)
+    # Share-link settings. Role is advisory metadata echoed to viewers; expiry and
+    # password are enforced by the server on every anonymous read.
+    share_role: Mapped[str] = mapped_column(String(8), default="edit", server_default="edit")
+    share_expires_at: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    share_password_hash: Mapped[str | None] = mapped_column(String(200), nullable=True)
     created_at: Mapped[str] = mapped_column(String(32))
     updated_at: Mapped[str] = mapped_column(String(32), index=True)
     owner: Mapped[Account | None] = relationship(back_populates="projects", foreign_keys=[owner_id])
