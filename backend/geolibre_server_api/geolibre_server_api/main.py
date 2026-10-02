@@ -81,7 +81,7 @@ from geolibre_server_api.project_models import (
     Version,
 )
 from geolibre_server_api.projects import demote_disallowed_public_projects, log_project_activity
-from geolibre_server_api.proxy_identity import load_trusted_proxy_config
+from geolibre_server_api.proxy_identity import client_ip, load_trusted_proxy_config
 
 Visibility = Literal["public", "unlisted", "private", "organization"]
 PublicSharingPolicy = Literal["yes", "publishers", "no"]
@@ -2660,7 +2660,14 @@ def create_app(
             select(Project)
             .options(*LISTING_EAGER_LOADS)
             .where(
-                (Project.owner_id == account.id) | (Project.created_by_id == account.id),
+                (Project.owner_id == account.id)
+                | (Project.created_by_id == account.id)
+                | Project.organization_id.in_(
+                    select(OrganizationMember.organization_id).where(
+                        OrganizationMember.account_id == account.id,
+                        OrganizationMember.role == "administrator",
+                    )
+                ),
                 Project.visibility.in_(("public", "unlisted")),
             )
             .order_by(Project.updated_at.desc())
@@ -3360,6 +3367,7 @@ def create_app(
     ):
         """List a visible project's versions, newest first (needs read:projects)."""
         project = visible(session, session.get(Project, project_id), principal)
+        link_gate(session, project, principal, None)
         body = {
             "versions": [
                 {
@@ -3586,7 +3594,7 @@ def create_app(
         check costs a scrypt hash and the route is anonymous.
         """
         project = visible(session, project, principal)
-        key = (project.id, request.client.host if request.client else "")
+        key = (project.id, str(client_ip(request) or ""))
         cutoff = time.monotonic() - SHARE_ACCESS_WINDOW_SECONDS
         recent = [stamp for stamp in access_failures.get(key, []) if stamp > cutoff]
         if len(recent) >= SHARE_ACCESS_MAX_FAILURES:

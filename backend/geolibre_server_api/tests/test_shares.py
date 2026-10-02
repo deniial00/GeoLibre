@@ -155,3 +155,47 @@ def test_wrong_passwords_are_throttled(client):
     assert statuses[10] == 429
     # Even the right password is refused while throttled.
     assert client.post(access, json={"password": "pw"}).status_code == 429
+
+
+def test_version_list_is_gated_by_the_share_password(client):
+    ada = account(client, "ada")
+    bob = account(client, "bob")
+    project, _ = share(client, ada, password="pw")
+
+    assert (
+        client.get(f"/api/projects/{project['id']}/versions", headers=auth(bob)).status_code == 401
+    )
+    assert (
+        client.get(f"/api/projects/{project['id']}/versions", headers=auth(ada)).status_code == 200
+    )
+
+
+def test_organization_administrator_sees_and_revokes_shares_they_did_not_create(client):
+    ada = account(client, "ada")
+    organization = client.post(
+        "/api/organizations", headers=auth(ada), json={"slug": "lab", "name": "Lab"}
+    ).json()["organization"]
+    project, _ = share(client, ada, visibility="public", organizationId=organization["id"])
+    bob = account(client, "bob")
+    invitation = client.put(
+        f"/api/organizations/{organization['id']}/members",
+        headers=auth(ada),
+        json={"username": "bob", "role": "administrator"},
+    )
+    assert invitation.status_code in (200, 201), invitation.text
+
+    listed = client.get("/api/shares", headers=auth(bob))
+    assert [s["id"] for s in listed.json()["shares"]] == [project["id"]]
+    assert client.delete(f"/api/shares/{project['id']}", headers=auth(bob)).status_code == 204
+
+
+def test_invalid_share_settings_are_rejected(client):
+    ada = account(client, "ada")
+    content = json.dumps({"version": "1.0", "title": "T", "layers": []})
+    for extra in ({"role": "owner"}, {"expiresIn": "1y"}, {"password": ""}):
+        response = client.post(
+            "/api/projects",
+            headers=auth(ada),
+            json={"filename": "f.json", "content": content, "visibility": "unlisted", **extra},
+        )
+        assert response.status_code == 422, extra
