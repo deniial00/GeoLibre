@@ -1385,7 +1385,8 @@ def create_app(
         if principal is not None and can_manage_project(session, project, principal.account):
             return
         if project.share_expires_at is not None and (
-            datetime.fromisoformat(project.share_expires_at) <= datetime.now(UTC)
+            datetime.fromisoformat(project.share_expires_at.replace("Z", "+00:00"))
+            <= datetime.now(UTC)
         ):
             raise HTTPException(410, "share link expired")
         if project.share_password_hash is not None and not (
