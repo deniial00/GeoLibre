@@ -130,11 +130,21 @@ export async function loadExternalPlugins(
     policy?: DeploymentPolicy | null;
     /** URLs recognized by the configured registry, not arbitrary installed URLs. */
     registryManifestUrls?: readonly string[];
+    /** Original settings directories when the caller suppresses them for policy. */
+    configuredPluginDirectories?: readonly string[];
   } = {},
 ): Promise<ExternalPluginLoadResult> {
   const issues: ExternalPluginLoadIssue[] = [];
   const bundledUrls = new Set(options.bundledManifestUrls ?? []);
   const policy = options.policy === undefined ? getDeploymentPolicy() : options.policy;
+  if (policy?.plugins?.sideload === false) {
+    const decision = evaluatePlugin("", "directory", policy);
+    if (!decision.allowed) {
+      for (const directory of options.configuredPluginDirectories ?? additionalPluginDirectories) {
+        issues.push({ archiveName: directory, message: decision.reason });
+      }
+    }
+  }
   const registryUrls = new Set(options.registryManifestUrls ?? []);
   const urlSource = (url: string): PluginSource =>
     bundledUrls.has(url) ? "bundled" : registryUrls.has(url) ? "registry" : "manifest-url";

@@ -984,7 +984,12 @@ function ensureExternalPluginsLoadedWithSettings(
         pluginManifestUrls,
         // Only manifests fetched from the bundled drop-in URLs may use
         // activeByDefault (they are baked into the build, hence trusted).
-        { bundledManifestUrls, policy, registryManifestUrls },
+        {
+          bundledManifestUrls,
+          policy,
+          registryManifestUrls,
+          configuredPluginDirectories: desktopSettings.additionalPluginDirectories,
+        },
       );
     })
     .then((result) => {

@@ -158,6 +158,42 @@ describe("recovering a URL plugin blocked by its integrity pin", () => {
     assert.deepEqual(registry.issues, []);
   });
 
+  it("reports every configured directory denied by sideload policy without scanning it", async () => {
+    const globals = globalThis as Record<string, unknown>;
+    const originalWindow = globals.window;
+    globals.window = {
+      __TAURI_INTERNALS__: {
+        invoke: async (command: string, args: { additionalPluginDirectories: string[] }) => {
+          assert.equal(command, "load_external_plugin_bundles");
+          if (args.additionalPluginDirectories.length > 0) {
+            throw new Error("Policy-denied directories must not be read.");
+          }
+          return { pluginsDirectories: [], bundles: [], errors: [] };
+        },
+      },
+    };
+    const directories = ["/plugins/manual", "/plugins/project"];
+    const policy = { version: 1 as const, plugins: { sideload: false } };
+    try {
+      for (const filteredByHook of [false, true]) {
+        const result = await externalPlugins.loadExternalPlugins(
+          manager,
+          filteredByHook ? [] : directories,
+          [],
+          { policy, ...(filteredByHook ? { configuredPluginDirectories: directories } : {}) },
+        );
+        assert.deepEqual(result.loadedPluginIds, []);
+        assert.deepEqual(result.issues.map((issue) => issue.archiveName), directories);
+        for (const issue of result.issues) {
+          assert.match(issue.message, /sideloading is disabled by deployment policy/);
+        }
+      }
+    } finally {
+      if (originalWindow === undefined) delete globals.window;
+      else globals.window = originalWindow;
+    }
+  });
+
   it("programmatic archive installation refuses before unpacking with a load issue", async () => {
     await assert.rejects(
       externalPlugins.installWebPluginArchive(manager, "denied.zip", new Uint8Array(), app, {

@@ -187,7 +187,8 @@ prompt and cannot be trusted into settings. Previously installed URLs stay in
 settings, but only URLs recognized by the current configured registry may load
 (plus bundled drop-ins). If that registry is unavailable, these installed URLs
 fail closed; bundled drop-ins can still load. Existing file-installed archives
-and additional directories cannot load.
+and additional directories cannot load. Each skipped configured directory is
+reported as an external plugin load issue without reading its contents.
 
 `defaultActive` marks permitted, loaded external plugins for activation in a
 fresh project. It does not override a saved project's active plugin list and
