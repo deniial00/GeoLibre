@@ -154,3 +154,17 @@ def test_write_policy_is_atomic_and_world_readable(tmp_path):
 def test_file_embed_origin_with_query_or_fragment_is_rejected(origin):
     doc = {"version": 1, "sharing": {"embedOrigins": [origin]}}
     assert "sharing.embedOrigins[0]" in error_of(dp.validate_policy, doc, LABEL)
+
+
+@pytest.mark.parametrize(
+    "origin", ["https://a.example:abc", "https://a.example:99999", "https://:443"]
+)
+def test_file_embed_origin_with_bad_port_or_host_is_rejected(origin):
+    doc = {"version": 1, "sharing": {"embedOrigins": [origin]}}
+    assert "sharing.embedOrigins[0]" in error_of(dp.validate_policy, doc, LABEL)
+
+
+def test_file_embed_origin_with_port_and_ipv6_is_accepted():
+    origins = ["http://localhost:8080", "https://[::1]:8443"]
+    doc = {"version": 1, "sharing": {"embedOrigins": origins}}
+    assert dp.validate_policy(doc, LABEL)["sharing"]["embedOrigins"] == origins

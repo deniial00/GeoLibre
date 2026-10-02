@@ -365,20 +365,29 @@ def _validate_catalog(label, path, value):
     return out
 
 
+def _is_origin(item):
+    """True for "*" or a bare http(s) origin with a valid host and port, no credentials."""
+    if not isinstance(item, str):
+        return False
+    if item == "*":
+        return True
+    if not re.fullmatch(r"https?://[^/\s?#]+", item):
+        return False
+    parsed = urlsplit(item)
+    try:
+        # .port raises ValueError for a non-numeric or out-of-range (0-65535) port.
+        parsed.port
+    except ValueError:
+        return False
+    return bool(parsed.hostname) and not parsed.username and not parsed.password
+
+
 def _validate_origins(label, path, value):
     if not isinstance(value, list):
         fail(label, path, "must be a list")
     out = []
     for index, item in enumerate(value):
-        ok = isinstance(item, str) and (
-            item == "*"
-            or (
-                re.fullmatch(r"https?://[^/\s?#]+", item)
-                and not urlsplit(item).username
-                and not urlsplit(item).password
-            )
-        )
-        if not ok:
+        if not _is_origin(item):
             fail(
                 label,
                 f"{path}[{index}]",
