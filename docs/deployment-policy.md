@@ -232,7 +232,8 @@ docker run -p 8080:80 \
 | `GEOLIBRE_AI_URL` / `GEOLIBRE_AI_MODEL` | `ai.enabled: true` / `ai.model` |
 
 The boot log has one `Deployment policy: <path> from <VAR> = <value>` line per
-override. Tokens never appear in it.
+override. Tokens never appear in it, and a query string or fragment on a URL is
+replaced with `?...`.
 
 Invalid input stops the boot with an `ERROR:` line that names the JSON path (for
 example `ERROR: GEOLIBRE_DEPLOYMENT_FILE capabilities[1] must be one of: ...`),

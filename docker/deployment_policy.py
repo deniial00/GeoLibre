@@ -140,7 +140,7 @@ def _invalid_json_constant(value):
 def read_services_file(path):
     """Read and validate a GEOLIBRE_SERVICES_FILE catalog; return its services."""
     try:
-        with open(path, encoding="utf-8") as source:
+        with open(path, encoding="utf-8-sig") as source:
             catalog = json.load(source, parse_constant=_invalid_json_constant)
     except OSError as error:
         raise SystemExit(
@@ -365,6 +365,12 @@ def _validate_catalog(label, path, value):
     return out
 
 
+def _loggable(url):
+    """Drop any query or fragment before a URL is logged, since it may carry a token."""
+    clean = re.split(r"[?#]", url, maxsplit=1)[0]
+    return clean if clean == url else clean + "?..."
+
+
 def _is_origin(item):
     """True for "*" or a bare http(s) origin with a valid host and port, no credentials."""
     if not isinstance(item, str):
@@ -373,8 +379,8 @@ def _is_origin(item):
         return True
     if not re.fullmatch(r"https?://[^/\s?#]+", item):
         return False
-    parsed = urlsplit(item)
     try:
+        parsed = urlsplit(item)
         # .port raises ValueError for a non-numeric or out-of-range (0-65535) port.
         parsed.port
     except ValueError:
@@ -544,10 +550,10 @@ def build_policy(env: Mapping[str, str]):
         override("services.builtins", "GEOLIBRE_BUILTIN_SERVICES", False, "false")
     if get("GEOLIBRE_SHARE_URL"):
         value = normalize_share_url(get("GEOLIBRE_SHARE_URL"))
-        override("sharing.shareUrl", "GEOLIBRE_SHARE_URL", value, value)
+        override("sharing.shareUrl", "GEOLIBRE_SHARE_URL", value, _loggable(value))
     if get("GEOLIBRE_COLLAB_URL"):
         value = normalize_collab_url(get("GEOLIBRE_COLLAB_URL"))
-        override("sharing.collabUrl", "GEOLIBRE_COLLAB_URL", value, value)
+        override("sharing.collabUrl", "GEOLIBRE_COLLAB_URL", value, _loggable(value))
     origins = list(dict.fromkeys(parse_embed_origins(get("GEOLIBRE_EMBED_ORIGINS"))))
     if origins:
         override("sharing.embedOrigins", "GEOLIBRE_EMBED_ORIGINS", origins, ",".join(origins))

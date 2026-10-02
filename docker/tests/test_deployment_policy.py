@@ -168,3 +168,23 @@ def test_file_embed_origin_with_port_and_ipv6_is_accepted():
     origins = ["http://localhost:8080", "https://[::1]:8443"]
     doc = {"version": 1, "sharing": {"embedOrigins": origins}}
     assert dp.validate_policy(doc, LABEL)["sharing"]["embedOrigins"] == origins
+
+
+def test_unterminated_ipv6_origin_gets_a_path_qualified_error():
+    doc = {"version": 1, "sharing": {"embedOrigins": ["https://[::1"]}}
+    assert "sharing.embedOrigins[0]" in error_of(dp.validate_policy, doc, LABEL)
+
+
+def test_services_file_with_bom_is_read(tmp_path):
+    path = tmp_path / "services.json"
+    body = {"services": [{"id": "a", "name": "A", "kind": "wms", "fields": {"url": "u"}}]}
+    path.write_bytes(b"\xef\xbb\xbf" + json.dumps(body).encode())
+    assert dp.read_services_file(str(path))[0]["id"] == "a"
+
+
+def test_url_query_is_not_logged():
+    policy, logs = dp.build_policy(
+        {"GEOLIBRE_COLLAB_URL": "wss://relay.example.com/s?token=SECRET"}
+    )
+    assert policy["sharing"]["collabUrl"].endswith("token=SECRET")
+    assert not any("SECRET" in line for line in logs)
