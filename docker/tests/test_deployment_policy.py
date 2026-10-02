@@ -188,3 +188,17 @@ def test_url_query_is_not_logged():
     )
     assert policy["sharing"]["collabUrl"].endswith("token=SECRET")
     assert not any("SECRET" in line for line in logs)
+
+
+@pytest.mark.parametrize("url", ["wss://[::1", "wss://[bogus]"])
+def test_malformed_bracketed_host_is_a_clean_error(url):
+    assert "GEOLIBRE_COLLAB_URL is not a valid URL" in error_of(dp.normalize_collab_url, url)
+    doc = {"version": 1, "sharing": {"collabUrl": url}}
+    assert "sharing.collabUrl is not a valid URL" in error_of(dp.validate_policy, doc, LABEL)
+
+
+def test_embed_origins_env_is_deduplicated():
+    assert dp.parse_embed_origins("https://a.example,https://a.example *") == [
+        "https://a.example",
+        "*",
+    ]

@@ -76,6 +76,18 @@ OVERRIDE_SUFFIX = " (overrides GEOLIBRE_DEPLOYMENT_FILE)"
 # --- Env validators shared with the runtime-config generation -----------------
 
 
+def _urlsplit(name, value):
+    """urlsplit() that exits with an ERROR instead of raising on a malformed host.
+
+    CPython raises ValueError for unbalanced brackets or a bracketed host that is
+    not an IPv6 address, e.g. wss://[::1 or https://[bogus].
+    """
+    try:
+        return urlsplit(value)
+    except ValueError as error:
+        raise SystemExit(f"ERROR: {name} is not a valid URL, not {value!r}.") from error
+
+
 def service_url(name, value, schemes, loopback_schemes, loopback_hosts):
     """Validate a self-hosted service URL, or exit with an explanation.
 
@@ -88,7 +100,7 @@ def service_url(name, value, schemes, loopback_schemes, loopback_hosts):
     disabled feature. Failing the boot instead puts the error where an operator
     will actually see it.
     """
-    parsed = urlsplit(value)
+    parsed = _urlsplit(name, value)
     # Both checks below run before the loopback shortcut, so their guarantees hold
     # for every accepted value. That ordering is load-bearing: urlsplit() parses
     # ws://localhost:8080"; ... with hostname "localhost", which would match the
@@ -223,7 +235,7 @@ def parse_embed_origins(raw):
         if entry == "*":
             origins.append(entry)
             continue
-        parsed = urlsplit(entry)
+        parsed = _urlsplit("GEOLIBRE_EMBED_ORIGINS entry", entry)
         if (
             parsed.scheme not in ("http", "https")
             or not parsed.netloc
@@ -235,7 +247,8 @@ def parse_embed_origins(raw):
                 "origin such as https://portal.example.com."
             )
         origins.append(f"{parsed.scheme}://{parsed.netloc}")
-    return origins
+    # Deduplicated (first seen wins) so the runtime config and deployment.json agree.
+    return list(dict.fromkeys(origins))
 
 
 def normalize_share_url(raw):
@@ -257,7 +270,7 @@ def normalize_geolens_url(raw):
         return setting
     if re.fullmatch(r"[A-Za-z0-9.-]+(?::[0-9]+)?(?:/.*)?", raw):
         raw = f"https://{raw}"
-    parsed = urlsplit(raw)
+    parsed = _urlsplit("GEOLIBRE_GEOLENS_URL", raw)
     if parsed.query or parsed.fragment:
         raise SystemExit(
             "ERROR: GEOLIBRE_GEOLENS_URL must not include query parameters or a fragment."
@@ -446,7 +459,7 @@ def _validate_field(label, path, kind, value):
         if value not in ("off", "same-origin"):
             if not value.startswith(("http://", "https://")):
                 fail(label, path, 'must be "off", "same-origin", or an http(s):// URL')
-            parsed = urlsplit(value)
+            parsed = _urlsplit(f"{label} {path}", value)
             if parsed.query or parsed.fragment:
                 fail(label, path, "must not include query parameters or a fragment")
             service_url(f"{label} {path}", value, ("https",), ("http",), LOOPBACK)
@@ -556,7 +569,7 @@ def build_policy(env: Mapping[str, str]):
     if get("GEOLIBRE_COLLAB_URL"):
         value = normalize_collab_url(get("GEOLIBRE_COLLAB_URL"))
         override("sharing.collabUrl", "GEOLIBRE_COLLAB_URL", value, _loggable(value))
-    origins = list(dict.fromkeys(parse_embed_origins(get("GEOLIBRE_EMBED_ORIGINS"))))
+    origins = parse_embed_origins(get("GEOLIBRE_EMBED_ORIGINS"))
     if origins:
         override("sharing.embedOrigins", "GEOLIBRE_EMBED_ORIGINS", origins, ",".join(origins))
     if get("GEOLIBRE_GEOLENS_URL"):
