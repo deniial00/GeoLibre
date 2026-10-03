@@ -90,4 +90,30 @@ describe("addPluginWfsLayer", () => {
     );
     assert.equal(useAppStore.getState().layers.length, 0);
   });
+
+  it("rejects a fetch result if the project changed while it was loading", async () => {
+    let resolveResponse!: (response: Response) => void;
+    let notifyFetchStarted!: () => void;
+    const fetchStarted = new Promise<void>((resolve) => {
+      notifyFetchStarted = resolve;
+    });
+    const response = new Promise<Response>((resolve) => {
+      resolveResponse = resolve;
+    });
+    globalThis.fetch = (async () => {
+      notifyFetchStarted();
+      return response;
+    }) as typeof fetch;
+
+    const pendingLayer = addPluginWfsLayer("stale", {
+      url: "https://example.test/wfs",
+      typeName: "roads",
+    });
+    await fetchStarted;
+    useAppStore.getState().newProject({ name: "Replacement project" });
+    resolveResponse(new Response(JSON.stringify(JSON_FEATURES)));
+
+    await assert.rejects(pendingLayer, /project changed while the layer was loading/);
+    assert.equal(useAppStore.getState().layers.length, 0);
+  });
 });

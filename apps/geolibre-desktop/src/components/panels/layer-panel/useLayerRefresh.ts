@@ -105,9 +105,11 @@ export function useLayerRefresh({ layers, isCollapsed }: UseLayerRefreshOptions)
 
   const handleRefreshLayer = useCallback(
     async (layer: GeoLibreLayer, automatic = false) => {
-      if (refreshingLayerIdsRef.current.has(layer.id)) return;
+      const requestGeneration = projectGeneration;
+      const requestKey = `${requestGeneration}:${layer.id}`;
+      if (refreshingLayerIdsRef.current.has(requestKey)) return;
 
-      refreshingLayerIdsRef.current.add(layer.id);
+      refreshingLayerIdsRef.current.add(requestKey);
       clearRefreshStatusTimer(layer.id);
       setRefreshStatuses((current) => ({
         ...current,
@@ -116,7 +118,6 @@ export function useLayerRefresh({ layers, isCollapsed }: UseLayerRefreshOptions)
           message: automatic ? t("layers.refreshingAuto") : t("layers.refreshing"),
         },
       }));
-      const requestGeneration = projectGeneration;
       const requestSourceUrl = layer.source.url;
 
       try {
@@ -363,9 +364,7 @@ export function useLayerRefresh({ layers, isCollapsed }: UseLayerRefreshOptions)
         }));
         scheduleStatusClear(layer.id);
       } finally {
-        if (requestGeneration === useAppStore.getState().projectGeneration) {
-          refreshingLayerIdsRef.current.delete(layer.id);
-        }
+        refreshingLayerIdsRef.current.delete(requestKey);
       }
     },
     [clearRefreshStatusTimer, projectGeneration, scheduleStatusClear, t, updateLayer],
@@ -382,7 +381,12 @@ export function useLayerRefresh({ layers, isCollapsed }: UseLayerRefreshOptions)
     if (observedWfsGenerationRef.current !== projectGeneration) {
       observedWfsGenerationRef.current = projectGeneration;
       observedWfsLayerIdsRef.current.clear();
-      refreshingLayerIdsRef.current.clear();
+      const generationPrefix = `${projectGeneration}:`;
+      for (const requestKey of refreshingLayerIdsRef.current) {
+        if (!requestKey.startsWith(generationPrefix)) {
+          refreshingLayerIdsRef.current.delete(requestKey);
+        }
+      }
     }
     const currentIds = new Set(layers.map((layer) => layer.id));
     for (const id of observedWfsLayerIdsRef.current) {

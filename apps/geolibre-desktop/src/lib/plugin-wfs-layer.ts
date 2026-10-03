@@ -47,6 +47,7 @@ export async function addPluginWfsLayer(
   if (!version) throw new Error("addWfsLayer: options.version must be a non-empty string.");
   validateBbox(options?.bbox);
 
+  const projectGeneration = useAppStore.getState().projectGeneration;
   const endpoint = stripOgcOperationParams(url, "WFS");
   const result = await fetchWfsGeoJson(
     {
@@ -60,6 +61,9 @@ export async function addPluginWfsLayer(
     },
     { useWfsProxy: true },
   );
+  if (useAppStore.getState().projectGeneration !== projectGeneration) {
+    throw new Error("addWfsLayer: the project changed while the layer was loading.");
+  }
   if (result.data.features.length === 0) {
     throw new Error("addWfsLayer: the service returned no features.");
   }

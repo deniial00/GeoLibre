@@ -736,7 +736,7 @@ WFS layers use the host's GetFeature loader, including GeoJSON/GML fallback, rep
 
 ```typescript
 const layerId = await app.addWfsLayer?.("Roads", {
-  url: "https://services.example.org/geoserver/wfs?token=...",
+  url: "https://services.example.org/geoserver/wfs",
   typeName: "transport:roads",
   bbox: [10, 40, 12, 42],
 });
