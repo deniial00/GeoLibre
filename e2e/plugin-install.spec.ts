@@ -116,9 +116,9 @@ test("external plugins reproject coordinates with the host's shared proj4", asyn
     async activate(app) {
       const module = await app.getProj4();
       const proj4 = module.default;
-      proj4.defs("EPSG:32632", "+proj=utm +zone=32 +datum=WGS84 +units=m +no_defs");
-      const wgs84 = proj4("EPSG:32632", "EPSG:4326", [500000, 0]);
-      const projected = proj4("EPSG:4326", "EPSG:32632", wgs84);
+      proj4.defs("e2e-proj4-plugin:utm32n", "+proj=utm +zone=32 +datum=WGS84 +units=m +no_defs");
+      const wgs84 = proj4("e2e-proj4-plugin:utm32n", "EPSG:4326", [500000, 0]);
+      const projected = proj4("EPSG:4326", "e2e-proj4-plugin:utm32n", wgs84);
       const output = document.createElement("output");
       output.id = "e2e-proj4-result";
       output.textContent = JSON.stringify({ wgs84, projected });

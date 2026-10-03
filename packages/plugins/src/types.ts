@@ -882,9 +882,10 @@ export interface GeoLibreAppAPI {
   getMaplibreGlRaster?: () => Promise<typeof import("maplibre-gl-raster")>;
   /**
    * Resolve the host's shared proj4 module namespace instead of bundling a copy.
-   * Its `default` export is the callable library; register required CRS
-   * definitions through `default.defs`. Definitions are shared, so do not
-   * overwrite existing CRS names with conflicting definitions.
+   * Its `default` export is the callable library. Pass CRS definitions directly
+   * or register plugin-prefixed names through `default.defs`; do not register
+   * or redefine EPSG names. The mutable registry is shared with the host and
+   * all plugins, so conflicting definitions can corrupt later reprojections.
    * Optional for older or variant hosts; plugins must handle its absence.
    */
   getProj4?: () => Promise<typeof Proj4>;

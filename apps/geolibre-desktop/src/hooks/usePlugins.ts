@@ -1568,6 +1568,7 @@ export function createAppAPI(mapControllerRef?: RefObject<MapEngine | null>) {
           throw error;
         }));
     })(),
+    // Share the host's proj4 instance; memoize loads but allow retry after failure.
     getProj4: (() => {
       let cached: Promise<typeof Proj4> | undefined;
       return () =>

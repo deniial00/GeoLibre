@@ -510,15 +510,30 @@ import type * as Proj4 from "proj4";
 const module: typeof Proj4 | undefined = await app.getProj4?.();
 if (!module) throw new Error("This plugin requires a host with getProj4 support.");
 const proj4 = module.default;
-proj4.defs("EPSG:32632", "+proj=utm +zone=32 +datum=WGS84 +units=m +no_defs");
-const [longitude, latitude] = proj4("EPSG:32632", "EPSG:4326", [500000, 0]);
+proj4.defs("my-plugin:utm32n", "+proj=utm +zone=32 +datum=WGS84 +units=m +no_defs");
+const [longitude, latitude] = proj4("my-plugin:utm32n", "EPSG:4326", [500000, 0]);
 ```
 
 This returns longitude 9 and latitude 0. See the
 [proj4 API](https://github.com/proj4js/proj4js/blob/master/README.md) for coordinate
-conversion and CRS definitions. Definitions belong to the shared library
-instance; do not overwrite existing CRS names with conflicting definitions.
+conversion and CRS definitions. The mutable definitions registry is shared with
+the host (including ArcGIS/Zarr reprojection) and all plugins. Register only
+plugin-prefixed names, as above; do not register or redefine `EPSG:*` names or
+names belonging to the host or other plugins. A conflicting definition can
+silently corrupt subsequently created transforms. These naming rules are a
+plugin-author responsibility, not an isolation boundary enforced by this API.
 Unknown EPSG definitions are not fetched automatically.
+
+For one-off conversions, pass the definition directly instead of modifying the
+shared registry:
+
+```typescript
+const [longitude, latitude] = proj4(
+  "+proj=utm +zone=32 +datum=WGS84 +units=m +no_defs",
+  "EPSG:4326",
+  [500000, 0],
+);
+```
 
 Older or variant hosts may omit `getProj4`; plugins must handle that absence.
 Shared access does not change `addGeoJsonLayer`'s WGS84 longitude/latitude
