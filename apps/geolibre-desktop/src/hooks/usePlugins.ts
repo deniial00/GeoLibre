@@ -1,3 +1,4 @@
+import type * as Proj4 from "proj4";
 import {
   clearExternalNativePaintBridge,
   setExternalNativePaintBridge,
@@ -1563,6 +1564,14 @@ export function createAppAPI(mapControllerRef?: RefObject<MapEngine | null>) {
         (cached ??= import("maplibre-gl-raster").catch((error) => {
           // Don't memoize a rejection: a transient chunk-load failure would
           // otherwise poison getMaplibreGlRaster() for the whole session.
+          cached = undefined;
+          throw error;
+        }));
+    })(),
+    getProj4: (() => {
+      let cached: Promise<typeof Proj4> | undefined;
+      return () =>
+        (cached ??= import("proj4").catch((error) => {
           cached = undefined;
           throw error;
         }));
