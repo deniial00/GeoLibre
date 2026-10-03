@@ -83,6 +83,16 @@ export interface ExternalPluginLoadIssue {
   message: string;
   policyDenial?: PluginPolicyDenial;
   integrityStatus?: "changed";
+  /** Set when the changed version is a registry-announced update. */
+  heldBack?: HeldBackPluginBundle;
+}
+
+export interface HeldBackPluginBundle {
+  pluginId: string;
+  /** Version recorded with the pin, or null for a pin written before versions were kept. */
+  pinnedVersion: string | null;
+  /** Version in the manifest now served at the URL. */
+  version: string;
 }
 
 export interface ExternalPluginLoadResult {
@@ -115,6 +125,11 @@ const inFlightUrlUpgrades = new Map<string, Promise<GeoLibrePlugin>>();
 // through the UI, because reinstalling matched the same stale pin and failed
 // again (#2318). Recording the attempt instead of the registration covers it.
 const pinnedUrlLoadAttempts = new Set<string>();
+
+// Bundles the pin held back this session, by manifest URL. The marketplace's
+// Update action registers one of these as a fresh plugin (there is no loaded
+// version to replace) and re-pins it.
+const heldBackBundles = new Map<string, HeldBackPluginBundle>();
 
 export async function loadExternalPlugins(
   manager: PluginManager,
@@ -337,17 +352,26 @@ async function loadPluginUrlBundles(
         // crypto.subtle unavailable) to this one URL — letting it throw here would
         // reject the whole loadExternalPlugins Promise.all and drop every plugin.
         try {
-          const integrity = await verifyPluginBundleIntegrity(manifestUrls[index], bundle);
+          const integrity = await verifyPluginBundleIntegrity(
+            manifestUrls[index],
+            bundle,
+            bundle.manifest.version,
+          );
           if (integrity.status === "changed") {
+            const heldBack: HeldBackPluginBundle = {
+              pluginId: bundle.manifest.id,
+              pinnedVersion: integrity.pinnedVersion,
+              version: bundle.manifest.version,
+            };
+            heldBackBundles.set(manifestUrls[index], heldBack);
             issues.push({
+              heldBack,
               archiveName: bundle.archiveName,
               sourceUrl: bundle.sourceUrl,
               integrityStatus: integrity.status,
-              // Point at the recovery that actually works. A held-back bundle
-              // never registers, so the marketplace's Update action (which
-              // upgrades a *loaded* plugin) is not offered for it; uninstalling
-              // the URL clears the pin, and reinstalling re-pins the published
-              // bundle after the user has had the chance to review it.
+              // The registry can offer an announced version as an explicit
+              // update; otherwise uninstalling clears the pin and reinstalling
+              // re-pins the published bundle after review.
               message:
                 `Plugin at '${bundle.sourceUrl}' changed since you last trusted it and was not loaded. ` +
                 "Open Settings → Plugins, uninstall it, then install it again to review and accept the update.",
@@ -365,6 +389,7 @@ async function loadPluginUrlBundles(
           });
           continue;
         }
+        heldBackBundles.delete(manifestUrls[index]);
       }
       bundles.push(bundle);
     } else {
@@ -786,6 +811,7 @@ export function unloadRemovedUrlPlugins(
   for (const url of removedUrls) {
     if (pinKeep.has(url)) continue;
     pinnedUrlLoadAttempts.delete(url);
+    heldBackBundles.delete(url);
     removePluginBundlePin(url);
   }
   return toRemove;
@@ -831,7 +857,11 @@ export function reloadExternalUrlPlugin(
   manager: PluginManager,
   manifestUrl: string,
   app: GeoLibreAppAPI,
-  options: { policy?: DeploymentPolicy | null; source?: PluginSource } = {},
+  options: {
+    policy?: DeploymentPolicy | null;
+    source?: PluginSource;
+    expectedVersion?: string;
+  } = {},
 ): Promise<GeoLibrePlugin> {
   const inFlight = inFlightUrlUpgrades.get(manifestUrl);
   if (inFlight) return inFlight;
@@ -848,7 +878,11 @@ async function reloadExternalUrlPluginUncoalesced(
   manager: PluginManager,
   manifestUrl: string,
   app: GeoLibreAppAPI,
-  options: { policy?: DeploymentPolicy | null; source?: PluginSource },
+  options: {
+    policy?: DeploymentPolicy | null;
+    source?: PluginSource;
+    expectedVersion?: string;
+  },
 ): Promise<GeoLibrePlugin> {
   const policy = options.policy === undefined ? getDeploymentPolicy() : options.policy;
   let existingId: string | null = null;
@@ -883,12 +917,43 @@ async function reloadExternalUrlPluginUncoalesced(
       policy,
       options.source ?? "manifest-url",
     );
+    // The user consented to a specific version; the URL may have moved on since
+    // the dialog offered it.
+    if (
+      options.expectedVersion !== undefined &&
+      bundle.manifest.version !== options.expectedVersion
+    ) {
+      throw new Error(
+        `Cannot update plugin: expected version ${options.expectedVersion} but the registry now serves ${bundle.manifest.version}. Refresh the plugin list and try again.`,
+      );
+    }
     // The timeout only bounds the fetch/stream above; a dynamic import() of a
     // local blob URL can't be aborted, but it evaluates near-instantly so it is
     // not a practical hang risk.
     plugin = await importExternalPlugin(bundle);
   } finally {
     clearTimeout(timeout);
+  }
+
+  // The pin held this URL's bundle back, so nothing is loaded for it. The user
+  // asked for this update explicitly, which is the consent the pin wants: load
+  // the new bundle as a fresh plugin and pin it.
+  const heldBack = heldBackBundles.get(manifestUrl);
+  if (existingId === null && heldBack !== undefined) {
+    if (plugin.id !== heldBack.pluginId || manager.list().some((p) => p.id === plugin.id)) {
+      throw new Error(
+        `Cannot update plugin: '${plugin.id}' does not match the held-back plugin '${heldBack.pluginId}' or is already registered. Reinstall it manually.`,
+      );
+    }
+    const newHash = await computePluginBundleHash(bundle);
+    manager.register(plugin);
+    externallyLoadedPluginSources.set(plugin.id, manifestUrl);
+    pinPluginBundle(manifestUrl, newHash, bundle.manifest.version);
+    heldBackBundles.delete(manifestUrl);
+    if (bundle.styleSource) {
+      injectExternalPluginStyle(plugin.id, bundle.styleSource);
+    }
+    return plugin;
   }
 
   // Nothing was loaded for this URL (existingId null — e.g. the manifest is in
@@ -922,7 +987,7 @@ async function reloadExternalUrlPluginUncoalesced(
   externallyLoadedPluginSources.set(plugin.id, manifestUrl);
   // Explicit user reload: accept this version as the new trusted baseline so the
   // next auto-scan doesn't flag it as changed.
-  pinPluginBundle(manifestUrl, await computePluginBundleHash(bundle));
+  pinPluginBundle(manifestUrl, await computePluginBundleHash(bundle), bundle.manifest.version);
   if (bundle.styleSource) {
     injectExternalPluginStyle(plugin.id, bundle.styleSource);
   }
