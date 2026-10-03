@@ -30,12 +30,21 @@ esac
 # policy. See docs/deployment-policy.md.
 python /usr/local/lib/geolibre/deployment_policy.py /usr/share/nginx/html/deployment.json
 
+# Generate capability guards from the final validated policy, not raw env.
+SIDECAR_DECISION=$(python /usr/local/lib/geolibre/sidecar_policy.py /usr/share/nginx/html/deployment.json)
+case "$SIDECAR_DECISION" in
+  SIDECAR_START=0) SIDECAR_START=0 ;;
+  SIDECAR_START=1) SIDECAR_START=1 ;;
+  *) echo "ERROR: Invalid sidecar policy decision." >&2; exit 1 ;;
+esac
+AI_ENABLED=$(python -c 'import json; print(int(json.load(open("/usr/share/nginx/html/deployment.json")).get("ai", {}).get("enabled") is True))')
+
 # Optional AI proxy. All three values are required together so merely setting a
 # model never embeds or enables ai.geolibre.app. GEOLIBRE_AI_URL is deliberately
 # restricted to the same-origin /ai route; the remote Worker URL and instance
 # token remain server-side in nginx.
 AI_PROXY_CONF=/etc/nginx/geolibre-ai-proxy.conf
-if [ -n "${GEOLIBRE_AI_URL:-}" ] || [ -n "${GEOLIBRE_AI_PROXY_URL:-}" ] || [ -n "${GEOLIBRE_AI_PROXY_TOKEN:-}" ]; then
+if [ "$AI_ENABLED" = "1" ]; then
   if [ -z "${GEOLIBRE_AI_URL:-}" ] || [ -z "${GEOLIBRE_AI_PROXY_URL:-}" ] || [ -z "${GEOLIBRE_AI_PROXY_TOKEN:-}" ]; then
     echo "ERROR: GEOLIBRE_AI_URL, GEOLIBRE_AI_PROXY_URL, and GEOLIBRE_AI_PROXY_TOKEN must be set together." >&2
     exit 1
@@ -105,7 +114,7 @@ if real_ip:
 
 token = os.environ["GEOLIBRE_AI_PROXY_TOKEN"]
 config = f"""
-location /ai/ {{
+location ^~ /ai/ {{
 {real_ip}
     proxy_pass {upstream}/;
     proxy_http_version 1.1;
@@ -127,7 +136,13 @@ open("/etc/nginx/geolibre-ai-proxy.conf", "w").write(config)
   chmod 640 "$AI_PROXY_CONF"
   echo "Authenticated AI proxy enabled at /ai."
 else
-  printf '# AI proxy disabled (GEOLIBRE_AI_URL not set).\n' > "$AI_PROXY_CONF"
+  cat > "$AI_PROXY_CONF" <<'EOF'
+location ^~ /ai {
+    types {}
+    default_type application/json;
+    return 403 '{"detail":"AI disabled by deployment policy"}';
+}
+EOF
 fi
 
 # Runtime config the app reads at load (index.html pulls it in before the
@@ -578,9 +593,14 @@ else
   rm -f "$HTPASSWD"
 fi
 
-if [ "${GEOLIBRE_DISABLE_SIDECAR:-0}" != "1" ]; then
+if [ "${GEOLIBRE_DISABLE_SIDECAR:-0}" = "1" ]; then
+  echo "Sidecar disabled: GEOLIBRE_DISABLE_SIDECAR=1."
+elif [ "$SIDECAR_START" = "1" ]; then
+  echo "Sidecar starting: deployment capabilities permit sidecar routes."
   python -m uvicorn geolibre_server.app.main:app \
     --host 127.0.0.1 --port 8765 &
+else
+  echo "Sidecar disabled: neither processing:run nor data:add is granted."
 fi
 
 exec nginx -g 'daemon off;'

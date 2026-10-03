@@ -17,6 +17,7 @@ import type { CesiumSceneHandle } from "@geolibre/map";
 import type { Feature, FeatureCollection, Geometry } from "geojson";
 import type { IControl, Map as MapLibreMap } from "maplibre-gl";
 import type { OvertureTheme } from "maplibre-gl-overture-maps";
+import type * as Proj4 from "proj4";
 import type { TemporalLayerAdapter } from "./plugins/temporal-layers";
 import type { GeoLibreToolbarLabel } from "./toolbar-menu-label";
 
@@ -898,6 +899,15 @@ export interface GeoLibreAppAPI {
    * forward-compatibility, so plugins should call it with optional chaining.
    */
   getMaplibreGlRaster?: () => Promise<typeof import("maplibre-gl-raster")>;
+  /**
+   * Resolve the host's shared proj4 module namespace instead of bundling a copy.
+   * Its `default` export is the callable library. Pass CRS definitions directly
+   * or register plugin-prefixed names through `default.defs`; do not register
+   * or redefine EPSG names. The mutable registry is shared with the host and
+   * all plugins, so conflicting definitions can corrupt later reprojections.
+   * Optional for older or variant hosts; plugins must handle its absence.
+   */
+  getProj4?: () => Promise<typeof Proj4>;
   /**
    * Set the map projection preference (persisted in app state, so the host's
    * projection enforcement keeps it). deck.gl-backed plugins call this with

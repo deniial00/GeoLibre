@@ -101,3 +101,62 @@ test("installs a plugin from an uploaded zip, persists it across reload, and uni
   await page.getByRole("button", { name: "Plugins", exact: true }).click();
   await expect(page.getByRole("menu").getByText(PLUGIN_NAME)).toHaveCount(0);
 });
+
+test("external plugins reproject coordinates with the host's shared proj4", async ({ page }) => {
+  const manifest = {
+    id: "e2e-proj4-plugin",
+    name: "E2E Proj4 Plugin",
+    version: "1.0.0",
+    entry: "plugin.js",
+  };
+  const entry = `export default {
+    id: "e2e-proj4-plugin",
+    name: "E2E Proj4 Plugin",
+    version: "1.0.0",
+    async activate(app) {
+      const module = await app.getProj4();
+      const proj4 = module.default;
+      proj4.defs("e2e-proj4-plugin:utm32n", "+proj=utm +zone=32 +datum=WGS84 +units=m +no_defs");
+      const wgs84 = proj4("e2e-proj4-plugin:utm32n", "EPSG:4326", [500000, 0]);
+      const projected = proj4("EPSG:4326", "e2e-proj4-plugin:utm32n", wgs84);
+      const output = document.createElement("output");
+      output.id = "e2e-proj4-result";
+      output.textContent = JSON.stringify({ wgs84, projected });
+      document.body.append(output);
+    },
+    deactivate() {
+      document.getElementById("e2e-proj4-result")?.remove();
+    },
+  };`;
+  const archive = Buffer.from(
+    zipSync({
+      "e2e-proj4-plugin/plugin.json": strToU8(JSON.stringify(manifest)),
+      "e2e-proj4-plugin/plugin.js": strToU8(entry),
+    }),
+  );
+
+  await page.goto("/");
+  await expect(page.getByTestId("map-canvas")).toBeVisible();
+  const dialog = await openManagePluginsSettings(page);
+  const [fileChooser] = await Promise.all([
+    page.waitForEvent("filechooser"),
+    dialog.getByRole("button", { name: /Choose \.zip/ }).click(),
+  ]);
+  await fileChooser.setFiles({
+    name: `${manifest.id}.zip`,
+    mimeType: "application/zip",
+    buffer: archive,
+  });
+  await expect(dialog.getByText(`Installed plugin "${manifest.id}".`)).toBeVisible();
+  await page.keyboard.press("Escape");
+  await page.getByRole("button", { name: "Plugins", exact: true }).click();
+  await page.getByRole("menu").getByText(manifest.name, { exact: true }).click();
+
+  const output = page.locator("#e2e-proj4-result");
+  await expect(output).toBeAttached();
+  const result = JSON.parse((await output.textContent())!);
+  expect(Math.abs(result.wgs84[0] - 9)).toBeLessThan(1e-8);
+  expect(Math.abs(result.wgs84[1])).toBeLessThan(1e-8);
+  expect(Math.abs(result.projected[0] - 500000)).toBeLessThan(1e-4);
+  expect(Math.abs(result.projected[1])).toBeLessThan(1e-4);
+});
