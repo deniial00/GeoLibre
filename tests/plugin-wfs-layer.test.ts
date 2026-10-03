@@ -4,6 +4,7 @@ import { useAppStore } from "@geolibre/core";
 import type { Point } from "geojson";
 import { DOMParser } from "linkedom";
 import { addPluginWfsLayer } from "../apps/geolibre-desktop/src/lib/plugin-wfs-layer";
+import { fetchWfsGeoJson } from "../apps/geolibre-desktop/src/lib/layer-refresh";
 
 globalThis.DOMParser = DOMParser as unknown as typeof globalThis.DOMParser;
 const originalFetch = globalThis.fetch;
@@ -30,7 +31,7 @@ describe("addPluginWfsLayer", () => {
   it("adds the fetched WFS collection as an editable, refreshable store layer", async () => {
     globalThis.fetch = (async () => new Response(JSON.stringify(JSON_FEATURES))) as typeof fetch;
     const id = await addPluginWfsLayer("Plugin features", {
-      url: " https://example.test/wfs?token=secret&request=GetCapabilities&bbox=bad ",
+      url: " https://8.8.8.8/wfs?token=secret&request=GetCapabilities&bbox=bad ",
       typeName: " ns:roads ",
       bbox: [10, 40, 12, 42],
     });
@@ -56,7 +57,7 @@ describe("addPluginWfsLayer", () => {
         : new Response(EXCEPTION, { status: 400, headers: { "content-type": "text/xml" } });
     }) as typeof fetch;
     const id = await addPluginWfsLayer("GML", {
-      url: "https://example.test/wfs",
+      url: "https://8.8.8.8/wfs",
       typeName: "ms:Feature",
     });
     const layer = useAppStore.getState().layers.find((candidate) => candidate.id === id)!;
@@ -65,27 +66,58 @@ describe("addPluginWfsLayer", () => {
     assert.match(layer.source.url!, /outputFormat=application%2Fgml/);
   });
 
+  it("rejects hostname WFS destinations in the hosted browser before fetching", async () => {
+    let fetchCalled = false;
+    globalThis.fetch = (async () => {
+      fetchCalled = true;
+      return new Response(JSON.stringify(JSON_FEATURES));
+    }) as typeof fetch;
+
+    await assert.rejects(
+      addPluginWfsLayer("Hosted hostname", {
+        url: "https://services.example.org/wfs",
+        typeName: "roads",
+      }),
+      /public IP-literal URL/,
+    );
+    assert.equal(fetchCalled, false);
+    assert.equal(useAppStore.getState().layers.length, 0);
+    await assert.rejects(
+      fetchWfsGeoJson(
+        {
+          endpoint: "http://10.0.0.1/wfs",
+          typeName: "roads",
+          version: "2.0.0",
+          outputFormat: "application/json",
+          srsName: "EPSG:4326",
+        },
+        { usePluginWfsSecurity: true },
+      ),
+      /public destination/,
+      "refreshes of saved plugin WFS layers must revalidate literal addresses",
+    );
+    assert.equal(fetchCalled, false);
+  });
+
   it("rejects invalid inputs and empty results without adding a layer", async () => {
     for (const [options, message] of [
       [{ url: "", typeName: "x" }, /options.url must be a non-empty string/],
       [{ url: "file:///x", typeName: "x" }, /absolute HTTP\(S\) URL/],
-      [
-        { url: "https://example.test", typeName: " " },
-        /options.typeName must be a non-empty string/,
-      ],
-      [{ url: "https://example.test", typeName: "x", bbox: [10, 40, 12, 91] }, /options.bbox/],
+      [{ url: "https://8.8.8.8", typeName: " " }, /options.typeName must be a non-empty string/],
+      [{ url: "https://8.8.8.8", typeName: "x", bbox: [10, 40, 12, 91] }, /options.bbox/],
+      [{ url: "http://172.16.0.1/wfs", typeName: "x" }, /public destination/],
     ] as const) {
       await assert.rejects(addPluginWfsLayer("invalid", options as never), message);
     }
     globalThis.fetch = (async () =>
       new Response(JSON.stringify({ type: "FeatureCollection", features: [] }))) as typeof fetch;
     await assert.rejects(
-      addPluginWfsLayer("empty", { url: "https://example.test", typeName: "x" }),
+      addPluginWfsLayer("empty", { url: "https://8.8.8.8", typeName: "x" }),
       /service returned no features/,
     );
     globalThis.fetch = (async () => new Response("unavailable", { status: 503 })) as typeof fetch;
     await assert.rejects(
-      addPluginWfsLayer("failed", { url: "https://example.test", typeName: "x" }),
+      addPluginWfsLayer("failed", { url: "https://8.8.8.8", typeName: "x" }),
       /status 503/,
     );
     assert.equal(useAppStore.getState().layers.length, 0);
@@ -106,7 +138,7 @@ describe("addPluginWfsLayer", () => {
     }) as typeof fetch;
 
     const pendingLayer = addPluginWfsLayer("stale", {
-      url: "https://example.test/wfs",
+      url: "https://8.8.8.8/wfs",
       typeName: "roads",
     });
     await fetchStarted;

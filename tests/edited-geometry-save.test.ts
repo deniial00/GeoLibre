@@ -7,6 +7,7 @@ import {
   serializeProject,
 } from "@geolibre/core";
 import {
+  discardEditedWfsGeometry,
   embedEditedGeometry,
   hasEditedGeometry,
 } from "../apps/geolibre-desktop/src/lib/edited-geometry-save";
@@ -72,6 +73,39 @@ it("leaves unedited URL layers as references", () => {
     source: { type: "geojson", url: "https://example.com/buildings.geojson" },
   });
   assert.equal(embedEditedGeometry(layer), layer);
+});
+
+it("keeps edited WFS references only when the user chooses no embedding", () => {
+  const editedGeojson = {
+    type: "FeatureCollection" as const,
+    features: [
+      {
+        type: "Feature" as const,
+        properties: { name: "Edited" },
+        geometry: { type: "Point" as const, coordinates: [1, 2] as [number, number] },
+      },
+    ],
+  };
+  const layer = geojsonLayer({
+    geojson: editedGeojson,
+    source: { type: "geojson", url: "https://example.com/wfs?request=GetFeature" },
+    metadata: { sourceKind: "wfs-getfeature", geometryEdited: true },
+  });
+  const referenced = discardEditedWfsGeometry(layer);
+  const project = createEmptyProject();
+  const saved = projectFromStore({
+    ...project,
+    projectName: project.name,
+    layers: [referenced],
+  });
+
+  assert.deepEqual(layer.geojson, editedGeojson, "the live layer remains unchanged");
+  assert.equal(referenced.source.url, layer.source.url);
+  assert.equal(referenced.geojson, undefined);
+  assert.equal(referenced.metadata.geometryEdited, undefined);
+  const reopened = parseProject(serializeProject(saved)).layers[0];
+  assert.equal(reopened.source.url, layer.source.url);
+  assert.equal(reopened.geojson, undefined);
 });
 
 it("marks committed changes but not a no-op editor session", () => {

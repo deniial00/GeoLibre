@@ -44,6 +44,22 @@ describe("nativeHttpSuccessRecord", () => {
     const record = nativeHttpSuccessRecord("resolve_url_redirect", "https://x/y", 5);
     assert.equal(record.source, "native resolve_url_redirect");
   });
+  it("redacts plugin WFS URL credentials from diagnostics", () => {
+    const record = nativeHttpSuccessRecord(
+      "fetch_plugin_wfs_response",
+      "https://alice:secret@example.com/wfs",
+      1,
+    );
+    assert.equal(record.url, "https://example.com/wfs");
+  });
+  it("redacts credential query values from plugin WFS diagnostics", () => {
+    const record = nativeHttpSuccessRecord(
+      "fetch_plugin_wfs_response",
+      "https://example.com/wfs?token=secret&view=public",
+      1,
+    );
+    assert.equal(record.url, "https://example.com/wfs?token=%5Bredacted%5D&view=public");
+  });
 });
 
 describe("nativeHttpFailureRecord", () => {
@@ -76,5 +92,17 @@ describe("nativeHttpFailureRecord", () => {
     // the redundant "failed (request failed)".
     assert.equal(record.message, "GET fetch_url_bytes failed");
     assert.equal(record.detail, "Request failed with status 500 Internal Server Error");
+  });
+  it("redacts userinfo from plugin WFS failure diagnostics", () => {
+    const record = nativeHttpFailureRecord(
+      "fetch_plugin_wfs_response",
+      "https://alice:secret@example.com/wfs?token=querysecret",
+      "Request failed: error sending request for url (https://alice:secret@example.com/wfs?token=querysecret)",
+      1,
+    );
+    assert.equal(record.url, "https://example.com/wfs?token=%5Bredacted%5D");
+    assert.ok(!record.detail?.includes("alice"));
+    assert.ok(!record.detail?.includes("secret"));
+    assert.ok(!record.detail?.includes("querysecret"));
   });
 });

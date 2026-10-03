@@ -23,11 +23,13 @@ import { isSqlQueryLayer } from "./sql-query-layer";
 // metadata check imports cleanly here; its DuckDB engine is behind a dynamic
 // import inside `refreshIcebergLayer`.
 import { isIcebergLayer } from "./iceberg";
+import { validatePluginWfsUrl } from "./plugin-wfs-security";
 
-// Keep in sync with WFS_PROXY_PATH / GPX_PROXY_PATH in vite.config.ts (the dev
-// proxy binds them there). The GPX path is a generic feed CORS proxy reused for
-// GeoRSS refreshes; the name is historical.
+// Keep in sync with WFS_PROXY_PATH / PLUGIN_WFS_PROXY_PATH / GPX_PROXY_PATH
+// in vite.config.ts (the dev proxy binds them there). The GPX path is a generic
+// feed CORS proxy reused for GeoRSS refreshes; the name is historical.
 const WFS_PROXY_PATH = "/__geolibre_wfs_proxy";
+const PLUGIN_WFS_PROXY_PATH = "/__geolibre_plugin_wfs_proxy";
 const GPX_PROXY_PATH = "/__geolibre_gpx_proxy";
 const CSW_PROXY_PATH = "/__geolibre_csw_proxy";
 // Add Data tags a layer built from a CSW record's GeoJSON resource with this
@@ -206,7 +208,12 @@ interface FetchedText {
  */
 export async function fetchGeoJsonFeatureCollection(
   url: string,
-  options: { useWfsProxy?: boolean; useCswProxy?: boolean; signal?: AbortSignal } = {},
+  options: {
+    useWfsProxy?: boolean;
+    usePluginWfsSecurity?: boolean;
+    useCswProxy?: boolean;
+    signal?: AbortSignal;
+  } = {},
 ): Promise<FeatureCollection> {
   // Combine signals so a caller-supplied signal does not drop the timeout.
   const signal = options.signal
@@ -247,19 +254,28 @@ export async function fetchGeoJsonFeatureCollection(
   return arcGis ? repairArcGisAxisOrder(collection, arcGis, options, signal) : collection;
 }
 
-type FetchRouting = { useWfsProxy?: boolean; useCswProxy?: boolean };
+type FetchRouting = {
+  useWfsProxy?: boolean;
+  usePluginWfsSecurity?: boolean;
+  useCswProxy?: boolean;
+};
 
 // The transport for a request: the native client for a WFS request on desktop,
 // otherwise the browser fetch (through the dev proxy under Vite).
 function fetchText(url: string, options: FetchRouting, signal: AbortSignal): Promise<FetchedText> {
-  if (options.useWfsProxy && isTauri() && isHttpUrl(url)) return fetchNativeText(url, signal);
+  if (options.useWfsProxy && isTauri() && isHttpUrl(url)) {
+    return fetchNativeText(url, signal, options.usePluginWfsSecurity);
+  }
   return fetchBrowserText(
     options.useWfsProxy
-      ? proxyWfsRequestUrl(url)
+      ? options.usePluginWfsSecurity
+        ? proxyPluginWfsRequestUrl(url)
+        : proxyWfsRequestUrl(url)
       : options.useCswProxy
         ? proxyCswRequestUrl(url)
         : url,
     signal,
+    options.usePluginWfsSecurity,
   );
 }
 
@@ -303,8 +319,40 @@ async function repairArcGisAxisOrder(
   return shouldSwapAxes(extent, bbox) ? swapAxes(collection) : collection;
 }
 
-async function fetchBrowserText(requestUrl: string, signal: AbortSignal): Promise<FetchedText> {
-  const response = await fetch(requestUrl, { signal });
+async function fetchBrowserText(
+  requestUrl: string,
+  signal: AbortSignal,
+  pluginWfsSecurity = false,
+): Promise<FetchedText> {
+  let target = requestUrl;
+  const headers = new Headers();
+  if (pluginWfsSecurity && !isViteDevServer()) {
+    const parsed = new URL(requestUrl);
+    validatePluginWfsUrl(parsed);
+    const host = parsed.hostname.replace(/^\[|\]$/g, "");
+    const localHost =
+      host === "localhost" || host.endsWith(".localhost") || host === "127.0.0.1" || host === "::1";
+    const ipLiteral = host.includes(":") || /^\d{1,3}(?:\.\d{1,3}){3}$/.test(host);
+    if (!localHost && !ipLiteral) {
+      throw new Error(
+        "Plugin WFS in hosted web builds requires a public IP-literal URL; use GeoLibre Desktop for hostname-based services.",
+      );
+    }
+    if (parsed.username || parsed.password) {
+      const value = `${decodeURIComponent(parsed.username)}:${decodeURIComponent(parsed.password)}`;
+      const bytes = new TextEncoder().encode(value);
+      const binary = Array.from(bytes, (byte) => String.fromCharCode(byte)).join("");
+      headers.set("authorization", `Basic ${btoa(binary)}`);
+      parsed.username = "";
+      parsed.password = "";
+      target = parsed.toString();
+    }
+  }
+  const response = await fetch(target, {
+    signal,
+    ...(headers.has("authorization") ? { headers } : {}),
+    ...(pluginWfsSecurity && !isViteDevServer() ? { redirect: "error" as const } : {}),
+  });
   const contentType = response.headers.get("content-type");
   return {
     ok: response.ok,
@@ -318,13 +366,23 @@ async function fetchBrowserText(requestUrl: string, signal: AbortSignal): Promis
 // a non-2xx answer: a WFS rejects an unsupported outputFormat with an
 // ExceptionReport on a 400, and the format fallback has to read it. The Rust
 // call cannot be cancelled mid-flight, so it is raced against the signal.
-async function fetchNativeText(url: string, signal: AbortSignal): Promise<FetchedText> {
-  const { fetchUrlResponse } = await import("./native-http");
-  const pending = fetchUrlResponse(url, {
-    context: "WFS GetFeature",
-    timeoutSecs: Math.ceil(FETCH_TIMEOUT_MS / 1000),
-    maxBytes: WFS_MAX_RESPONSE_BYTES,
-  });
+async function fetchNativeText(
+  url: string,
+  signal: AbortSignal,
+  pluginWfsSecurity = false,
+): Promise<FetchedText> {
+  const { fetchUrlResponse, fetchPluginWfsResponse } = await import("./native-http");
+  const pending = pluginWfsSecurity
+    ? fetchPluginWfsResponse(url, {
+        context: "Plugin WFS GetFeature",
+        timeoutSecs: Math.ceil(FETCH_TIMEOUT_MS / 1000),
+        maxBytes: WFS_MAX_RESPONSE_BYTES,
+      })
+    : fetchUrlResponse(url, {
+        context: "WFS GetFeature",
+        timeoutSecs: Math.ceil(FETCH_TIMEOUT_MS / 1000),
+        maxBytes: WFS_MAX_RESPONSE_BYTES,
+      });
   // If the abort wins the race, the native call is left unobserved; swallow
   // its later rejection (the wrapper still logs it to diagnostics).
   pending.catch(() => {});
@@ -415,7 +473,7 @@ export async function fetchWfsGeoJson(
     maxFeatures?: string;
     bbox?: [number, number, number, number];
   },
-  options: { useWfsProxy?: boolean; signal?: AbortSignal } = {},
+  options: { useWfsProxy?: boolean; usePluginWfsSecurity?: boolean; signal?: AbortSignal } = {},
 ): Promise<{ data: FeatureCollection; url: string; outputFormat: string }> {
   const requested = params.outputFormat.trim();
   // Try the user's requested format first (when non-empty), then the remaining
@@ -928,6 +986,12 @@ function proxyWfsRequestUrl(url: string): string {
   // accepts absolute HTTP(S) targets.
   return isViteDevServer() && isHttpUrl(url)
     ? `${WFS_PROXY_PATH}?url=${encodeURIComponent(url)}`
+    : url;
+}
+
+function proxyPluginWfsRequestUrl(url: string): string {
+  return isViteDevServer() && isHttpUrl(url)
+    ? `${PLUGIN_WFS_PROXY_PATH}?url=${encodeURIComponent(url)}`
     : url;
 }
 

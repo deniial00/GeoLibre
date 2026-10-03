@@ -132,6 +132,60 @@ export function validatePublicUrl(urlString: string): string | null {
   }
   return null;
 }
+const PLUGIN_WFS_CREDENTIAL_QUERY_KEYS: Record<string, true> = {
+  token: true,
+  access_token: true,
+  api_key: true,
+  apikey: true,
+  key: true,
+  signature: true,
+  password: true,
+  secret: true,
+};
+
+function hasPluginWfsCredentials(url: URL): boolean {
+  return (
+    Boolean(url.username || url.password) ||
+    [...url.searchParams].some(
+      ([key, value]) =>
+        value !== "" && PLUGIN_WFS_CREDENTIAL_QUERY_KEYS[key.toLowerCase()] === true,
+    )
+  );
+}
+
+function pluginWfsLocalHttp(parsed: URL): boolean {
+  return (
+    parsed.protocol === "http:" &&
+    (parsed.hostname === "localhost" ||
+      parsed.hostname.endsWith(".localhost") ||
+      parsed.hostname === "127.0.0.1" ||
+      parsed.hostname === "[::1]")
+  );
+}
+
+function validatePluginWfsUrl(urlString: string): URL {
+  const parsed = new URL(urlString);
+  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+    throw new Error("Plugin WFS only supports HTTP(S)");
+  }
+  const localHost =
+    parsed.hostname === "localhost" ||
+    parsed.hostname.endsWith(".localhost") ||
+    parsed.hostname === "127.0.0.1" ||
+    parsed.hostname === "[::1]";
+  if (hasPluginWfsCredentials(parsed) && parsed.protocol !== "https:" && !localHost) {
+    throw new Error("Plugin WFS credentials require HTTPS (or HTTP localhost)");
+  }
+  if (!pluginWfsLocalHttp(parsed) && isPrivateHost(parsed.hostname)) {
+    throw new Error(`Blocked private/reserved address: ${parsed.hostname}`);
+  }
+  return parsed;
+}
+
+async function assertPluginWfsTarget(urlString: string, lookup?: typeof dnsLookup): Promise<void> {
+  const parsed = validatePluginWfsUrl(urlString);
+  if (!pluginWfsLocalHttp(parsed)) await assertResolvedPublicHost(parsed.hostname, lookup);
+}
 
 /**
  * Throws if `urlString` is not a safe, publicly-routable HTTP(S) URL.
@@ -193,7 +247,8 @@ function isPrivateIPv4(octets: number[]): boolean {
   if (a === 192 && b === 0 && octets[2] === 2) return true; // 192.0.2.0/24 TEST-NET-1
   if (a === 198 && (b === 18 || b === 19)) return true; // 198.18.0.0/15 benchmarking
   if (a === 198 && b === 51 && octets[2] === 100) return true; // 198.51.100.0/24 documentation
-  if (a === 203 && b === 0 && octets[2] === 113) return true; // 203.0.113.0/24 documentation
+  if (a === 192 && b === 88 && octets[2] === 99) return true; // deprecated 6to4 relay
+  if (a === 203 && b === 0 && octets[2] === 113) return true; // 203.0.113.0/24 TEST-NET-3
   if (a >= 224) return true; // 224.0.0.0+ multicast + reserved
   return false;
 }
@@ -223,6 +278,17 @@ function isPrivateIPv6(addr: string): boolean {
   // ULA fc00::/7
   if (Number.isFinite(firstHextet) && (firstHextet & 0xfe00) === 0xfc00) return true;
 
+  // Transition, documentation and protocol-assignment prefixes are not public
+  // destinations even though they sit inside global-unicast address space.
+  const secondHextet = parseInt(lower.split(":")[1] || "", 16);
+  if (
+    /^2002:/i.test(lower) ||
+    /^2001:0:/i.test(lower) ||
+    (firstHextet === 0x2001 &&
+      (secondHextet === 0x0db8 || secondHextet === 0x0010 || secondHextet === 0x0002))
+  ) {
+    return true;
+  }
   return false;
 }
 
@@ -366,40 +432,70 @@ export async function fetchWithGuard(
     fetchImpl?: (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
     /** Test-only DNS override used with `fetchImpl`. */
     lookup?: typeof dnsLookup;
+    /** Plugin WFS is public-only except unauthenticated HTTP localhost. */
+    pluginWfsSecurity?: boolean;
   } = {},
 ): Promise<Response> {
-  assertPublicHttpUrl(targetUrl);
+  const assertTarget = async (url: string): Promise<void> => {
+    if (options.pluginWfsSecurity) {
+      await assertPluginWfsTarget(url, options.lookup);
+    } else {
+      assertPublicHttpUrl(url);
+    }
+  };
+  await assertTarget(targetUrl);
   const timeoutMs = options.timeoutMs ?? PROXY_FETCH_TIMEOUT_MS;
   const fetchImpl = options.fetchImpl;
 
   let current = targetUrl;
+  let previous: URL | null = null;
   for (let hop = 0; hop <= PROXY_MAX_REDIRECT_HOPS; hop++) {
     const { signal: callerSignal, ...rest } = init;
     const signal = mergeAbortSignals(timeoutMs, callerSignal ?? null);
+    const currentUrl = new URL(current);
+    if (options.pluginWfsSecurity && previous && hasPluginWfsCredentials(previous)) {
+      if (previous.protocol === "https:" && currentUrl.protocol === "http:") {
+        throw new Error("Plugin WFS refused a credentialed HTTPS-to-HTTP redirect");
+      }
+      if (previous.origin !== currentUrl.origin) {
+        throw new Error("Plugin WFS refused to redirect credentials across origins");
+      }
+    }
+    const requestUrl = new URL(currentUrl);
+    const headers = new Headers(rest.headers);
+    if (options.pluginWfsSecurity && (requestUrl.username || requestUrl.password)) {
+      const credentials = `${decodeURIComponent(requestUrl.username)}:${decodeURIComponent(requestUrl.password)}`;
+      headers.set("authorization", `Basic ${Buffer.from(credentials).toString("base64")}`);
+      requestUrl.username = "";
+      requestUrl.password = "";
+    }
     let response: Response;
     if (fetchImpl) {
-      // No undici dispatcher on this path — resolve+validate before fetching.
-      await assertResolvedPublicHost(new URL(current).hostname, options.lookup);
-      response = await fetchImpl(current, {
+      if (!options.pluginWfsSecurity) {
+        await assertResolvedPublicHost(new URL(current).hostname, options.lookup);
+      }
+      response = await fetchImpl(requestUrl.toString(), {
         ...rest,
+        headers,
         signal,
         redirect: "manual",
       });
     } else {
-      response = (await undiciFetch(current, {
+      const localTarget = options.pluginWfsSecurity && pluginWfsLocalHttp(currentUrl);
+      response = (await undiciFetch(requestUrl.toString(), {
         ...rest,
+        headers,
         signal,
         redirect: "manual",
-        dispatcher: guardedDispatcher,
+        ...(localTarget ? {} : { dispatcher: guardedDispatcher }),
       })) as unknown as Response;
     }
-    if (!REDIRECT_STATUSES.has(response.status)) {
-      return response;
-    }
+    if (!REDIRECT_STATUSES.has(response.status)) return response;
     const location = response.headers.get("location");
     if (!location) return response;
-    const next = new URL(location, current).toString();
-    assertPublicHttpUrl(next);
+    const next = new URL(location, currentUrl).toString();
+    await assertTarget(next);
+    previous = currentUrl;
     current = next;
   }
   throw new Error("Too many proxy redirects");
@@ -921,6 +1017,7 @@ export async function proxyBinaryRequestGuarded(
   req: IncomingMessage,
   res: ServerResponse,
   proxyPath: string,
+  pluginWfsSecurity = false,
 ): Promise<void> {
   const requestUrl = new URL(req.url ?? "", `http://localhost${proxyPath}`);
   const target = requestUrl.searchParams.get("url");
@@ -931,12 +1028,22 @@ export async function proxyBinaryRequestGuarded(
     return;
   }
 
-  const urlErr = validatePublicUrl(target);
+  const urlErr = pluginWfsSecurity ? null : validatePublicUrl(target);
   if (urlErr) {
     res.statusCode = 502;
     res.setHeader("content-type", "text/plain");
     res.end(urlErr);
     return;
+  }
+  if (pluginWfsSecurity) {
+    try {
+      validatePluginWfsUrl(target);
+    } catch (error) {
+      res.statusCode = 502;
+      res.setHeader("content-type", "text/plain");
+      res.end(error instanceof Error ? error.message : "Plugin WFS target refused");
+      return;
+    }
   }
 
   const headers = new Headers();
@@ -945,10 +1052,8 @@ export async function proxyBinaryRequestGuarded(
 
   let response: Response;
   try {
-    response = await fetchWithGuard(target, { headers });
+    response = await fetchWithGuard(target, { headers }, { pluginWfsSecurity });
   } catch (err) {
-    // Do not echo err.message — resolved private IPs / undici connect details
-    // would turn this proxy into an internal-network disclosure oracle.
     console.warn("[vite-proxy-guard] upstream fetch blocked or failed:", err);
     res.statusCode = 502;
     res.setHeader("content-type", "text/plain");

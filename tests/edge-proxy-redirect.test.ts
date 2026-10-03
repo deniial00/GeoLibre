@@ -520,6 +520,151 @@ describe("Vite proxy guard — fetchWithGuard redirect policy", () => {
     );
     assert.equal(called, false);
   });
+  it("applies plugin WFS destination and credential rules at each hop", async () => {
+    let calls = 0;
+    const fetchImpl: typeof fetch = async (input, init) => {
+      calls++;
+      if (String(input) === "https://example.com/start") {
+        return new Response(null, {
+          status: 302,
+          headers: { location: "http://10.0.0.5/private" },
+        });
+      }
+      return new Response("unexpected", { status: 200 });
+    };
+    await assert.rejects(
+      () =>
+        fetchWithGuard(
+          "https://example.com/start",
+          {},
+          { fetchImpl, lookup: publicLookup, pluginWfsSecurity: true },
+        ),
+      /Blocked/,
+    );
+    assert.equal(calls, 1);
+
+    const credentialRedirect: typeof fetch = async () =>
+      new Response(null, {
+        status: 302,
+        headers: { location: "http://example.com/cleartext" },
+      });
+    await assert.rejects(
+      () =>
+        fetchWithGuard(
+          "https://user:secret@example.com/start",
+          {},
+          { fetchImpl: credentialRedirect, lookup: publicLookup, pluginWfsSecurity: true },
+        ),
+      /credentialed HTTPS-to-HTTP/,
+    );
+
+    const queryCredentialRedirect: typeof fetch = async () =>
+      new Response(null, {
+        status: 302,
+        headers: { location: "http://example.com/cleartext" },
+      });
+    await assert.rejects(
+      () =>
+        fetchWithGuard(
+          "https://example.com/start?token=hidden",
+          {},
+          {
+            fetchImpl: queryCredentialRedirect,
+            lookup: publicLookup,
+            pluginWfsSecurity: true,
+          },
+        ),
+      /credentialed HTTPS-to-HTTP/,
+    );
+    let crossOriginCalls = 0;
+    const crossOriginRedirect: typeof fetch = async () => {
+      crossOriginCalls++;
+      return new Response(null, {
+        status: 302,
+        headers: { location: "https://other.example/next" },
+      });
+    };
+    await assert.rejects(
+      () =>
+        fetchWithGuard(
+          "https://example.com/start?api_key=hidden",
+          {},
+          { fetchImpl: crossOriginRedirect, lookup: publicLookup, pluginWfsSecurity: true },
+        ),
+      /redirect credentials across origins/,
+    );
+    assert.equal(crossOriginCalls, 1);
+
+    const local: typeof fetch = async (_input, init) => {
+      assert.match(new Headers(init?.headers).get("authorization") ?? "", /^Basic /);
+      return new Response("ok", { status: 200 });
+    };
+    const localResponse = await fetchWithGuard(
+      "http://user:secret@localhost:8080/wfs",
+      {},
+      { fetchImpl: local, pluginWfsSecurity: true },
+    );
+    assert.equal(await localResponse.text(), "ok");
+  });
+
+  it("rejects credentialed cleartext plugin WFS endpoints before fetching", async () => {
+    let called = false;
+    const never: typeof fetch = async () => {
+      called = true;
+      return new Response("unexpected", { status: 200 });
+    };
+    await assert.rejects(
+      () =>
+        fetchWithGuard(
+          "http://user:secret@example.com/start",
+          {},
+          { fetchImpl: never, lookup: publicLookup, pluginWfsSecurity: true },
+        ),
+      /credentials require HTTPS/,
+    );
+    assert.equal(called, false);
+    await assert.rejects(
+      () =>
+        fetchWithGuard(
+          "http://example.com/start?token=secret",
+          {},
+          { fetchImpl: never, lookup: publicLookup, pluginWfsSecurity: true },
+        ),
+      /credentials require HTTPS/,
+    );
+    assert.equal(called, false);
+    await assert.rejects(
+      () =>
+        fetchWithGuard("http://10.0.0.1/wfs", {}, { fetchImpl: never, pluginWfsSecurity: true }),
+      /Blocked/,
+    );
+    assert.equal(called, false);
+    const privateDns = (async () => [{ address: "192.168.1.7", family: 4 as const }]) as never;
+    await assert.rejects(
+      () =>
+        fetchWithGuard(
+          "https://wfs.example.test/getfeature",
+          {},
+          { fetchImpl: never, lookup: privateDns, pluginWfsSecurity: true },
+        ),
+      /192\.168\.1\.7/,
+    );
+    assert.equal(called, false);
+    await assert.rejects(
+      () =>
+        fetchWithGuard(
+          "http://[::ffff:7f00:1]/wfs",
+          {},
+          { fetchImpl: never, pluginWfsSecurity: true },
+        ),
+      /Blocked/,
+    );
+    await assert.rejects(
+      () =>
+        fetchWithGuard("http://0x0a000001/wfs", {}, { fetchImpl: never, pluginWfsSecurity: true }),
+      /Blocked/,
+    );
+  });
 });
 
 describe("guarded connector DNS lookup", () => {

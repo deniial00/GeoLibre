@@ -1,5 +1,6 @@
 /**
  * Thin wrappers around the native Tauri HTTP commands (`fetch_url_bytes`,
+ * `fetch_url_response`, `fetch_plugin_wfs_response`, and
  * `resolve_url_redirect`) that record every call in the Diagnostics network log.
  *
  * These commands run in Rust and never pass through `window.fetch`, so the
@@ -15,7 +16,11 @@ import { appendDiagnostic, formatUnknown, type DiagnosticInput } from "./diagnos
 import { classifyFetchFailure } from "./fetch-error";
 
 /** The native HTTP commands exposed by the Tauri backend. */
-export type NativeHttpCommand = "fetch_url_bytes" | "fetch_url_response" | "resolve_url_redirect";
+export type NativeHttpCommand =
+  | "fetch_url_bytes"
+  | "fetch_url_response"
+  | "fetch_plugin_wfs_response"
+  | "resolve_url_redirect";
 
 interface NativeHttpOptions {
   /** Short feature label (e.g. "WFS GetCapabilities") added to the record. */
@@ -39,6 +44,45 @@ interface FetchUrlBytesOptions extends NativeHttpOptions {
   /** Optional response byte limit, enforced while the native body is read. */
   maxBytes?: number;
 }
+const PLUGIN_WFS_CREDENTIAL_QUERY_KEYS: Record<string, true> = {
+  token: true,
+  access_token: true,
+  api_key: true,
+  apikey: true,
+  key: true,
+  signature: true,
+  password: true,
+  secret: true,
+};
+
+function diagnosticUrl(command: NativeHttpCommand, url: string): string {
+  if (command !== "fetch_plugin_wfs_response") return url;
+  try {
+    const parsed = new URL(url);
+    parsed.username = "";
+    parsed.password = "";
+    const keys = [...parsed.searchParams.keys()];
+    for (const key of keys) {
+      if (PLUGIN_WFS_CREDENTIAL_QUERY_KEYS[key.toLowerCase()]) {
+        parsed.searchParams.set(key, "[redacted]");
+      }
+    }
+    return parsed.toString();
+  } catch {
+    return url;
+  }
+}
+
+function diagnosticError(command: NativeHttpCommand, error: unknown): string {
+  const text = formatUnknown(error);
+  if (command !== "fetch_plugin_wfs_response") return text;
+  return text
+    .replace(/(https?:\/\/)[^/@\s]+@/gi, "$1[credentials]@")
+    .replace(
+      /([?&](?:token|access_token|api_key|apikey|key|signature|password|secret)=)[^&#\s]*/gi,
+      "$1[redacted]",
+    );
+}
 
 function recordSource(command: NativeHttpCommand, context?: string): string {
   return context ? `native ${command} — ${context}` : `native ${command}`;
@@ -61,7 +105,7 @@ export function nativeHttpSuccessRecord(
     durationMs,
     method: "GET",
     source: recordSource(command, context),
-    url,
+    url: diagnosticUrl(command, url),
   };
 }
 
@@ -78,7 +122,7 @@ export function nativeHttpFailureRecord(
   context?: string,
 ): DiagnosticInput {
   const { kind, label, hint } = classifyFetchFailure(error);
-  const rawError = formatUnknown(error);
+  const rawError = diagnosticError(command, error);
   return {
     category: "network",
     level: "error",
@@ -90,7 +134,7 @@ export function nativeHttpFailureRecord(
     durationMs,
     method: "GET",
     source: recordSource(command, context),
-    url,
+    url: diagnosticUrl(command, url),
   };
 }
 
@@ -111,7 +155,7 @@ async function invokeNativeHttp<T>(
     appendDiagnostic(
       nativeHttpSuccessRecord(
         command,
-        url,
+        diagnosticUrl(command, url),
         Math.round(performance.now() - startedAt),
         options?.context,
       ),
@@ -121,7 +165,7 @@ async function invokeNativeHttp<T>(
     appendDiagnostic(
       nativeHttpFailureRecord(
         command,
-        url,
+        diagnosticUrl(command, url),
         error,
         Math.round(performance.now() - startedAt),
         options?.context,
@@ -174,6 +218,22 @@ export async function fetchUrlResponse(
     content_type: string | null;
     body: number[] | Uint8Array;
   }>("fetch_url_response", url, options);
+  return {
+    status: raw.status,
+    contentType: raw.content_type,
+    body: raw.body instanceof Uint8Array ? raw.body : new Uint8Array(raw.body),
+  };
+}
+/** Fetches a plugin WFS response through the stricter public-destination policy. */
+export async function fetchPluginWfsResponse(
+  url: string,
+  options?: FetchUrlBytesOptions,
+): Promise<NativeHttpResponse> {
+  const raw = await invokeNativeHttp<{
+    status: number;
+    content_type: string | null;
+    body: number[] | Uint8Array;
+  }>("fetch_plugin_wfs_response", url, options);
   return {
     status: raw.status,
     contentType: raw.content_type,

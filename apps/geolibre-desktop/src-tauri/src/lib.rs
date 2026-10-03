@@ -474,8 +474,8 @@ pub fn run() {
             close_oauth_popups,
             native_duckdb::count_native_vector_file_features,
             ensure_martin_binary,
-            fetch_url_bytes,
             fetch_url_response,
+            fetch_plugin_wfs_response,
             arcgis_http::fetch_arcgis_response,
             arcgis_http::cancel_arcgis_request,
             aws_credentials::aws_list_profiles,
@@ -1409,6 +1409,234 @@ fn ensure_fetchable_url(url: &str) -> Result<(), String> {
     let parsed = reqwest::Url::parse(url).map_err(|error| format!("Invalid URL: {error}"))?;
     url_is_fetchable(&parsed)
 }
+fn plugin_wfs_non_public_ip(ip: std::net::IpAddr) -> bool {
+    use std::net::IpAddr;
+    match ip {
+        IpAddr::V4(ip) => {
+            let [a, b, c, _] = ip.octets();
+            ip.is_private()
+                || ip.is_loopback()
+                || ip.is_link_local()
+                || ip.is_unspecified()
+                || ip.is_broadcast()
+                || ip.is_multicast()
+                || a == 0
+                || (a == 100 && (64..=127).contains(&b))
+                || (a == 192 && ((b == 0 && (c == 0 || c == 2)) || b == 168))
+                || (a == 192 && b == 88 && c == 99)
+                || (a == 198 && (b == 18 || b == 19))
+                || (a == 198 && b == 51 && c == 100)
+                || (a == 203 && b == 0 && c == 113)
+                || a >= 224
+        }
+        IpAddr::V6(ip) => {
+            let segments = ip.segments();
+            let embedded = ip.to_ipv4().or_else(|| {
+                let encoded = if segments[0] == 0x2002 {
+                    Some((segments[1], segments[2]))
+                } else if segments[0] == 0x2001 && segments[1] == 0 {
+                    Some((!segments[6], !segments[7]))
+                } else {
+                    None
+                }?;
+                Some(std::net::Ipv4Addr::new(
+                    (encoded.0 >> 8) as u8,
+                    encoded.0 as u8,
+                    (encoded.1 >> 8) as u8,
+                    encoded.1 as u8,
+                ))
+            });
+            ip.is_loopback()
+                || ip.is_unspecified()
+                || ip.is_multicast()
+                || ip.is_unique_local()
+                || ip.is_unicast_link_local()
+                || segments[0] == 0x2002
+                || (segments[0] == 0x2001
+                    && (segments[1] == 0
+                        || segments[1] == 0x0db8
+                        || segments[1] == 0x0010
+                        || segments[1] == 0x0002))
+                || embedded.is_some_and(|v4| plugin_wfs_non_public_ip(IpAddr::V4(v4)))
+        }
+    }
+}
+
+fn plugin_wfs_address_is_allowed(host: &str, address: std::net::IpAddr) -> bool {
+    let local_host = host.eq_ignore_ascii_case("localhost")
+        || host.to_ascii_lowercase().ends_with(".localhost")
+        || host
+            .parse::<std::net::IpAddr>()
+            .is_ok_and(|literal| literal.is_loopback());
+    if local_host {
+        address.is_loopback()
+    } else {
+        !plugin_wfs_non_public_ip(address)
+    }
+}
+
+struct PluginWfsDnsResolver;
+
+impl reqwest::dns::Resolve for PluginWfsDnsResolver {
+    fn resolve(&self, name: reqwest::dns::Name) -> reqwest::dns::Resolving {
+        use std::net::ToSocketAddrs;
+        Box::pin(async move {
+            let host = name.as_str().to_string();
+            let addresses = (host.as_str(), 0u16)
+                .to_socket_addrs()
+                .map_err(|error| Box::new(error) as Box<dyn std::error::Error + Send + Sync>)?
+                .filter(|address| plugin_wfs_address_is_allowed(&host, address.ip()))
+                .collect::<Vec<_>>();
+            if addresses.is_empty() {
+                return Err(SSRF_BLOCKED_MESSAGE.into());
+            }
+            Ok(Box::new(addresses.into_iter()) as reqwest::dns::Addrs)
+        })
+    }
+}
+
+fn plugin_wfs_has_credentials(url: &reqwest::Url) -> bool {
+    const KEYS: &[&str] = &[
+        "token",
+        "access_token",
+        "api_key",
+        "apikey",
+        "key",
+        "signature",
+        "password",
+        "secret",
+    ];
+    !url.username().is_empty()
+        || url.password().is_some()
+        || url.query_pairs().any(|(key, value)| {
+            !value.is_empty()
+                && KEYS
+                    .iter()
+                    .any(|candidate| key.eq_ignore_ascii_case(candidate))
+        })
+}
+
+fn plugin_wfs_same_origin(a: &reqwest::Url, b: &reqwest::Url) -> bool {
+    a.scheme() == b.scheme()
+        && a.host_str() == b.host_str()
+        && a.port_or_known_default() == b.port_or_known_default()
+}
+
+fn plugin_wfs_url_is_safe(url: &reqwest::Url) -> Result<(), String> {
+    use std::net::{IpAddr, ToSocketAddrs};
+    let scheme = url.scheme();
+    if scheme != "http" && scheme != "https" {
+        return Err("Plugin WFS only supports HTTP(S)".to_string());
+    }
+    let has_credentials = plugin_wfs_has_credentials(url);
+    let host = url
+        .host_str()
+        .ok_or_else(|| "URL has no host".to_string())?;
+    let local = host.eq_ignore_ascii_case("localhost")
+        || host.to_ascii_lowercase().ends_with(".localhost")
+        || host.eq_ignore_ascii_case("127.0.0.1")
+        || host.eq_ignore_ascii_case("::1");
+    if has_credentials && scheme != "https" && !(scheme == "http" && local) {
+        return Err("Plugin WFS credentials require HTTPS (or HTTP localhost)".to_string());
+    }
+    if scheme == "http" && local {
+        return Ok(());
+    }
+    let is_non_public = |ip: IpAddr| plugin_wfs_non_public_ip(ip);
+    if let Ok(ip) = host.parse::<IpAddr>() {
+        return if is_non_public(ip) {
+            Err(SSRF_BLOCKED_MESSAGE.to_string())
+        } else {
+            Ok(())
+        };
+    }
+    for address in (host, url.port_or_known_default().unwrap_or(0))
+        .to_socket_addrs()
+        .map_err(|error| format!("Could not resolve host {host}: {error}"))?
+    {
+        if is_non_public(address.ip()) {
+            return Err(SSRF_BLOCKED_MESSAGE.to_string());
+        }
+    }
+    Ok(())
+}
+
+fn plugin_wfs_redirect_error(
+    previous: &[reqwest::Url],
+    next: &reqwest::Url,
+) -> Option<&'static str> {
+    if let Some(source) = previous
+        .last()
+        .filter(|url| plugin_wfs_has_credentials(url))
+    {
+        if source.scheme() == "https" && next.scheme() == "http" {
+            return Some("Plugin WFS refused a credentialed HTTPS-to-HTTP redirect");
+        }
+        if !plugin_wfs_same_origin(source, next) {
+            return Some("Plugin WFS refused to redirect credentials across origins");
+        }
+    }
+    plugin_wfs_url_is_safe(next)
+        .err()
+        .map(|_| SSRF_BLOCKED_MESSAGE)
+}
+
+fn plugin_wfs_redirect_policy() -> reqwest::redirect::Policy {
+    reqwest::redirect::Policy::custom(|attempt| {
+        if attempt.previous().len() >= MAX_HTTP_REDIRECTS {
+            return attempt.stop();
+        }
+        match plugin_wfs_redirect_error(attempt.previous(), attempt.url()) {
+            Some(error) => attempt.error(error),
+            None => attempt.follow(),
+        }
+    })
+}
+
+#[tauri::command]
+async fn fetch_plugin_wfs_response(
+    url: String,
+    timeout_secs: Option<u64>,
+    max_bytes: Option<u64>,
+) -> Result<NativeHttpResponse, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let parsed = reqwest::Url::parse(&url).map_err(|error| format!("Invalid URL: {error}"))?;
+        plugin_wfs_url_is_safe(&parsed)?;
+        let client = build_guarded_http_client_with_resolver(
+            plugin_wfs_redirect_policy(),
+            std::sync::Arc::new(PluginWfsDnsResolver),
+        )?;
+        let response = client
+            .get(parsed)
+            .timeout(Duration::from_secs(resolve_fetch_timeout_secs(
+                timeout_secs,
+            )))
+            .send()
+            .map_err(|error| request_error_message(&error))?;
+        let status = response.status().as_u16();
+        let content_type = response
+            .headers()
+            .get(reqwest::header::CONTENT_TYPE)
+            .and_then(|value| value.to_str().ok())
+            .map(str::to_owned);
+        let body = if let Some(limit) = max_bytes {
+            let content_length = response.content_length();
+            http_body::read_limited_body(response, content_length, limit)?
+        } else {
+            response
+                .bytes()
+                .map(|bytes| bytes.to_vec())
+                .map_err(|error| format!("Could not read response body: {error}"))?
+        };
+        Ok(NativeHttpResponse {
+            status,
+            content_type,
+            body,
+        })
+    })
+    .await
+    .map_err(|error| format!("Plugin WFS fetch task failed: {error}"))?
+}
 
 /// A redirect policy that re-applies [`url_is_fetchable`] to every hop, so a
 /// public URL that 3xx-redirects to an internal address is not followed.
@@ -1639,19 +1867,22 @@ fn guarded_http_client() -> Result<reqwest::blocking::Client, String> {
 }
 
 fn build_guarded_http_client() -> Result<reqwest::blocking::Client, String> {
-    build_guarded_http_client_with_redirects(guarded_redirect_policy())
+    build_guarded_http_client_with_resolver(
+        guarded_redirect_policy(),
+        std::sync::Arc::new(GuardedDnsResolver),
+    )
 }
 
-fn build_guarded_http_client_with_redirects(
+fn build_guarded_http_client_with_resolver<R: reqwest::dns::Resolve + 'static>(
     redirects: reqwest::redirect::Policy,
+    resolver: std::sync::Arc<R>,
 ) -> Result<reqwest::blocking::Client, String> {
-    // The SSRF guard (GuardedDnsResolver + redirect re-validation) is applied
-    // here, independent of the TLS backend chosen below, so it holds on both the
-    // rustls and native-tls paths.
+    // Apply the request-specific SSRF resolver and redirect policy with the
+    // same CA and mutual-TLS configuration as the general native HTTP client.
     let mut builder = reqwest::blocking::Client::builder()
         .connect_timeout(Duration::from_secs(REMOTE_TILE_CONNECT_TIMEOUT_SECS))
         .redirect(redirects)
-        .dns_resolver(std::sync::Arc::new(GuardedDnsResolver))
+        .dns_resolver(resolver)
         .user_agent("GeoLibre Desktop");
 
     for certificate in extra_ca_certificates()? {
@@ -4886,7 +5117,8 @@ mod tests {
         client_cert_is_pkcs12, client_cert_password_without_path, ensure_fetchable_url,
         is_allowed_geojson_write_path, is_allowed_local_vector_path, is_allowed_project_path,
         is_disallowed_ip, is_image_picker_path, is_persisted_image_file, is_safe_absolute_path,
-        is_ssrf_guard_error, is_unc_resolved_path, path_is_under, project_path_string,
+        is_ssrf_guard_error, is_unc_resolved_path, path_is_under, plugin_wfs_address_is_allowed,
+        plugin_wfs_redirect_error, plugin_wfs_url_is_safe, project_path_string,
         project_paths_from_args, read_mbtiles_zoom_range, resolve_fetch_timeout_secs,
         tcp_table_port, write_local_geojson_file, MAX_FETCH_TIMEOUT_SECS, REMOTE_TILE_TIMEOUT_SECS,
         SSRF_BLOCKED_MESSAGE,
@@ -5434,6 +5666,58 @@ mod tests {
         assert!(ensure_fetchable_url("https://1.1.1.1/").is_ok());
         assert!(ensure_fetchable_url("http://127.0.0.1:8081/tiles/0/0/0.png").is_ok());
         assert!(ensure_fetchable_url("http://[::1]:8081/data.pmtiles").is_ok());
+    }
+    #[test]
+    fn plugin_wfs_blocks_private_targets_and_credential_downgrades() {
+        let loopback = reqwest::Url::parse("http://127.0.0.1:8080/wfs").unwrap();
+        let private = reqwest::Url::parse("http://10.0.0.1/wfs").unwrap();
+        let octal_private = reqwest::Url::parse("http://0x0a000001/wfs").unwrap();
+        let mapped_loopback = reqwest::Url::parse("http://[::ffff:7f00:1]/wfs").unwrap();
+        let credentialed_http = reqwest::Url::parse("http://user:secret@example.com/wfs").unwrap();
+        let credentialed_https =
+            reqwest::Url::parse("https://user:secret@example.com/wfs").unwrap();
+        let public_http = reqwest::Url::parse("http://example.com/wfs").unwrap();
+        assert!(plugin_wfs_url_is_safe(&loopback).is_ok());
+        assert!(plugin_wfs_url_is_safe(&private).is_err());
+        assert!(plugin_wfs_url_is_safe(&octal_private).is_err());
+        assert!(plugin_wfs_url_is_safe(&mapped_loopback).is_err());
+        assert!(plugin_wfs_url_is_safe(&credentialed_http).is_err());
+        assert_eq!(
+            plugin_wfs_redirect_error(&[credentialed_https], &public_http),
+            Some("Plugin WFS refused a credentialed HTTPS-to-HTTP redirect")
+        );
+        let query_credential_http =
+            reqwest::Url::parse("http://example.com/wfs?token=secret").unwrap();
+        let query_credential_https =
+            reqwest::Url::parse("https://example.com/wfs?api_key=secret").unwrap();
+        let https_other_origin = reqwest::Url::parse("https://other.example/wfs").unwrap();
+        assert!(plugin_wfs_url_is_safe(&query_credential_http).is_err());
+        assert!(plugin_wfs_url_is_safe(&query_credential_https).is_ok());
+        assert_eq!(
+            plugin_wfs_redirect_error(&[query_credential_https.clone()], &public_http),
+            Some("Plugin WFS refused a credentialed HTTPS-to-HTTP redirect")
+        );
+        assert_eq!(
+            plugin_wfs_redirect_error(&[query_credential_https], &https_other_origin),
+            Some("Plugin WFS refused to redirect credentials across origins")
+        );
+    }
+
+    #[test]
+    fn plugin_wfs_resolver_allows_loopback_only_for_local_destinations() {
+        let loopback = "127.0.0.1".parse().unwrap();
+        let public = "8.8.8.8".parse().unwrap();
+        assert!(plugin_wfs_address_is_allowed("localhost", loopback));
+        assert!(plugin_wfs_address_is_allowed("127.0.0.1", loopback));
+        assert!(!plugin_wfs_address_is_allowed("localhost", public));
+        assert!(!plugin_wfs_address_is_allowed(
+            "services.example.org",
+            loopback
+        ));
+        assert!(plugin_wfs_address_is_allowed(
+            "services.example.org",
+            public
+        ));
     }
 
     #[test]

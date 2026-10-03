@@ -91,9 +91,34 @@ describe("WFS GetFeature on desktop", () => {
         : { status: 400, content_type: "text/xml", body: EXCEPTION };
     const { useAppStore } = await import("@geolibre/core");
     const { addPluginWfsLayer } = await import("../apps/geolibre-desktop/src/lib/plugin-wfs-layer");
+    await assert.rejects(
+      () =>
+        addPluginWfsLayer("Private", {
+          url: "http://10.0.0.1/wfs",
+          typeName: "ms:Reda",
+        }),
+      /public destination/,
+    );
+    await assert.rejects(
+      () =>
+        addPluginWfsLayer("RFC1918", {
+          url: "http://172.16.0.1/wfs",
+          typeName: "ms:Reda",
+        }),
+      /public destination/,
+    );
+    assert.equal(calls.length, 0);
+    await assert.rejects(
+      () =>
+        addPluginWfsLayer("Cleartext token", {
+          url: "http://wfs.example.test/wfs?token=secret",
+          typeName: "ms:Reda",
+        }),
+      /credentials require HTTPS/,
+    );
     useAppStore.getState().newProject({ name: "Native plugin WFS" });
     const id = await addPluginWfsLayer("Native", {
-      url: "https://mapy.example.pl/wfs",
+      url: "https://mapy.example.pl/wfs?token=secret",
       typeName: "ms:Reda",
       bbox: [10, 40, 12, 42],
     });
@@ -101,8 +126,17 @@ describe("WFS GetFeature on desktop", () => {
     assert.ok(layer);
     assert.deepEqual((layer.geojson?.features[0].geometry as Point).coordinates, [14.11, 54.44]);
     assert.ok(calls.length > 1);
-    assert.ok(calls.every((call) => call.cmd === "fetch_url_response"));
+    assert.ok(calls.every((call) => call.cmd === "fetch_plugin_wfs_response"));
     assert.ok(calls.every((call) => new URL(call.url).searchParams.has("bbox")));
+    calls.length = 0;
+    const localId = await addPluginWfsLayer("Local WFS", {
+      url: "http://localhost:8081/wfs",
+      typeName: "ms:Reda",
+    });
+    assert.ok(useAppStore.getState().layers.some((item) => item.id === localId));
+    assert.ok(calls.length > 0);
+    assert.ok(calls.every((call) => call.cmd === "fetch_plugin_wfs_response"));
+    assert.ok(calls.every((call) => new URL(call.url).protocol === "http:"));
   });
 
   it("retries a request once when the connection drops", async () => {

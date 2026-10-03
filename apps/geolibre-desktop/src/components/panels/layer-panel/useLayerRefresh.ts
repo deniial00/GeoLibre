@@ -296,15 +296,12 @@ export function useLayerRefresh({ layers, isCollapsed }: UseLayerRefreshOptions)
           featureCount,
           metadata: refreshedMetadata,
         } = await refreshGeoJsonLayer(layer);
-        const latestBeforeWrite = useAppStore
-          .getState()
-          .layers.find((candidate) => candidate.id === layer.id);
+        const latest = useAppStore.getState().layers.find((candidate) => candidate.id === layer.id);
         if (
           requestGeneration !== useAppStore.getState().projectGeneration ||
-          latestBeforeWrite?.source.url !== requestSourceUrl
+          latest?.source.url !== requestSourceUrl
         )
           return;
-        const latest = useAppStore.getState().layers.find((candidate) => candidate.id === layer.id);
         if (!latest) return;
 
         updateLayer(layer.id, {
@@ -333,16 +330,13 @@ export function useLayerRefresh({ layers, isCollapsed }: UseLayerRefreshOptions)
         }));
         scheduleStatusClear(layer.id);
       } catch (error) {
-        const latestForError = useAppStore
-          .getState()
-          .layers.find((candidate) => candidate.id === layer.id);
+        const latest = useAppStore.getState().layers.find((candidate) => candidate.id === layer.id);
         if (
           requestGeneration !== useAppStore.getState().projectGeneration ||
-          latestForError?.source.url !== requestSourceUrl
+          latest?.source.url !== requestSourceUrl
         )
           return;
         const message = error instanceof Error ? error.message : t("layers.refreshError");
-        const latest = useAppStore.getState().layers.find((candidate) => candidate.id === layer.id);
         if (latest) {
           updateLayer(layer.id, {
             ...setLayerConnectionResult(latest, { error: message }),

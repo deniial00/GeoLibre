@@ -742,6 +742,44 @@ describe("project parsing", () => {
     assert.ok(ordinaryGeoJson.layers[0].geojson);
   });
 
+  it("preserves edited host WFS geometry as authoritative embedded data", () => {
+    const editedGeojson = {
+      type: "FeatureCollection" as const,
+      features: [
+        {
+          type: "Feature" as const,
+          properties: { name: "Edited road" },
+          geometry: { type: "Point" as const, coordinates: [3, 4] as [number, number] },
+        },
+      ],
+    };
+    const layer = geojsonLayer({
+      id: "wfs-geometry-edited",
+      name: "Edited WFS",
+      geojson: editedGeojson,
+      source: { type: "geojson", url: "https://example.test/wfs?request=GetFeature" },
+      metadata: { sourceKind: "wfs-getfeature", geometryEdited: true },
+    });
+    const project = projectFromStore({
+      projectName: "Edited WFS",
+      mapView: { center: [0, 0], zoom: 2, bearing: 0, pitch: 0 },
+      basemapStyleUrl: DEFAULT_BASEMAP,
+      basemapVisible: true,
+      basemapOpacity: 1,
+      layers: [layer],
+      preferences: createEmptyProject().preferences,
+      metadata: {},
+    });
+    const saved = parseProject(serializeProject(project));
+    const savedLayer = saved.layers[0];
+
+    assert.equal(layer.source.url, "https://example.test/wfs?request=GetFeature");
+    assert.equal(savedLayer.source.url, undefined);
+    assert.deepEqual(savedLayer.geojson, editedGeojson);
+    assert.equal(savedLayer.metadata.geometryEdited, undefined);
+    assert.deepEqual(parseProject(serializeProject(saved)).layers[0].geojson, editedGeojson);
+  });
+
   it("keeps geojson for external native layers without a restorable source URL", () => {
     const project = projectFromStore({
       projectName: "Native File",

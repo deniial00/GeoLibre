@@ -24,3 +24,10 @@ export function embedEditedGeometry(layer: GeoLibreLayer): GeoLibreLayer {
         : metadata,
   };
 }
+/** Honor an explicit no-embed choice for edited WFS layers. */
+export function discardEditedWfsGeometry(layer: GeoLibreLayer): GeoLibreLayer {
+  if (!hasEditedGeometry(layer) || layer.metadata.sourceKind !== "wfs-getfeature") return layer;
+  const { geojson: _geojson, ...rest } = layer;
+  const { geometryEdited: _edited, ...metadata } = layer.metadata;
+  return { ...rest, metadata };
+}

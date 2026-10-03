@@ -778,6 +778,10 @@ const cogId = await app.addCogLayer?.(
 
 WFS layers use the host's GetFeature loader, including GeoJSON/GML fallback, reprojection, desktop native HTTP, and refresh. `addWfsLayer` resolves with the new layer id and rejects if loading fails or the service returns no features. Saved projects keep the request URL rather than embedding the downloaded collection; reopening fetches it again. The optional bbox is WGS84 `[west, south, east, north]`; the host applies the existing 1,000-feature limit.
 
+Plugin WFS requests are restricted to public HTTP(S) destinations, with HTTP loopback (`localhost`, `127.0.0.1`, or `::1`) retained for local development. Desktop and Vite development validate DNS answers and every redirect hop, rejecting private, loopback (except local HTTP), link-local, and reserved destinations. URL userinfo (`username:password@`) and non-empty `token`, `access_token`, `api_key`, `apikey`, `key`, `signature`, `password`, or `secret` query values are treated as credentials: they are accepted only over HTTPS or HTTP localhost, and credentialed redirects may not change origin or downgrade HTTPS to HTTP. In hosted browser builds, redirects are rejected and only public IP-literal destinations (plus localhost) are supported: browser `fetch` cannot inspect or pin DNS, so hostname-based WFS endpoints are refused. Use GeoLibre Desktop or Vite development for hostname-based WFS services; a production proxy could restore that support later.
+
+The example hostname works in GeoLibre Desktop and Vite development; hosted browser deployments must substitute a public IP literal.
+
 ```typescript
 const layerId = await app.addWfsLayer?.("Roads", {
   url: "https://services.example.org/geoserver/wfs",

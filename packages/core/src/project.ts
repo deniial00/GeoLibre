@@ -1867,6 +1867,7 @@ function hasRestorableSourceUrl(layer: GeoLibreLayer): boolean {
 }
 
 function prepareLayerForSave(layer: GeoLibreLayer): GeoLibreLayer {
+  const hasGeometryEdits = layer.metadata.geometryEdited === true;
   layer = portableLayer(layer);
   // This flag describes unsaved changes to the live source, not persisted
   // project state. A reference-only save reloads the original geometries;
@@ -1942,17 +1943,23 @@ function prepareLayerForSave(layer: GeoLibreLayer): GeoLibreLayer {
   }
 
   // Host-managed WFS records reload through their persisted successful
-  // GetFeature URL. Keep the feature collection live for rendering/editing,
-  // but omit it from reference-backed project copies. Explicit embedded edits
-  // remove source.url before reaching this path and remain authoritative.
+  // GetFeature URL. Keep unedited feature collections reference-only in saved
+  // projects. Edited geometry becomes authoritative embedded data, so omit
+  // the request URL in that saved copy; otherwise a later save/reopen could
+  // replace the edits with the service response.
   if (
     layer.type === "geojson" &&
     layer.metadata.sourceKind === "wfs-getfeature" &&
     layer.geojson &&
     hasHttpWfsSource
   ) {
-    const { geojson: _geojson, ...rest } = layer;
-    layer = rest;
+    if (hasGeometryEdits) {
+      const { url: _url, ...source } = layer.source;
+      layer = { ...layer, source };
+    } else {
+      const { geojson: _geojson, ...rest } = layer;
+      layer = rest;
+    }
   }
 
   // An Add Vector Layer layer GeoLibre adopted (`maplibre-gl-vector-adopted`,

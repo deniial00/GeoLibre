@@ -520,6 +520,7 @@ function gdal3CdnPaths(): { wasm: string; data: string } | null {
 const GDAL3_CDN_PATHS = gdal3CdnPaths();
 const WMS_PROXY_PATH = "/__geolibre_wms_proxy";
 const WFS_PROXY_PATH = "/__geolibre_wfs_proxy";
+const PLUGIN_WFS_PROXY_PATH = "/__geolibre_plugin_wfs_proxy";
 const CSW_PROXY_PATH = "/__geolibre_csw_proxy";
 const GPX_PROXY_PATH = "/__geolibre_gpx_proxy";
 const CELESTRAK_PROXY_PATH = "/__geolibre_celestrak";
@@ -783,6 +784,15 @@ function wmsProxyPlugin(): Plugin {
           res.statusCode = 502;
           res.setHeader("content-type", "text/plain");
           res.end(message);
+        }
+      });
+      server.middlewares.use(PLUGIN_WFS_PROXY_PATH, async (req, res) => {
+        try {
+          await proxyBinaryRequestGuarded(req, res, PLUGIN_WFS_PROXY_PATH, true);
+        } catch {
+          res.statusCode = 502;
+          res.setHeader("content-type", "text/plain");
+          res.end("Plugin WFS proxy request failed");
         }
       });
       server.middlewares.use(CSW_PROXY_PATH, async (req, res) => {
