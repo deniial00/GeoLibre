@@ -24,7 +24,7 @@ import {
   type BrowserFilePickerType,
   type BrowserFilePickerWindow,
 } from "./file-dialogs";
-import { isHttpUrl } from "./paths";
+import { isGeoLibreProjectFileName, isHttpUrl } from "./paths";
 import { isAbortError } from "./shared";
 
 const GEOLIBRE_PROJECT_FILE_TYPES: BrowserFilePickerType[] = [
@@ -290,14 +290,14 @@ export async function openRecentProjectFile(
 
   let text: string;
   try {
-    // A content URI is not a filesystem path, so `read_project_file` refuses it
-    // outright; the `fs` plugin resolves it through Android's ContentResolver
-    // instead. That succeeds while the picker's read grant is still alive —
-    // reopening from Open Recent in the same session — and fails once the
-    // process has restarted, which the stored copy below covers.
-    text = isAndroidContentUri(path)
-      ? await readTextFile(path)
-      : await invoke<string>("read_project_file", { path });
+    // Content URIs use the fs plugin's ContentResolver; generic JSON uses its
+    // filesystem scope. Canonical project files retain the guarded native
+    // reader so OS-opened projects without picker grants still reopen.
+    text =
+      isAndroidContentUri(path) ||
+      (path.toLowerCase().endsWith(".json") && !isGeoLibreProjectFileName(path))
+        ? await readTextFile(path)
+        : await invoke<string>("read_project_file", { path });
   } catch (error) {
     // Fall back to the copy kept for exactly this project, if there is one
     // (GeoLibre#1948). Only Android content URIs ever have one, and the source

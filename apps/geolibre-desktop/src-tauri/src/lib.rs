@@ -703,18 +703,17 @@ fn take_pending_project_paths(state: tauri::State<'_, PendingProjectPaths>) -> V
 
 /// Whether `read_project_file` may read `path`: an absolute local path (POSIX
 /// `/...` or a Windows drive-letter `C:\...`, never a UNC `\\host\share`), free
-/// of `..` traversal, ending in a GeoLibre project extension — `.geolibre` or
-/// `.geolibre.json`. These are the canonical formats `saveProject` writes and
-/// `isGeoLibreProjectFileName` recognizes in `file-io/paths.ts`.
+/// of `..` traversal and ending in a canonical GeoLibre project extension —
+/// `.geolibre` or `.geolibre.json`. Generic JSON projects use the filesystem
+/// plugin's permission scope instead.
 ///
 /// Without this, the command was an arbitrary local-file reader: any webview JS
 /// or loaded plugin could `invoke("read_project_file", { path: "~/.ssh/id_rsa" })`
 /// and receive the contents. A bare `.json` extension is deliberately NOT
 /// accepted: plenty of real secrets are JSON (GCP service-account keys,
-/// `application_default_credentials.json`, editor/CLI configs with tokens), so
-/// requiring the `.geolibre` marker keeps those out while still reading every
-/// real project. Byte-oriented like `is_allowed_local_vector_path` so Windows
-/// paths behave the same on any host.
+/// `application_default_credentials.json`, editor/CLI configs with tokens).
+/// Byte-oriented like `is_allowed_local_vector_path` so Windows paths behave
+/// the same on any host.
 pub(crate) fn is_allowed_project_path(path: &str) -> bool {
     let bytes = path.as_bytes();
     let is_separator = |byte: u8| byte == b'/' || byte == b'\\';
@@ -745,7 +744,7 @@ pub(crate) fn is_allowed_project_path(path: &str) -> bool {
 fn read_project_file(path: String) -> Result<String, String> {
     if !is_allowed_project_path(&path) {
         return Err(format!(
-            "Refusing to read \"{path}\": not an absolute local project file path"
+            "Refusing to read \"{path}\": expected an absolute local path without '..' traversal ending in .geolibre or .geolibre.json"
         ));
     }
     // Resolve symlinks and re-check the extension, so a symlink named
