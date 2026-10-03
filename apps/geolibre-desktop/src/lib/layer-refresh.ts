@@ -159,6 +159,7 @@ export function createWfsGetFeatureUrl(options: {
   outputFormat: string;
   srsName: string;
   maxFeatures?: string;
+  bbox?: [number, number, number, number];
 }): string {
   const isWfs2 = options.version.startsWith("2");
   const params: Array<[string, string]> = [
@@ -174,6 +175,13 @@ export function createWfsGetFeatureUrl(options: {
   if (options.srsName) params.push(["srsName", options.srsName]);
   if (options.maxFeatures) {
     params.push([isWfs2 ? "count" : "maxFeatures", options.maxFeatures]);
+  }
+  if (options.bbox) {
+    const [west, south, east, north] = options.bbox;
+    const bbox = options.version.startsWith("1.0")
+      ? `${west},${south},${east},${north},EPSG:4326`
+      : `${south},${west},${north},${east},urn:ogc:def:crs:EPSG::4326`;
+    params.push(["bbox", bbox]);
   }
 
   return appendQuery(options.endpoint, params);
@@ -405,6 +413,7 @@ export async function fetchWfsGeoJson(
     outputFormat: string;
     srsName: string;
     maxFeatures?: string;
+    bbox?: [number, number, number, number];
   },
   options: { useWfsProxy?: boolean; signal?: AbortSignal } = {},
 ): Promise<{ data: FeatureCollection; url: string; outputFormat: string }> {

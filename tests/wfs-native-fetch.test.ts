@@ -81,6 +81,30 @@ describe("WFS GetFeature on desktop", () => {
     assert.equal(feature.properties?.NAME, "Świnoujście");
   });
 
+  it("adds a plugin WFS layer through native fetch and preserves parsed coordinates", async () => {
+    globalThis.fetch = (async () => {
+      throw new Error("the webview fetch must not be used for a WFS request on desktop");
+    }) as typeof fetch;
+    answer = (url) =>
+      new URL(url).searchParams.get("outputFormat")?.includes("gml")
+        ? { status: 200, content_type: "application/gml+xml", body: GML }
+        : { status: 400, content_type: "text/xml", body: EXCEPTION };
+    const { useAppStore } = await import("@geolibre/core");
+    const { addPluginWfsLayer } = await import("../apps/geolibre-desktop/src/lib/plugin-wfs-layer");
+    useAppStore.getState().newProject({ name: "Native plugin WFS" });
+    const id = await addPluginWfsLayer("Native", {
+      url: "https://mapy.example.pl/wfs",
+      typeName: "ms:Reda",
+      bbox: [10, 40, 12, 42],
+    });
+    const layer = useAppStore.getState().layers.find((item) => item.id === id);
+    assert.ok(layer);
+    assert.deepEqual((layer.geojson?.features[0].geometry as Point).coordinates, [14.11, 54.44]);
+    assert.ok(calls.length > 1);
+    assert.ok(calls.every((call) => call.cmd === "fetch_url_response"));
+    assert.ok(calls.every((call) => new URL(call.url).searchParams.has("bbox")));
+  });
+
   it("retries a request once when the connection drops", async () => {
     let gmlAttempts = 0;
     answer = (url) => {

@@ -1930,6 +1930,31 @@ function prepareLayerForSave(layer: GeoLibreLayer): GeoLibreLayer {
     layer = rest;
   }
 
+  const wfsSourceUrl = layer.source.url;
+  let hasHttpWfsSource = false;
+  if (typeof wfsSourceUrl === "string") {
+    try {
+      const url = new URL(wfsSourceUrl);
+      hasHttpWfsSource = url.protocol === "http:" || url.protocol === "https:";
+    } catch {
+      hasHttpWfsSource = false;
+    }
+  }
+
+  // Host-managed WFS records reload through their persisted successful
+  // GetFeature URL. Keep the feature collection live for rendering/editing,
+  // but omit it from reference-backed project copies. Explicit embedded edits
+  // remove source.url before reaching this path and remain authoritative.
+  if (
+    layer.type === "geojson" &&
+    layer.metadata.sourceKind === "wfs-getfeature" &&
+    layer.geojson &&
+    hasHttpWfsSource
+  ) {
+    const { geojson: _geojson, ...rest } = layer;
+    layer = rest;
+  }
+
   // An Add Vector Layer layer GeoLibre adopted (`maplibre-gl-vector-adopted`,
   // ADOPTED_VECTOR_SOURCE_KIND in @geolibre/plugins) holds its features in
   // `geojson`, but a URL-backed one saves the URL and is re-read through the

@@ -1,3 +1,4 @@
+import { addPluginWfsLayer } from "../lib/plugin-wfs-layer";
 import {
   clearExternalNativePaintBridge,
   setExternalNativePaintBridge,
@@ -137,6 +138,7 @@ import type {
   GeoLibreMapControlPosition,
   GeoLibreTileLayerOptions,
   GeoLibreWmsLayerOptions,
+  GeoLibreWfsLayerOptions,
   GeoLibreZarrLayerOptions,
   GeoLibreZarrQueryGeometry,
   GeoLibreZarrQueryOptions,
@@ -1172,6 +1174,7 @@ export function createAppAPI(mapControllerRef?: RefObject<MapEngine | null>) {
         beforeLayerId ?? null,
       );
     },
+    addWfsLayer: addPluginWfsLayer,
     // Unlike the tile helpers above, a COG is read client-side by the shared
     // raster control. Besides keeping every COG path on one renderer, this is
     // what mirrors the layer as `maplibre-gl-raster`, making the full Raster

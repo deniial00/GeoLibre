@@ -146,6 +146,7 @@ export interface GeoLibreAppAPI {
     options?: GeoLibreTileLayerOptions
   ) => string;
   addWmsLayer?: (name: string, options: GeoLibreWmsLayerOptions) => string;
+  addWfsLayer?: (name: string, options: GeoLibreWfsLayerOptions) => Promise<string>;
   // Native client-side COG (reads the GeoTIFF directly; band/rescale/colormap/
   // nodata controls). Resolves with the new layer's id (see "Raster and tile
   // layers" below).
@@ -670,6 +671,13 @@ export interface GeoLibreWmsLayerOptions extends GeoLibreTileLayerOptions {
   crs?: string; // "EPSG:3857" (default), "EPSG:4326", "CRS:84" (1.3.0 only), any "EPSG:<code>"
 }
 
+export interface GeoLibreWfsLayerOptions {
+  url: string; // WFS GetFeature endpoint
+  typeName: string; // advertised feature type
+  version?: string; // defaults to "2.0.0"
+  bbox?: [number, number, number, number]; // [west, south, east, north] in WGS84
+}
+
 export interface GeoLibreCogLayerOptions {
   bands?: string; // "1" (single band) or "1,2,3" (RGB)
   colormap?: string; // named colormap for a single-band COG, e.g. "terrain"
@@ -715,12 +723,23 @@ app.addWmsLayer?.("Cadastral parcels", {
   crs: "EPSG:6706",
 });
 
+
 // COG — read the GeoTIFF directly (client-side), with raster controls.
 const cogId = await app.addCogLayer?.(
   "LINZ DEM",
   "https://cog.example.nz/dem.tif",
   { colormap: "terrain", nodata: -9999 }
 );
+```
+
+WFS layers use the host's GetFeature loader, including GeoJSON/GML fallback, reprojection, desktop native HTTP, and refresh. `addWfsLayer` resolves with the new layer id and rejects if loading fails or the service returns no features. Saved projects keep the request URL rather than embedding the downloaded collection; reopening fetches it again. The optional bbox is WGS84 `[west, south, east, north]`; the host applies the existing 1,000-feature limit.
+
+```typescript
+const layerId = await app.addWfsLayer?.("Roads", {
+  url: "https://services.example.org/geoserver/wfs?token=...",
+  typeName: "transport:roads",
+  bbox: [10, 40, 12, 42],
+});
 ```
 
 `options.engine` picks the renderer (`"maplibre-gl-raster"` for the GPU/deck.gl path, `"cog-tiler-wasm"` for the WebAssembly tiler, `"titiler"` for a TiTiler server). Unlike the other options it is **not per layer**: the raster control holds one engine for every raster it manages, so naming one re-renders the rasters already on the map. Pass `"auto"` to leave whatever the control is on alone; omit it and the GPU renderer is used. The GPU renderer requires a Mercator projection, so a plugin that expects to work on the globe should ask for `"cog-tiler-wasm"`.

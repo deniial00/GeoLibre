@@ -8,6 +8,7 @@ import {
   fetchWfsGeoJson,
   isRefreshableLayer,
   isVectorControlRefreshLayer,
+  refreshGeoJsonLayer,
   supportsRefreshFailurePolicy,
   WFS_XML_RESPONSE_ERROR,
 } from "../apps/geolibre-desktop/src/lib/layer-refresh";
@@ -367,6 +368,76 @@ describe("fetchWfsGeoJson output-format fallback", () => {
     assert.equal(requestedFormats[0], "application/json");
     assert.ok(!requestedFormats.includes(""), "no empty outputFormat request");
     assert.equal(result.data.features.length, 1);
+  });
+});
+
+describe("WFS bounding-box requests", () => {
+  const originalFetch = globalThis.fetch;
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
+  });
+  const params = {
+    endpoint: "https://geo.example.com/WFSServer",
+    typeName: "ANM:Area",
+    version: "2.0.0",
+    outputFormat: "application/json",
+    srsName: "EPSG:4326",
+    maxFeatures: "1000",
+  };
+
+  for (const [version, expected] of [
+    ["2.0.0", "40,10,42,12,urn:ogc:def:crs:EPSG::4326"],
+    ["1.1.0", "40,10,42,12,urn:ogc:def:crs:EPSG::4326"],
+    ["1.0.0", "10,40,12,42,EPSG:4326"],
+  ] as const) {
+    it(`encodes asymmetric WGS84 bounds with WFS ${version} axis order`, async () => {
+      const urls: URL[] = [];
+      globalThis.fetch = (async (input: RequestInfo | URL) => {
+        urls.push(new URL(typeof input === "string" ? input : input.toString()));
+        return new Response(JSON.stringify({
+          type: "FeatureCollection",
+          features: [{ type: "Feature", properties: { revision: urls.length }, geometry: null }],
+        }));
+      }) as typeof fetch;
+      const result = await fetchWfsGeoJson({
+        ...params,
+        version,
+        bbox: [10, 40, 12, 42],
+      });
+      assert.ok(urls.every((url) => url.searchParams.get("bbox") === expected));
+      assert.equal(result.data.features[0].properties?.revision, 1);
+    });
+  }
+
+  it("does not add a bbox when none was requested", async () => {
+    let request: URL | undefined;
+    globalThis.fetch = (async (input: RequestInfo | URL) => {
+      request = new URL(typeof input === "string" ? input : input.toString());
+      return new Response(JSON.stringify({ type: "FeatureCollection", features: [] }));
+    }) as typeof fetch;
+    await fetchWfsGeoJson(params);
+    assert.equal(request?.searchParams.has("bbox"), false);
+  });
+
+  it("refreshes changed properties through the stored BBOX request URL", async () => {
+    let requested: URL | undefined;
+    globalThis.fetch = (async (input: RequestInfo | URL) => {
+      requested = new URL(typeof input === "string" ? input : input.toString());
+      return new Response(JSON.stringify({
+        type: "FeatureCollection",
+        features: [{ type: "Feature", properties: { revision: 2 }, geometry: null }],
+      }));
+    }) as typeof fetch;
+    const layer = makeLayer({
+      source: {
+        type: "geojson",
+        url: "https://geo.example.com/WFSServer?service=WFS&request=GetFeature&bbox=40%2C10%2C42%2C12%2Curn%3Aogc%3Adef%3Acrs%3AEPSG%3A%3A4326&count=1000",
+      },
+      metadata: { sourceKind: "wfs-getfeature" },
+    });
+    const result = await refreshGeoJsonLayer(layer);
+    assert.equal(requested?.searchParams.get("bbox"), "40,10,42,12,urn:ogc:def:crs:EPSG::4326");
+    assert.equal(result.geojson.features[0].properties?.revision, 2);
   });
 });
 

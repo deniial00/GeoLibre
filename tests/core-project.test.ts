@@ -693,6 +693,49 @@ describe("project parsing", () => {
     assert.equal(project.layers[0].geojson, undefined);
   });
 
+  it("saves host WFS layers by reference while retaining live and explicitly embedded data", () => {
+    const featureCollection = {
+      type: "FeatureCollection" as const,
+      features: [{ type: "Feature" as const, properties: { name: "Road" }, geometry: { type: "Point" as const, coordinates: [1, 2] as [number, number] } }],
+    };
+    const layer = geojsonLayer({
+      id: "wfs-reference",
+      name: "WFS",
+      geojson: featureCollection,
+      source: { type: "geojson", url: "https://example.test/wfs?request=GetFeature&bbox=1,2,3,4" },
+      metadata: { sourceKind: "wfs-getfeature", featureCount: 1 },
+      connection: { lastSyncedAt: "2025-01-01T00:00:00.000Z", error: null },
+    });
+    const state = {
+      projectName: "WFS",
+      mapView: { center: [0, 0] as [number, number], zoom: 2, bearing: 0, pitch: 0 },
+      basemapStyleUrl: DEFAULT_BASEMAP,
+      basemapVisible: true,
+      basemapOpacity: 1,
+      layers: [layer],
+      preferences: createEmptyProject().preferences,
+      metadata: {},
+    };
+    const project = projectFromStore(state);
+    assert.ok(layer.geojson);
+    assert.equal(project.layers[0].geojson, undefined);
+    assert.equal(project.layers[0].id, layer.id);
+    assert.equal(project.layers[0].source.url, layer.source.url);
+    assert.deepEqual(project.layers[0].style, layer.style);
+    assert.deepEqual(project.layers[0].connection, layer.connection);
+    assert.equal(parseProject(serializeProject(project)).layers[0].geojson, undefined);
+    const embeddedEdit = projectFromStore({
+      ...state,
+      layers: [{ ...layer, source: { type: "geojson" } }],
+    });
+    assert.ok(embeddedEdit.layers[0].geojson);
+    const ordinaryGeoJson = projectFromStore({
+      ...state,
+      layers: [{ ...layer, metadata: {}, source: { type: "geojson" } }],
+    });
+    assert.ok(ordinaryGeoJson.layers[0].geojson);
+  });
+
   it("keeps geojson for external native layers without a restorable source URL", () => {
     const project = projectFromStore({
       projectName: "Native File",

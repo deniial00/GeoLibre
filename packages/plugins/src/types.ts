@@ -140,6 +140,18 @@ export interface GeoLibreWmsLayerOptions extends GeoLibreTileLayerOptions {
   crs?: string;
 }
 
+/** Options for adding a host-managed WFS GetFeature layer. */
+export interface GeoLibreWfsLayerOptions {
+  /** WFS service endpoint. */
+  url: string;
+  /** Feature type name advertised by the WFS service. */
+  typeName: string;
+  /** WFS protocol version (default "2.0.0"). */
+  version?: string;
+  /** Optional WGS84 extent as [west, south, east, north]. */
+  bbox?: [number, number, number, number];
+}
+
 /**
  * What {@link GeoLibreAppAPI.importLayerStyle} did. `warnings` lists what the
  * style asked for that GeoLibre could not represent. On failure, `invalid`
@@ -513,6 +525,13 @@ export interface GeoLibreAppAPI {
    * forward-compatibility, so call it with optional chaining.
    */
   addWmsLayer?: (name: string, options: GeoLibreWmsLayerOptions) => string;
+  /**
+   * Fetch a WFS feature type through the host's GeoJSON/GML parser and native
+   * HTTP transport where available. The layer persists as a WFS request and
+   * reloads its features when the project is reopened. Rejects on fetch or
+   * parsing failure and when the service returns no features.
+   */
+  addWfsLayer?: (name: string, options: GeoLibreWfsLayerOptions) => Promise<string>;
   /**
    * Add a native Cloud-Optimized GeoTIFF (COG) layer read directly from a URL
    * and rendered client-side, returning a promise for the new layer's id.
