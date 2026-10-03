@@ -56,7 +56,7 @@ import {
 import { RemoveLayerDialog } from "./layer-panel/RemoveLayerDialog";
 import { useLayerActions } from "./layer-panel/useLayerActions";
 import { useLayerDragAndDrop } from "./layer-panel/useLayerDragAndDrop";
-import { useLayerRefresh } from "./layer-panel/useLayerRefresh";
+import type { LayerRefresh } from "./layer-panel/useLayerRefresh";
 import { useLayerRename } from "./layer-panel/useLayerRename";
 import { useLayerSelection } from "./layer-panel/useLayerSelection";
 import { useTimeSliderBinding } from "./layer-panel/useTimeSliderBinding";
@@ -65,6 +65,7 @@ import { setLayersPanelCollapsed } from "../../lib/layer-panel-collapse";
 interface LayerPanelProps {
   themeMode: ThemeMode;
   mapControllerRef: RefObject<MapEngine | null>;
+  refresh: LayerRefresh;
   collaborationApi?: CollaborationApi;
   onResizeStart: (event: ReactPointerEvent<HTMLDivElement>) => void;
   /** Id of the layer currently in a geometry-edit session, or null. */
@@ -116,6 +117,7 @@ interface LayerPanelProps {
 export function LayerPanel({
   themeMode,
   mapControllerRef,
+  refresh,
   collaborationApi,
   onResizeStart,
   geometryEditLayerId,
@@ -299,7 +301,6 @@ export function LayerPanel({
     selectOnlyLayer: selection.selectOnlyLayer,
   });
   const rename = useLayerRename(layers, layerGroups);
-  const refresh = useLayerRefresh({ layers, isCollapsed });
   const actions = useLayerActions({
     mapControllerRef,
     canEditLayer,

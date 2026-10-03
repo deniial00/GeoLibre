@@ -66,7 +66,7 @@ export function useLayerRefresh({ layers, isCollapsed }: UseLayerRefreshOptions)
     return () => window.clearInterval(timer);
   }, [isCollapsed, hasSyncTimestamps]);
   const refreshingLayerIdsRef = useRef(new Set<string>());
-  const observedWfsLayerIdsRef = useRef(new Set<string>());
+  const observedWfsSourceUrlsRef = useRef(new Map<string, unknown>());
   const observedWfsGenerationRef = useRef(projectGeneration);
   const refreshTimersRef = useRef(new Map<string, LayerRefreshTimer>());
   const refreshStatusTimersRef = useRef(new Map<string, number>());
@@ -106,7 +106,8 @@ export function useLayerRefresh({ layers, isCollapsed }: UseLayerRefreshOptions)
   const handleRefreshLayer = useCallback(
     async (layer: GeoLibreLayer, automatic = false) => {
       const requestGeneration = projectGeneration;
-      const requestKey = `${requestGeneration}:${layer.id}`;
+      const requestSourceUrl = layer.source.url;
+      const requestKey = `${requestGeneration}:${layer.id}:${requestSourceUrl}`;
       if (refreshingLayerIdsRef.current.has(requestKey)) return;
 
       refreshingLayerIdsRef.current.add(requestKey);
@@ -118,7 +119,6 @@ export function useLayerRefresh({ layers, isCollapsed }: UseLayerRefreshOptions)
           message: automatic ? t("layers.refreshingAuto") : t("layers.refreshing"),
         },
       }));
-      const requestSourceUrl = layer.source.url;
 
       try {
         if (isSqlQueryLayer(layer)) {
@@ -380,7 +380,12 @@ export function useLayerRefresh({ layers, isCollapsed }: UseLayerRefreshOptions)
   useEffect(() => {
     if (observedWfsGenerationRef.current !== projectGeneration) {
       observedWfsGenerationRef.current = projectGeneration;
-      observedWfsLayerIdsRef.current.clear();
+      observedWfsSourceUrlsRef.current.clear();
+      for (const timer of refreshStatusTimersRef.current.values()) {
+        window.clearTimeout(timer);
+      }
+      refreshStatusTimersRef.current.clear();
+      setRefreshStatuses({});
       const generationPrefix = `${projectGeneration}:`;
       for (const requestKey of refreshingLayerIdsRef.current) {
         if (!requestKey.startsWith(generationPrefix)) {
@@ -389,12 +394,12 @@ export function useLayerRefresh({ layers, isCollapsed }: UseLayerRefreshOptions)
       }
     }
     const currentIds = new Set(layers.map((layer) => layer.id));
-    for (const id of observedWfsLayerIdsRef.current) {
-      if (!currentIds.has(id)) observedWfsLayerIdsRef.current.delete(id);
+    for (const id of observedWfsSourceUrlsRef.current.keys()) {
+      if (!currentIds.has(id)) observedWfsSourceUrlsRef.current.delete(id);
     }
     for (const layer of layers) {
-      if (observedWfsLayerIdsRef.current.has(layer.id)) continue;
-      observedWfsLayerIdsRef.current.add(layer.id);
+      if (observedWfsSourceUrlsRef.current.get(layer.id) === layer.source.url) continue;
+      observedWfsSourceUrlsRef.current.set(layer.id, layer.source.url);
       if (
         layer.type !== "geojson" ||
         layer.metadata.sourceKind !== "wfs-getfeature" ||
