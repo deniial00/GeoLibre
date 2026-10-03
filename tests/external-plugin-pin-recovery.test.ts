@@ -198,6 +198,10 @@ describe("recovering a URL plugin blocked by its integrity pin", () => {
           directories,
         );
         for (const issue of result.issues) {
+          assert.deepEqual(issue.policyDenial, {
+            kind: "sideload-disabled",
+            pluginId: "",
+          });
           assert.match(issue.message, /sideloading is disabled by deployment policy/);
         }
       }
@@ -216,7 +220,8 @@ describe("recovering a URL plugin blocked by its integrity pin", () => {
       (error: unknown) => {
         assert.ok(error instanceof externalPlugins.PluginPolicyError);
         assert.equal(error.archiveName, "denied.zip");
-        assert.match(error.message, /sideloading/);
+        assert.equal(error.policyDenial.kind, "sideload-disabled");
+        assert.equal(error.policyDenial.pluginId, "");
         return true;
       },
     );
@@ -236,7 +241,8 @@ describe("recovering a URL plugin blocked by its integrity pin", () => {
       (error: unknown) => {
         assert.ok(error instanceof externalPlugins.PluginPolicyError);
         assert.equal(error.archiveName, "blocked.zip");
-        assert.match(error.message, /blocked/);
+        assert.equal(error.policyDenial.kind, "blocked");
+        assert.equal(error.policyDenial.pluginId, "pin-demo");
         return true;
       },
     );
@@ -356,6 +362,7 @@ describe("recovering a URL plugin blocked by its integrity pin", () => {
       approved,
     );
     assert.deepEqual(returned.loadedPluginIds, []);
+    assert.equal(returned.issues[0]?.integrityStatus, "changed");
     assert.deepEqual(manager.list(), []);
     externalPlugins.unloadRemovedUrlPlugins(manager, [], app);
     assert.equal(integrity.getPluginBundlePin(MANIFEST_URL), null);

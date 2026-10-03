@@ -34,16 +34,24 @@ import {
 import { isTauri } from "./tauri-io";
 import type { DeploymentPolicy } from "./deployment-policy";
 import { getDeploymentPolicy } from "./deployment-env";
-import { evaluatePlugin, type PluginSource } from "./plugin-policy";
+import {
+  evaluatePlugin,
+  type PluginDenialDecision,
+  type PluginPolicyDenial,
+  type PluginSource,
+} from "./plugin-policy";
 
 export class PluginPolicyError extends Error implements ExternalPluginLoadIssue {
+  public readonly policyDenial: PluginPolicyDenial;
+
   constructor(
     public readonly archiveName: string,
-    message: string,
+    decision: PluginDenialDecision,
     public readonly sourceUrl?: string,
   ) {
-    super(message);
+    super(decision.reason);
     this.name = "PluginPolicyError";
+    this.policyDenial = decision.denial;
   }
 }
 
@@ -55,7 +63,7 @@ function enforcePluginPolicy(
   sourceUrl?: string,
 ): void {
   const decision = evaluatePlugin(id, source, policy);
-  if (!decision.allowed) throw new PluginPolicyError(archiveName, decision.reason, sourceUrl);
+  if (!decision.allowed) throw new PluginPolicyError(archiveName, decision, sourceUrl);
 }
 
 interface ExternalPluginBundleError {
@@ -73,6 +81,8 @@ export interface ExternalPluginLoadIssue {
   archiveName: string;
   sourceUrl?: string;
   message: string;
+  policyDenial?: PluginPolicyDenial;
+  integrityStatus?: "changed";
 }
 
 export interface ExternalPluginLoadResult {
@@ -141,7 +151,11 @@ export async function loadExternalPlugins(
     const decision = evaluatePlugin("", "directory", policy);
     if (!decision.allowed) {
       for (const directory of options.configuredPluginDirectories ?? additionalPluginDirectories) {
-        issues.push({ archiveName: directory, message: decision.reason });
+        issues.push({
+          archiveName: directory,
+          message: decision.reason,
+          policyDenial: decision.denial,
+        });
       }
     }
   }
@@ -240,6 +254,7 @@ export async function loadExternalPlugins(
         archiveName: bundle.archiveName,
         sourceUrl: bundle.sourceUrl,
         message: error instanceof Error ? error.message : "Could not load external plugin.",
+        ...(error instanceof PluginPolicyError ? { policyDenial: error.policyDenial } : {}),
       });
     }
   }
@@ -327,6 +342,7 @@ async function loadPluginUrlBundles(
             issues.push({
               archiveName: bundle.archiveName,
               sourceUrl: bundle.sourceUrl,
+              integrityStatus: integrity.status,
               // Point at the recovery that actually works. A held-back bundle
               // never registers, so the marketplace's Update action (which
               // upgrades a *loaded* plugin) is not offered for it; uninstalling
@@ -359,6 +375,9 @@ async function loadPluginUrlBundles(
           result.reason instanceof Error
             ? result.reason.message
             : "Could not load plugin manifest URL.",
+        ...(result.reason instanceof PluginPolicyError
+          ? { policyDenial: result.reason.policyDenial }
+          : {}),
       });
     }
   }

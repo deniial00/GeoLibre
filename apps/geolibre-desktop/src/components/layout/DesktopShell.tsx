@@ -9,7 +9,15 @@ import {
   openRasterLayerPanel,
   subscribeGeometryEdit,
 } from "@geolibre/plugins";
-import { Suspense, useCallback, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import {
+  Suspense,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from "react";
 import { createPortal } from "react-dom";
 import { BROWSER_PANEL_ID, useRegisterBrowserPanel } from "../../hooks/useRegisterBrowserPanel";
 import { COMMENTS_PANEL_ID, useRegisterCommentsPanel } from "../../hooks/useRegisterCommentsPanel";
@@ -347,13 +355,28 @@ export function DesktopShell({
     });
   useTileProtocols();
   useRasterFileHandlers(mapControllerRef, t);
-  usePluginStateRestore({
+  const restoredProjectGeneration = usePluginStateRestore({
     mapControllerRef,
     enforceViewerPlugins,
     externalPluginsReady,
     mapReadyGeneration,
     projectGeneration,
   });
+  useEffect(() => {
+    const root = document.documentElement;
+    root.dataset.geolibreProjectGeneration = String(projectGeneration);
+    root.dataset.geolibreProjectReadyGeneration =
+      externalPluginsReady &&
+      projectPluginTrust.pendingUrls.length === 0 &&
+      restoredProjectGeneration === projectGeneration
+        ? String(projectGeneration)
+        : "";
+  }, [
+    externalPluginsReady,
+    projectGeneration,
+    projectPluginTrust.pendingUrls.length,
+    restoredProjectGeneration,
+  ]);
   // After the restore above, so a `?url=` project's plugin state cannot close
   // what the link opened.
   usePluginDeepLink({

@@ -172,7 +172,10 @@
     "errorDirectoryPicker": "无法打开目录选择器。",
     "errorInstall": "无法安装该插件。",
     "errorUninstall": "无法卸载该插件。",
-    "description": "浏览、安装、更新和移除外部 GeoLibre 插件。插件列于 <registryLink>GeoLibre 插件注册表</registryLink>。"
+    "description": "浏览、安装、更新和移除外部 GeoLibre 插件。插件列于 <registryLink>GeoLibre 插件注册表</registryLink>。",
+    "policySideloadDisabled": "部署策略已禁用插件侧载。",
+    "policyBlocked": "插件“{{pluginId}}”已被部署策略阻止。",
+    "policyNotAllowed": "部署策略不允许插件“{{pluginId}}”。"
   },
   "viewState": {
     "panelTitle": "信息"

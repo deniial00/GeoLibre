@@ -25,7 +25,7 @@ import {
   restoreVectorLayers,
   REVERSE_GEOCODE_PLUGIN_ID,
 } from "@geolibre/plugins";
-import { useEffect, useRef, type RefObject } from "react";
+import { useEffect, useRef, useState, type RefObject } from "react";
 import { restoreLocalFileLayers } from "../../lib/restore-local-layers";
 import { hasReverseGeocodeConsent } from "../../lib/reverse-geocode-consent";
 import { createAppAPI, getPluginManager } from "../usePlugins";
@@ -51,7 +51,8 @@ export function usePluginStateRestore({
   externalPluginsReady,
   mapReadyGeneration,
   projectGeneration,
-}: PluginStateRestoreOptions): void {
+}: PluginStateRestoreOptions): number | null {
+  const [restoredGeneration, setRestoredGeneration] = useState<number | null>(null);
   // A renderer swap restores the plugins from the store's projectPlugins, which
   // is only refreshed when a plugin is toggled or moved, so it would roll every
   // plugin back to how it was then (a Time Slider stack added since came back
@@ -115,6 +116,8 @@ export function usePluginStateRestore({
   );
 
   useEffect(() => {
+    let current = true;
+    setRestoredGeneration(null);
     // Restoration should run only when a project is loaded (projectGeneration)
     // or the map is reinitialised (mapReadyGeneration), not on every
     // incremental plugin write-back. projectPlugins is read from the store
@@ -143,8 +146,10 @@ export function usePluginStateRestore({
       // point of the guard, so re-assert it once this settles rather than
       // leaving the next one to notice.
       .catch(console.error)
-      .finally(enforceViewerPlugins);
-    // The environment plugins have a branch for each renderer (#2287): the
+      .finally(() => {
+        enforceViewerPlugins();
+        if (current) setRestoredGeneration(projectGeneration);
+      });
     // effects engine drives Cesium's sky box and atmosphere, the sun simulation
     // its lighting and clock, the flight simulator its camera. They rebind the
     // same way on both — a renderer swap rebuilds the engine, so the host
@@ -242,6 +247,9 @@ export function usePluginStateRestore({
       pluginManager.deactivate(REVERSE_GEOCODE_PLUGIN_ID, appAPI);
     }
     restoreReverseGeocode(appAPI, pluginManager.isActive(REVERSE_GEOCODE_PLUGIN_ID));
+    return () => {
+      current = false;
+    };
   }, [
     enforceViewerPlugins,
     externalPluginsReady,
@@ -249,4 +257,5 @@ export function usePluginStateRestore({
     projectGeneration,
     mapControllerRef,
   ]);
+  return restoredGeneration;
 }

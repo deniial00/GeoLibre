@@ -174,7 +174,10 @@
     "errorDirectoryPicker": "Could not open the directory picker.",
     "errorInstall": "Could not install the plugin.",
     "errorUninstall": "Could not uninstall the plugin.",
-    "description": "Browse, install, update, and remove external GeoLibre plugins. Plugins are listed in the <registryLink>GeoLibre plugin registry</registryLink>."
+    "description": "Browse, install, update, and remove external GeoLibre plugins. Plugins are listed in the <registryLink>GeoLibre plugin registry</registryLink>",
+    "policySideloadDisabled": "Plugin sideloading is disabled by deployment policy.",
+    "policyBlocked": "Plugin '{{pluginId}}' is blocked by deployment policy.",
+    "policyNotAllowed": "Plugin '{{pluginId}}' is not allowed by deployment policy."
   },
   "viewState": {
     "panelTitle": "Info"

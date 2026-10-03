@@ -34,6 +34,7 @@ import {
   type ReactElement,
   type RefObject,
 } from "react";
+import type { TFunction } from "i18next";
 import { Trans, useTranslation } from "react-i18next";
 import { useDesktopSettingsStore } from "../../hooks/useDesktopSettings";
 import {
@@ -62,7 +63,16 @@ import {
 import { openExternalLink } from "../../lib/open-external";
 import { pluginDisplayName } from "../../lib/plugin-display-name";
 import { getDeploymentPolicy } from "../../lib/deployment-env";
-import { evaluatePlugin } from "../../lib/plugin-policy";
+import {
+  evaluatePlugin,
+  pluginPolicyDenialMessage,
+  type PluginPolicyDenial,
+} from "../../lib/plugin-policy";
+
+type PolicyErrorState = { message: string; policyDenial?: PluginPolicyDenial };
+function renderPolicyError(error: PolicyErrorState, t: TFunction): string {
+  return error.policyDenial ? pluginPolicyDenialMessage(error.policyDenial, t) : error.message;
+}
 
 type ManageSection = "all" | "installed" | "not-installed" | "upgradeable" | "settings";
 
@@ -111,18 +121,15 @@ export function ManagePluginsDialog({
     status: "loading",
   });
   const [query, setQuery] = useState("");
-  const [reloadToken, setReloadToken] = useState(0);
   const [confirmRemoveId, setConfirmRemoveId] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
-  const [actionError, setActionError] = useState<{
-    id: string;
-    message: string;
-  } | null>(null);
+  const [reloadToken, setReloadToken] = useState(0);
+  const [actionError, setActionError] = useState<(PolicyErrorState & { id: string }) | null>(null);
   const [newDirectory, setNewDirectory] = useState("");
   const [newManifestUrl, setNewManifestUrl] = useState("");
   const [settingsError, setSettingsError] = useState<string | null>(null);
   const [installing, setInstalling] = useState(false);
-  const [installError, setInstallError] = useState<string | null>(null);
+  const [installError, setInstallError] = useState<PolicyErrorState | null>(null);
   const [installNotice, setInstallNotice] = useState<string | null>(null);
   const [webPlugins, setWebPlugins] = useState<InstalledWebPlugin[]>([]);
 
@@ -276,13 +283,15 @@ export function ManagePluginsDialog({
     async (entry: PluginRegistryEntry) => {
       if (!evaluatePlugin(entry.id, "registry", getDeploymentPolicy()).allowed) return;
       setActionError(null);
-      setBusyId(entry.id);
       try {
         await upgradeExternalPlugin(entry.manifestUrl, mapControllerRef);
       } catch (error: unknown) {
         setActionError({
           id: entry.id,
           message: error instanceof Error ? error.message : t("managePlugins.errorUpdate"),
+          ...(error && typeof error === "object" && "policyDenial" in error
+            ? { policyDenial: error.policyDenial as PluginPolicyDenial }
+            : {}),
         });
       } finally {
         setBusyId(null);
@@ -368,7 +377,12 @@ export function ManagePluginsDialog({
         await refreshWebPlugins();
       }
     } catch (error) {
-      setInstallError(error instanceof Error ? error.message : t("managePlugins.errorInstall"));
+      setInstallError({
+        message: error instanceof Error ? error.message : t("managePlugins.errorInstall"),
+        ...(error && typeof error === "object" && "policyDenial" in error
+          ? { policyDenial: error.policyDenial as PluginPolicyDenial }
+          : {}),
+      });
     } finally {
       setInstalling(false);
     }
@@ -382,7 +396,12 @@ export function ManagePluginsDialog({
         await uninstallPluginArchiveFromFile(id, mapControllerRef);
         await refreshWebPlugins();
       } catch (error) {
-        setInstallError(error instanceof Error ? error.message : t("managePlugins.errorUninstall"));
+        setInstallError({
+          message: error instanceof Error ? error.message : t("managePlugins.errorUninstall"),
+          ...(error && typeof error === "object" && "policyDenial" in error
+            ? { policyDenial: error.policyDenial as PluginPolicyDenial }
+            : {}),
+        });
       }
     },
     [mapControllerRef, refreshWebPlugins],
@@ -671,12 +690,19 @@ export function ManagePluginsDialog({
                             ) : null}
                           </div>
                           {actionError?.id === entry.id ? (
-                            <p className="text-[11px] text-destructive">{actionError.message}</p>
+                            <p className="text-[11px] text-destructive">
+                              {actionError.policyDenial
+                                ? pluginPolicyDenialMessage(actionError.policyDenial, t)
+                                : actionError.message}
+                            </p>
                           ) : null}
                           {installed && loadIssue ? (
                             <p className="text-[11px] text-destructive">
                               {t("managePlugins.failedToLoad", {
-                                message: loadIssue,
+                                message:
+                                  typeof loadIssue === "string"
+                                    ? loadIssue
+                                    : renderPolicyError(loadIssue, t),
                               })}
                             </p>
                           ) : null}
@@ -743,7 +769,14 @@ export function ManagePluginsDialog({
                                 </Button>
                               ) : null}
                               {loadIssue ? (
-                                <span className="flex items-center gap-1 text-xs text-destructive">
+                                <span
+                                  title={
+                                    typeof loadIssue === "string"
+                                      ? loadIssue
+                                      : renderPolicyError(loadIssue, t)
+                                  }
+                                  className="flex items-center gap-1 text-xs text-destructive"
+                                >
                                   <AlertTriangle className="h-3.5 w-3.5" />
                                   {t("managePlugins.failed")}
                                 </span>
@@ -800,7 +833,7 @@ interface SettingsTabProps {
   newManifestUrl: string;
   error: string | null;
   installing: boolean;
-  installError: string | null;
+  installError: PolicyErrorState | null;
   installNotice: string | null;
   installedFromFile: InstalledWebPlugin[];
   onInstallFromFile: () => void;
@@ -873,7 +906,9 @@ function SettingsTab({
               </p>
             </div>
           ) : null}
-          {installError ? <p className="text-xs text-destructive">{installError}</p> : null}
+          {installError ? (
+            <p className="text-xs text-destructive">{renderPolicyError(installError, t)}</p>
+          ) : null}
           {installNotice ? (
             <p className="text-xs text-emerald-600 dark:text-emerald-400">{installNotice}</p>
           ) : null}

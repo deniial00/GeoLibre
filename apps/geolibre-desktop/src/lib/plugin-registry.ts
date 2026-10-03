@@ -56,6 +56,26 @@ export function resolveRegistryUrl(): string {
 // compressed responses that omit the header.
 const MAX_REGISTRY_BYTES = 5 * 1024 * 1024;
 
+const inFlightRegistryFetches = new Map<string, Promise<PluginRegistry>>();
+
+/**
+ * Share only an in-flight registry response for callers classifying the same
+ * resolved registry URL. Successful and failed results are never cached.
+ */
+export function fetchPluginRegistryShared(
+  registryUrl: string = resolveRegistryUrl(),
+): Promise<PluginRegistry> {
+  const current = inFlightRegistryFetches.get(registryUrl);
+  if (current) return current;
+  const request = fetchPluginRegistry(registryUrl).finally(() => {
+    if (inFlightRegistryFetches.get(registryUrl) === request) {
+      inFlightRegistryFetches.delete(registryUrl);
+    }
+  });
+  inFlightRegistryFetches.set(registryUrl, request);
+  return request;
+}
+
 /**
  * Fetch and normalize the plugin registry. Entry manifest URLs are resolved to
  * absolute URLs against the registry location; malformed entries are dropped.

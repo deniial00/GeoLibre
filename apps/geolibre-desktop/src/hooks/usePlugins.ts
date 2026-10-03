@@ -128,8 +128,12 @@ import {
 } from "@geolibre/plugins";
 import { getDeploymentPolicy, readDeploymentEnvValue } from "../lib/deployment-env";
 import type { DeploymentPolicy } from "../lib/deployment-policy";
-import { evaluatePlugin } from "../lib/plugin-policy";
-import { fetchPluginRegistry } from "../lib/plugin-registry";
+import {
+  evaluatePlugin,
+  type PluginDenialDecision,
+  type PluginPolicyDenial,
+} from "../lib/plugin-policy";
+import { fetchPluginRegistry, fetchPluginRegistryShared } from "../lib/plugin-registry";
 import { bundleFromZipBytes } from "../lib/plugin-archive-unpack";
 import { CesiumEngine, getPrimaryCesiumControlHost, type MapEngine } from "@geolibre/map";
 import type {
@@ -517,7 +521,11 @@ manager.subscribe(() => {
 let externalPluginsLoaded = false;
 let externalPluginsLoadPromise: Promise<void> | null = null;
 let externalPluginsLoadKey: string | null = null;
-let externalPluginLoadIssues = new Map<string, string>();
+type ExternalPluginLoadIssueDisplay = {
+  message: string;
+  policyDenial?: PluginPolicyDenial;
+};
+let externalPluginLoadIssues = new Map<string, ExternalPluginLoadIssueDisplay>();
 const externalPluginsListeners = new Set<() => void>();
 const EMPTY_PLUGIN_MANIFEST_URLS: string[] = [];
 
@@ -525,7 +533,7 @@ export function getPluginManager(): PluginManager {
   return manager;
 }
 
-export function getExternalPluginLoadIssues(): ReadonlyMap<string, string> {
+export function getExternalPluginLoadIssues(): ReadonlyMap<string, ExternalPluginLoadIssueDisplay> {
   return externalPluginLoadIssues;
 }
 
@@ -580,13 +588,13 @@ export async function installPluginArchive(
   // manifest id before the install IPC can persist it in the app-data directory.
   const sideloadDecision = evaluatePlugin("", "zip", policy);
   if (policy?.plugins?.sideload === false && !sideloadDecision.allowed) {
-    throw new PluginPolicyError(sourcePath, sideloadDecision.reason);
+    throw new PluginPolicyError(sourcePath, sideloadDecision);
   }
   if (policy?.plugins?.allowed !== undefined || policy?.plugins?.blocked?.length) {
     const bundle = await bundleFromZipBytes(sourcePath, await readFile(sourcePath));
     const decision = evaluatePlugin(bundle.manifest.id, "zip", policy);
     if (!decision.allowed) {
-      throw new PluginPolicyError(sourcePath, decision.reason);
+      throw new PluginPolicyError(sourcePath, decision);
     }
   }
   const pluginId = await invoke<string>("install_external_plugin_archive", {
@@ -906,7 +914,7 @@ async function registryManifestUrlsForPolicy(
     return [];
   }
   try {
-    const registry = await fetchPluginRegistry();
+    const registry = await fetchPluginRegistryShared();
     return registry.entries
       .filter((entry) => evaluatePlugin(entry.id, "registry", policy).allowed)
       .map((entry) => entry.manifestUrl);
@@ -1002,7 +1010,13 @@ async function ensureExternalPluginsLoadedWithSettings(
     })
     .then((result) => {
       externalPluginLoadIssues = new Map(
-        result.issues.map((issue) => [issue.sourceUrl ?? issue.archiveName, issue.message]),
+        result.issues.map((issue) => [
+          issue.sourceUrl ?? issue.archiveName,
+          {
+            message: issue.message,
+            ...(issue.policyDenial ? { policyDenial: issue.policyDenial } : {}),
+          },
+        ]),
       );
       notifyExternalPluginsListeners();
       if (result.loadedPluginIds.length) {

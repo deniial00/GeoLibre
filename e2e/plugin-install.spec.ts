@@ -2,10 +2,8 @@ import { expect, test, type Page } from "@playwright/test";
 import { strToU8, zipSync } from "fflate";
 import { createEmptyProject, DEFAULT_LAYER_STYLE } from "@geolibre/core";
 
-// A minimal but valid external GeoLibre plugin: the entry is a self-contained
-// ESM module exporting a GeoLibrePlugin whose id/name/version match the
-// manifest. activate/deactivate are no-ops so the plugin registers without
-// needing a live map control.
+// The fixture exposes activation in the DOM so end-to-end cases can observe
+// real PluginManager lifecycle calls.
 const PLUGIN_ID = "e2e-sample-plugin";
 const PLUGIN_NAME = "E2E Sample Plugin";
 const PLUGIN_VERSION = "1.0.0";
@@ -21,8 +19,14 @@ const ENTRY_SOURCE = `const plugin = {
   id: ${JSON.stringify(PLUGIN_ID)},
   name: ${JSON.stringify(PLUGIN_NAME)},
   version: ${JSON.stringify(PLUGIN_VERSION)},
-  activate() {},
-  deactivate() {},
+  activate() {
+    const output = document.createElement("output");
+    output.id = "e2e-sample-plugin-active";
+    document.body.append(output);
+  },
+  deactivate() {
+    document.getElementById("e2e-sample-plugin-active")?.remove();
+  },
 };
 export default plugin;
 `;
@@ -38,13 +42,17 @@ function buildPluginZip(): Buffer {
   return Buffer.from(archive);
 }
 
-/** Open Manage Plugins from the Settings dropdown and switch to its Settings tab. */
-async function openManagePluginsSettings(page: Page) {
-  await page.getByRole("button", { name: "Settings", exact: true }).click();
-  await page.getByRole("menuitem", { name: "Manage Plugins" }).click();
+/** Open Manage Plugins from Settings and switch to its Settings tab. */
+async function openManagePluginsSettings(page: Page, locale: "en" | "zh" = "en") {
+  const labels =
+    locale === "zh"
+      ? { settings: "设置", managePlugins: "管理插件" }
+      : { settings: "Settings", managePlugins: "Manage Plugins" };
+  await page.getByRole("button", { name: labels.settings, exact: true }).click();
+  await page.getByRole("menuitem", { name: labels.managePlugins }).click();
   const dialog = page.getByRole("dialog");
-  await expect(dialog.getByText("Manage Plugins")).toBeVisible();
-  await dialog.getByRole("button", { name: "Settings", exact: true }).click();
+  await expect(dialog.getByText(labels.managePlugins)).toBeVisible();
+  await dialog.getByRole("button", { name: labels.settings, exact: true }).click();
   return dialog;
 }
 
@@ -103,12 +111,12 @@ test("installs a plugin from an uploaded zip, persists it across reload, and uni
   await expect(page.getByRole("menu").getByText(PLUGIN_NAME)).toHaveCount(0);
 });
 
-test("blocked archive installs report denial without registering or persisting the plugin", async ({
+test("deployment defaultActive applies to fresh projects but respects explicit deactivation", async ({
   page,
 }) => {
   await page.route("**/deployment.json", (route) =>
     route.fulfill({
-      json: { version: 1, plugins: { blocked: [PLUGIN_ID] } },
+      json: { version: 1, plugins: { defaultActive: [PLUGIN_ID] } },
     }),
   );
   await page.goto("/");
@@ -123,13 +131,61 @@ test("blocked archive installs report denial without registering or persisting t
     mimeType: "application/zip",
     buffer: buildPluginZip(),
   });
-  await expect(
-    dialog.getByText(`Plugin '${PLUGIN_ID}' is blocked by deployment policy.`),
-  ).toBeVisible();
-  await expect(dialog.getByRole("button", { name: `Uninstall ${PLUGIN_NAME}` })).toHaveCount(0);
+  await expect(dialog.getByText(`Installed plugin "${PLUGIN_ID}".`)).toBeVisible();
+  await expect(page.locator("#e2e-sample-plugin-active")).toBeAttached();
+  await page.keyboard.press("Escape");
+
+  await page.getByRole("button", { name: "Plugins", exact: true }).click();
+  await page.getByRole("menuitem", { name: new RegExp(`^${PLUGIN_NAME}`) }).click();
+  await expect(page.locator("#e2e-sample-plugin-active")).toHaveCount(0);
+
+  const root = page.locator("html");
+  const previousGeneration = await root.getAttribute("data-geolibre-project-generation");
+  await page.getByRole("button", { name: "Project", exact: true }).click();
+  await page.getByRole("menuitem", { name: "New...", exact: true }).click();
+  const newProjectDialog = page.getByRole("dialog", { name: "New project" });
+  const discardButton = page.getByRole("button", { name: "Do not save", exact: true });
+  if (await discardButton.isVisible().catch(() => false)) await discardButton.click();
+  await expect(newProjectDialog).toBeVisible();
+  await newProjectDialog.getByRole("button", { name: "Create", exact: true }).click();
+  await expect
+    .poll(async () => root.getAttribute("data-geolibre-project-generation"))
+    .not.toBe(previousGeneration);
+  await expect
+    .poll(async () => {
+      const generation = await root.getAttribute("data-geolibre-project-generation");
+      const ready = await root.getAttribute("data-geolibre-project-ready-generation");
+      return generation !== null && generation === ready;
+    })
+    .toBe(true);
+  await expect(page.locator("#e2e-sample-plugin-active")).toBeAttached();
+});
+
+test("blocked archive installs report denial without registering or persisting the plugin", async ({
+  page,
+}) => {
+  await page.route("**/deployment.json", (route) =>
+    route.fulfill({
+      json: { version: 1, plugins: { blocked: [PLUGIN_ID] } },
+    }),
+  );
+  await page.goto("/?locale=zh");
+  await expect(page.getByTestId("map-canvas")).toBeVisible();
+  const dialog = await openManagePluginsSettings(page, "zh");
+  const [chooser] = await Promise.all([
+    page.waitForEvent("filechooser"),
+    dialog.getByRole("button", { name: /选择 \.zip/ }).click(),
+  ]);
+  await chooser.setFiles({
+    name: `${PLUGIN_ID}.zip`,
+    mimeType: "application/zip",
+    buffer: buildPluginZip(),
+  });
+  await expect(dialog.getByText(`插件“${PLUGIN_ID}”已被部署策略阻止。`)).toBeVisible();
+  await expect(dialog.getByRole("button", { name: `卸载 ${PLUGIN_NAME}` })).toHaveCount(0);
   await page.reload();
   await expect(page.getByTestId("map-canvas")).toBeVisible();
-  await page.getByRole("button", { name: "Plugins", exact: true }).click();
+  await page.getByRole("button", { name: "插件", exact: true }).click();
   await expect(page.getByRole("menu").getByText(PLUGIN_NAME)).toHaveCount(0);
 });
 
@@ -175,6 +231,8 @@ test("sideload=false hides installation controls and ignores project manifest UR
       geojson: { type: "FeatureCollection", features: [] },
     },
   ];
+  const root = page.locator("html");
+  const previousGeneration = await root.getAttribute("data-geolibre-project-generation");
   await page.evaluate((text) => {
     const dataTransfer = new DataTransfer();
     dataTransfer.items.add(new File([text], "policy.geolibre.json", { type: "application/json" }));
@@ -192,6 +250,16 @@ test("sideload=false hides installation controls and ignores project manifest UR
   await expect(
     page.locator('[data-testid="layer-row"][data-layer-name="Policy project loaded"]'),
   ).toBeVisible();
+  await expect
+    .poll(async () => root.getAttribute("data-geolibre-project-generation"))
+    .not.toBe(previousGeneration);
+  await expect
+    .poll(async () => {
+      const generation = await root.getAttribute("data-geolibre-project-generation");
+      const ready = await root.getAttribute("data-geolibre-project-ready-generation");
+      return generation !== null && generation === ready;
+    })
+    .toBe(true);
   await expect(page.getByRole("dialog", { name: "Load plugins from this project?" })).toHaveCount(
     0,
   );
@@ -265,19 +333,7 @@ for (const registryResult of ["delisted", "unavailable", "blocked-id"] as const)
       if (route.request().url() === manifestUrl) return route.fulfill({ json: MANIFEST });
       return route.fulfill({
         contentType: "text/javascript",
-        body: ENTRY_SOURCE.replace(
-          "activate() {},",
-          `activate() {
-          const output = document.createElement("output");
-          output.id = "registry-plugin-active";
-          document.body.append(output);
-        },`,
-        ).replace(
-          "deactivate() {},",
-          `deactivate() {
-          document.getElementById("registry-plugin-active")?.remove();
-        },`,
-        ),
+        body: ENTRY_SOURCE.replaceAll("e2e-sample-plugin-active", "registry-plugin-active"),
       });
     });
     await page.addInitScript((url) => {
@@ -292,7 +348,7 @@ for (const registryResult of ["delisted", "unavailable", "blocked-id"] as const)
     await page.goto("/");
     await expect(page.getByTestId("map-canvas")).toBeVisible();
     await page.getByRole("button", { name: "Plugins", exact: true }).click();
-    await page.getByRole("menuitem", { name: PLUGIN_NAME, exact: true }).click();
+    await page.getByRole("menuitem", { name: new RegExp(`^${PLUGIN_NAME}`) }).click();
     await expect(page.locator("#registry-plugin-active")).toBeAttached();
     const initialPluginRequests = [...pluginRequests];
 
