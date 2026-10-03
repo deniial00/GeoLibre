@@ -1,3 +1,4 @@
+import type * as Proj4 from "proj4";
 import {
   clearExternalNativePaintBridge,
   setExternalNativePaintBridge,
@@ -249,7 +250,6 @@ const BUILT_IN_PLUGINS: GeoLibrePlugin[] = [
   maplibreGeoEditorPlugin,
   maplibreAnnotationsPlugin,
   maplibreDimensionsPlugin,
-  maplibreBasemapControlPlugin,
   // The web service plugins (WEB_SERVICE_PLUGIN_IDS) are grouped into the
   // "Web Services" submenu, rendered where the first of them appears in this
   // order.
@@ -259,6 +259,7 @@ const BUILT_IN_PLUGINS: GeoLibrePlugin[] = [
   maplibreNationalMapPlugin,
   maplibreUsgsNldiPlugin,
   maplibreUsgsDemPlugin,
+  maplibreUsgsLidarPlugin,
   maplibreVantorPlugin,
   maplibrePlanetOpenDataPlugin,
   maplibrePortolanPlugin,
@@ -282,12 +283,12 @@ const BUILT_IN_PLUGINS: GeoLibrePlugin[] = [
   maplibreFieldsOfTheWorldPlugin,
   maplibreOceanDataPlatformPlugin,
   maplibreGeoLensPlugin,
+  maplibreBasemapControlPlugin,
   maplibreEsriWaybackPlugin,
   maplibreTimeSliderPlugin,
   maplibreTimelapsePlugin,
   maplibreOvertureMapsPlugin,
   maplibreGeoAgentPlugin,
-  maplibreUsgsLidarPlugin,
   maplibreStreetViewPlugin,
   maplibreMapillaryPlugin,
   maplibreElevationProfilePlugin,
@@ -1651,6 +1652,15 @@ export function createAppAPI(mapControllerRef?: RefObject<MapEngine | null>) {
         (cached ??= import("maplibre-gl-raster").catch((error) => {
           // Don't memoize a rejection: a transient chunk-load failure would
           // otherwise poison getMaplibreGlRaster() for the whole session.
+          cached = undefined;
+          throw error;
+        }));
+    })(),
+    // Share the host's proj4 instance; memoize loads but allow retry after failure.
+    getProj4: (() => {
+      let cached: Promise<typeof Proj4> | undefined;
+      return () =>
+        (cached ??= import("proj4").catch((error) => {
           cached = undefined;
           throw error;
         }));

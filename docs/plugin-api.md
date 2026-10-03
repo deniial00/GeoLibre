@@ -5,6 +5,7 @@
 ```typescript
 import type { Feature, FeatureCollection, Geometry } from "geojson";
 import type { IControl } from "maplibre-gl";
+import type * as Proj4 from "proj4";
 
 export type GeoLibreMapControlPosition =
   | "top-left"
@@ -235,6 +236,7 @@ export interface GeoLibreAppAPI {
     position: GeoLibreMapControlPosition
   ) => boolean;
   getDeckGL?: () => Promise<GeoLibreDeckGL>;
+  getProj4?: () => Promise<typeof Proj4>;
   // Right-sidebar panels (see "Right sidebar panels" below).
   registerRightPanel?: (panel: GeoLibreRightPanelRegistration) => () => void;
   unregisterRightPanel?: (id: string) => void;
@@ -496,6 +498,48 @@ Map control plugins can optionally expose `getMapControlPosition()` and `setMapC
 Plugins with serializable runtime settings can expose `getProjectState()` and `applyProjectState()` so GeoLibre can save and restore those settings in the project file. A wrapper should use these hooks to adapt upstream control APIs such as `getState()` without requiring every upstream package to implement a GeoLibre-specific interface.
 
 Plugins that render with deck.gl should call `app.getDeckGL()` (returns a promise) to obtain GeoLibre's own deck.gl modules — `core`, `layers`, `geoLayers`, `meshLayers`, and `mapbox` (use `mapbox.MapboxOverlay` for interleaved MapLibre rendering). Render on the host's single deck.gl instance rather than bundling a second copy: deck.gl and luma.gl throw on a version mismatch and share global singletons, so a bundled copy fails to render. Call it with optional chaining (`app.getDeckGL?.()`) since a host variant may not ship deck.gl.
+
+### Shared projection library
+
+External plugins can use `app.getProj4()` to resolve the host's proj4 module
+namespace. Its `default` export is the callable library:
+
+```typescript
+import type * as Proj4 from "proj4";
+
+const module: typeof Proj4 | undefined = await app.getProj4?.();
+if (!module) throw new Error("This plugin requires a host with getProj4 support.");
+const proj4 = module.default;
+proj4.defs("my-plugin:utm32n", "+proj=utm +zone=32 +datum=WGS84 +units=m +no_defs");
+const [longitude, latitude] = proj4("my-plugin:utm32n", "EPSG:4326", [500000, 0]);
+```
+
+This returns longitude 9 and latitude 0. See the
+[proj4 API](https://github.com/proj4js/proj4js/blob/master/README.md) for coordinate
+conversion and CRS definitions. The mutable definitions registry is shared with
+the host (including ArcGIS/Zarr reprojection) and all plugins. Register only
+plugin-prefixed names, as above; do not register or redefine `EPSG:*` names or
+names belonging to the host or other plugins. A conflicting definition can
+silently corrupt subsequently created transforms. These naming rules are a
+plugin-author responsibility, not an isolation boundary enforced by this API.
+Unknown EPSG definitions are not fetched automatically.
+
+For one-off conversions, pass the definition directly instead of modifying the
+shared registry:
+
+```typescript
+const [longitude, latitude] = proj4(
+  "+proj=utm +zone=32 +datum=WGS84 +units=m +no_defs",
+  "EPSG:4326",
+  [500000, 0],
+);
+```
+
+Older or variant hosts may omit `getProj4`; plugins must handle that absence.
+Shared access does not change `addGeoJsonLayer`'s WGS84 longitude/latitude
+requirement: reproject source coordinates before adding the layer. Omit proj4's
+runtime import and dependency from the plugin bundle when using this API;
+type-only references, such as the namespace import above, need no runtime copy.
 
 Plugins can also declare URL query parameters and handle them when GeoLibre opens. URL parameter handlers run after the map is ready, external plugins are loaded, and project plugin state has been restored. GeoLibre calls handlers for plugins whose declared parameter names are present in the URL, and it suppresses repeated handling of the same URL context for the same plugin. If a matching plugin is registered (installed) but inactive, GeoLibre first attempts to activate it via `PluginManager.activate`; the handler runs only if activation succeeds (an `activate()` that returns `false` or throws leaves the plugin inactive and skips dispatch). Parameter names are case-sensitive, as URL query parameters are: declaring `exampleGeoJson` will not match `?ExampleGeoJson=…`.
 

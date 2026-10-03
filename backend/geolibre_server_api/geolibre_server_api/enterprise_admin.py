@@ -5,6 +5,7 @@ from __future__ import annotations
 import ipaddress
 import json
 import re
+import secrets
 import uuid
 from typing import Literal
 from urllib.parse import urlparse
@@ -12,7 +13,7 @@ from urllib.parse import urlparse
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from pydantic import BaseModel, Field
-from sqlalchemy import delete, select
+from sqlalchemy import delete, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -22,11 +23,13 @@ from geolibre_server_api.auth import (
     get_session,
     iso_ts,
     require_scope,
+    token_digest,
 )
 from geolibre_server_api.auth_models import Account
 from geolibre_server_api.enterprise_models import (
     OrganizationIdentityProvider,
     OrganizationSecurityPolicy,
+    ScimToken,
 )
 from geolibre_server_api.oidc import OidcError, fetch_json
 from geolibre_server_api.org_models import Group, OrganizationRole
@@ -204,6 +207,24 @@ def _provider_for(session: Session, organization_id: str) -> OrganizationIdentit
             OrganizationIdentityProvider.organization_id == organization_id
         )
     )
+
+
+class ScimTokenBody(BaseModel):
+    """A new SCIM token for an organization's identity provider."""
+
+    label: str = Field(min_length=1, max_length=100)
+
+    model_config = {"extra": "forbid", "populate_by_name": True}
+
+
+def scim_token_json(row: ScimToken) -> dict:
+    return {
+        "id": row.id,
+        "label": row.label,
+        "createdAt": iso_ts(row.created_at),
+        "lastUsedAt": iso_ts(row.last_used_at) if row.last_used_at is not None else None,
+        "revokedAt": iso_ts(row.revoked_at) if row.revoked_at is not None else None,
+    }
 
 
 def build_enterprise_admin_router() -> APIRouter:
@@ -406,6 +427,72 @@ def build_enterprise_admin_router() -> APIRouter:
             delete(OrganizationIdentityProvider).where(
                 OrganizationIdentityProvider.organization_id == organization_id
             )
+        )
+        session.commit()
+        return Response(status_code=204, headers={"Cache-Control": "private, no-store"})
+
+    @router.post("/api/organizations/{organization_id}/scim-tokens", status_code=201)
+    def create_scim_token(
+        organization_id: str,
+        body: ScimTokenBody,
+        request: Request,
+        response: Response,
+        principal: AuthPrincipal = Depends(require_scope("write:projects")),
+        session: Session = Depends(get_session),
+    ):
+        require_organization_admin(session, organization_id, principal, request, mutation=True)
+        response.headers["Cache-Control"] = "private, no-store"
+        token = secrets.token_urlsafe(32)
+        row = ScimToken(
+            id=str(uuid.uuid4()),
+            organization_id=organization_id,
+            created_by_id=principal.account.id,
+            digest=token_digest(token),
+            label=body.label,
+            created_at=get_clock(request)(),
+        )
+        session.add(row)
+        session.commit()
+        return {
+            "token": token,
+            "scimToken": scim_token_json(row),
+            "baseUrl": f"{request.app.state.base_url}/scim/v2/{organization_id}",
+        }
+
+    @router.get("/api/organizations/{organization_id}/scim-tokens")
+    def list_scim_tokens(
+        organization_id: str,
+        request: Request,
+        response: Response,
+        principal: AuthPrincipal = Depends(require_scope("read:projects")),
+        session: Session = Depends(get_session),
+    ):
+        require_organization_admin(session, organization_id, principal, request, mutation=False)
+        response.headers["Cache-Control"] = "private, no-store"
+        rows = session.scalars(
+            select(ScimToken)
+            .where(ScimToken.organization_id == organization_id)
+            .order_by(ScimToken.created_at.desc(), ScimToken.id)
+        )
+        return {"scimTokens": [scim_token_json(row) for row in rows]}
+
+    @router.delete("/api/organizations/{organization_id}/scim-tokens/{token_id}", status_code=204)
+    def revoke_scim_token(
+        organization_id: str,
+        token_id: str,
+        request: Request,
+        principal: AuthPrincipal = Depends(require_scope("write:projects")),
+        session: Session = Depends(get_session),
+    ):
+        require_organization_admin(session, organization_id, principal, request, mutation=True)
+        row = session.get(ScimToken, token_id)
+        if row is None or row.organization_id != organization_id:
+            raise HTTPException(404, "SCIM token not found")
+        # Revoking again keeps the first revocation time.
+        session.execute(
+            update(ScimToken)
+            .where(ScimToken.id == token_id, ScimToken.revoked_at.is_(None))
+            .values(revoked_at=get_clock(request)())
         )
         session.commit()
         return Response(status_code=204, headers={"Cache-Control": "private, no-store"})

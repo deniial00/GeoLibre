@@ -27,7 +27,7 @@ from fastapi import HTTPException
 from joserfc import jwt
 from joserfc.errors import InvalidKeyIdError, JoseError
 from joserfc.jwk import KeySet
-from sqlalchemy import func, select
+from sqlalchemy import delete, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -38,6 +38,8 @@ from geolibre_server_api.enterprise_models import (
     AccountSecurity,
     FederatedIdentity,
     OrganizationIdentityProvider,
+    ScimGroup,
+    ScimUser,
 )
 from geolibre_server_api.org_models import (
     ROLE_RANK,
@@ -46,6 +48,7 @@ from geolibre_server_api.org_models import (
     Organization,
     OrganizationMember,
 )
+from geolibre_server_api.policy import deactivate_account, is_deactivated, is_last_active_admin
 from geolibre_server_api.projects import demote_disallowed_public_projects
 from geolibre_server_api.proxy_identity import ProxyIdentity, parse_networks
 
@@ -360,15 +363,7 @@ def apply_org_mapping(
             # The break-glass account must stay an administrator to keep its
             # password sign-in; clearing it on the provider is the way out.
             provider.break_glass_account_id == account_id
-            or session.scalar(
-                select(func.count())
-                .select_from(OrganizationMember)
-                .where(
-                    OrganizationMember.organization_id == organization_id,
-                    OrganizationMember.role == "administrator",
-                )
-            )
-            == 1
+            or is_last_active_admin(session, organization_id, account_id)
         )
         if not keeps_admin:
             lowered = ROLE_RANK[mapped_role] < ROLE_RANK[member.role]
@@ -428,6 +423,8 @@ def _resolve_identity(
     new_email: Callable[[], str | None],
     managed_by: str | None,
     now_ts: int,
+    claimed_username: str | None = None,
+    claimed_email: str | None = None,
 ) -> Account:
     """The account linked to (provider_key, subject), created just in time when missing."""
     identity = _find_identity(session, provider_key, subject)
@@ -451,6 +448,8 @@ def _resolve_identity(
             subject=subject,
             created_at=now_ts,
             last_login_at=now_ts,
+            claimed_username=claimed_username,
+            claimed_email=claimed_email,
         )
         try:
             with session.begin_nested():
@@ -472,6 +471,8 @@ def _resolve_identity(
     if identity is None:
         raise OidcError("account creation conflict")
     identity.last_login_at = now_ts
+    identity.claimed_username = claimed_username
+    identity.claimed_email = claimed_email
     account = session.get(Account, identity.account_id)
     if account is None:  # pragma: no cover - the FK cascades account deletion
         raise RuntimeError("federated identity without an account")
@@ -485,6 +486,229 @@ def _first_string(*values: object) -> str:
     return ""
 
 
+def _claimed_values(
+    claims: dict, provider: OrganizationIdentityProvider
+) -> tuple[str | None, str | None]:
+    """The lowercased username claim, and the lowercased email claim when verified."""
+    username = claims.get(provider.username_claim)
+    email = claims.get(provider.email_claim)
+    claimed_username = (
+        username.lower() if isinstance(username, str) and 0 < len(username) <= 255 else None
+    )
+    claimed_email = (
+        email.lower()
+        if claims.get("email_verified") is True and isinstance(email, str) and 0 < len(email) <= 320
+        else None
+    )
+    return claimed_username, claimed_email
+
+
+def _managed_here(session: Session, organization_id: str, account_id: str) -> bool:
+    managed_by = session.scalar(
+        select(AccountSecurity.managed_by_organization_id).where(
+            AccountSecurity.account_id == account_id
+        )
+    )
+    return managed_by == organization_id
+
+
+def _has_identity(session: Session, account_id: str, provider_key: str | None = None) -> bool:
+    query = select(FederatedIdentity.id).where(FederatedIdentity.account_id == account_id)
+    if provider_key is not None:
+        query = query.where(FederatedIdentity.provider_key == provider_key)
+    return session.scalar(query.limit(1)) is not None
+
+
+def _has_scim_user(session: Session, organization_id: str, account_id: str) -> bool:
+    return session.get(ScimUser, (organization_id, account_id), populate_existing=True) is not None
+
+
+def _adopt_orphan(
+    session: Session,
+    provider: OrganizationIdentityProvider,
+    account_id: str,
+    orphan: ScimUser,
+    now_ts: int,
+) -> None:
+    """Hand the SCIM user of an unused account SCIM created to the subject's real account.
+
+    The orphan was provisioned while the user already had a single sign-on
+    account, so it never had a way to sign in. The real account takes over the
+    SCIM user, its deactivation, and its plain memberships in the organization's
+    SCIM groups; the orphan is deactivated and leaves the organization.
+    """
+    organization_id = provider.organization_id
+    orphan_id = orphan.account_id
+    orphan_deactivated = is_deactivated(session, orphan_id)
+    try:
+        with session.begin_nested():
+            # Conditional on the orphan still holding it: of two concurrent
+            # sign-ins, only one moves the SCIM user.
+            moved = session.execute(
+                update(ScimUser)
+                .where(
+                    ScimUser.organization_id == organization_id,
+                    ScimUser.account_id == orphan_id,
+                )
+                .values(account_id=account_id)
+                .execution_options(synchronize_session=False)
+            ).rowcount
+    except IntegrityError:
+        # The real account was provisioned concurrently.
+        return
+    session.expunge(orphan)
+    if not moved:
+        return
+
+    scim_group_ids = select(ScimGroup.group_id).where(ScimGroup.organization_id == organization_id)
+    orphan_rows = session.scalars(
+        select(GroupMember).where(
+            GroupMember.account_id == orphan_id,
+            GroupMember.role == "member",
+            GroupMember.group_id.in_(scim_group_ids),
+        )
+    ).all()
+    for row in orphan_rows:
+        if session.get(GroupMember, (row.group_id, account_id)) is not None:
+            continue
+        try:
+            with session.begin_nested():
+                session.add(
+                    GroupMember(
+                        group_id=row.group_id,
+                        account_id=account_id,
+                        role="member",
+                        status=row.status,
+                        created_at=row.created_at,
+                    )
+                )
+                session.flush()
+        except IntegrityError:
+            pass
+
+    if orphan_deactivated:
+        if provider.break_glass_account_id == account_id or is_last_active_admin(
+            session, organization_id, account_id
+        ):
+            # SCIM itself refuses this deactivation (409); the provider sees
+            # the account active and its next update is refused the same way.
+            logger.warning("scim deactivation not carried over to the last administrator")
+        else:
+            deactivate_account(session, account_id, now_ts)
+
+    if provider.break_glass_account_id == orphan_id or is_last_active_admin(
+        session, organization_id, orphan_id
+    ):
+        # Removing it would leave the organization without an administrator, the
+        # removal SCIM refuses with a 409; the orphan keeps its membership.
+        logger.warning("scim orphan kept: it is the last administrator")
+        return
+    deactivate_account(session, orphan_id, now_ts)
+    session.execute(
+        delete(OrganizationMember).where(
+            OrganizationMember.organization_id == organization_id,
+            OrganizationMember.account_id == orphan_id,
+        )
+    )
+    session.execute(
+        delete(GroupMember).where(
+            GroupMember.account_id == orphan_id,
+            GroupMember.role == "member",
+            GroupMember.group_id.in_(
+                select(Group.id).where(Group.organization_id == organization_id)
+            ),
+        )
+    )
+
+
+def _link_scim_user(
+    session: Session,
+    provider: OrganizationIdentityProvider,
+    subject: str,
+    claimed: tuple[str | None, str | None],
+    now_ts: int,
+) -> None:
+    """Connect the subject with the account SCIM provisioned for its claimed user name.
+
+    The SCIM user is found by the username claim, else the verified email claim.
+
+    - A first sign-in links to that account, unless another subject of this
+      provider already holds it (then the sign-in creates its own account).
+    - A subject whose account SCIM deleted (deactivated, no SCIM user) moves to
+      the account SCIM provisioned again, when no subject holds that one yet.
+    - A subject whose account predates SCIM (managed here, no SCIM user) takes
+      over the SCIM user of an account SCIM created for it that never signed in.
+    """
+    organization_id = provider.organization_id
+    scim_user = None
+    for value in claimed:
+        if value is None:
+            continue
+        scim_user = session.scalar(
+            select(ScimUser).where(
+                ScimUser.organization_id == organization_id, ScimUser.user_name == value
+            )
+        )
+        if scim_user is not None:
+            break
+    if scim_user is None:
+        return
+    target_id = scim_user.account_id
+    identity = _find_identity(session, provider.id, subject)
+    if identity is None:
+        if _has_identity(session, target_id, provider.id):
+            return
+        try:
+            with session.begin_nested():
+                session.add(
+                    FederatedIdentity(
+                        id=str(uuid.uuid4()),
+                        account_id=target_id,
+                        provider_key=provider.id,
+                        provider_id=provider.id,
+                        subject=subject,
+                        created_at=now_ts,
+                        last_login_at=now_ts,
+                    )
+                )
+                session.flush()
+        except IntegrityError:
+            # A concurrent sign-in linked the subject or the account; the caller
+            # re-reads the subject's link or creates its own account.
+            pass
+        return
+
+    current_id = identity.account_id
+    if (
+        current_id == target_id
+        or _has_scim_user(session, organization_id, current_id)
+        or not _managed_here(session, organization_id, current_id)
+        or not _managed_here(session, organization_id, target_id)
+    ):
+        return
+    if is_deactivated(session, current_id):
+        if _has_identity(session, target_id, provider.id):
+            return
+        try:
+            with session.begin_nested():
+                session.execute(
+                    update(FederatedIdentity)
+                    .where(
+                        FederatedIdentity.id == identity.id,
+                        FederatedIdentity.account_id == current_id,
+                    )
+                    .values(account_id=target_id)
+                    .execution_options(synchronize_session=False)
+                )
+        except IntegrityError:
+            # A concurrent sign-in linked another subject to the account.
+            pass
+        session.expire(identity)
+        return
+    if not _has_identity(session, target_id):
+        _adopt_orphan(session, provider, current_id, scim_user, now_ts)
+
+
 def resolve_oidc_account(
     session: Session,
     provider: OrganizationIdentityProvider,
@@ -493,9 +717,13 @@ def resolve_oidc_account(
 ) -> Account:
     """Find or JIT-create the account for validated claims and apply the org mapping.
 
-    Never links to an existing account by email: that would let any IdP that
-    asserts an address take over a local account.
+    Sign-in reconciles with the provider's own organization's SCIM users
+    (``_link_scim_user``). It never links to any other existing account by
+    email: that would let any IdP that asserts an address take over a local
+    account. A deactivated account gets no mapping, so its memberships stay gone.
     """
+    claimed_username, claimed_email = _claimed_values(claims, provider)
+    _link_scim_user(session, provider, claims["sub"], (claimed_username, claimed_email), now_ts)
     account = _resolve_identity(
         session,
         provider_key=provider.id,
@@ -507,8 +735,11 @@ def resolve_oidc_account(
         new_email=lambda: _verified_email(session, claims, provider.email_claim),
         managed_by=provider.organization_id,
         now_ts=now_ts,
+        claimed_username=claimed_username,
+        claimed_email=claimed_email,
     )
-    apply_org_mapping(session, provider, account.id, _claim_groups(claims, provider))
+    if not is_deactivated(session, account.id):
+        apply_org_mapping(session, provider, account.id, _claim_groups(claims, provider))
     session.commit()
     return account
 

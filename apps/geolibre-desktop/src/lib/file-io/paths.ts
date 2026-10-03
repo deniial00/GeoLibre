@@ -17,6 +17,20 @@ export function isGeoLibreProjectFileName(path: string): boolean {
   return name.endsWith(".geolibre") || name.endsWith(".geolibre.json");
 }
 
+/**
+ * Give a project save path a name Open Recent can read back. Desktop reads are
+ * limited to `.geolibre` / `.geolibre.json`, so a name such as
+ * `map.geolibre_bis.json` would save fine and then refuse to reopen. A trailing
+ * `.json` is replaced by `.geolibre.json`; any other name gets it appended.
+ *
+ * @param path - The path chosen in the save dialog.
+ * @returns The path, ending in a recognized GeoLibre project extension.
+ */
+export function ensureGeoLibreProjectExtension(path: string): string {
+  if (isGeoLibreProjectFileName(path)) return path;
+  return `${path.replace(/\.json$/i, "")}.geolibre.json`;
+}
+
 export const SHAPEFILE_SIDECAR_EXTENSIONS = ["dbf", "shx", "prj", "cpg"];
 // SYNC: RESTORABLE_VECTOR_EXTENSIONS in src-tauri/src/lib.rs must list the same
 // extensions, or a format added here would be rejected by the Rust restore

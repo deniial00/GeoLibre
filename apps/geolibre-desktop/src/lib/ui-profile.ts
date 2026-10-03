@@ -12,7 +12,7 @@ import type { ExperienceLevel, UiProfileSettings } from "../hooks/useDesktopSett
 export type ComplexityTier = "basic" | "intermediate" | "advanced";
 
 /**
- * Plugins toggled from other menus (Effects/Directions/Reverse Geocode via the
+ * Plugins toggled from other menus (Effects/Directions/Reverse Geocode/Layer Control via the
  * Controls menu, deck.gl viz via Add Data), so they are excluded from the
  * Plugins menu and from the UI-profile plugin lists. Keep in sync with
  * `PluginsMenu`'s skip list. Literal ids (mirroring `EFFECTS_PLUGIN_ID` etc.
@@ -24,6 +24,7 @@ export const MENU_MANAGED_PLUGIN_IDS = new Set<string>([
   "maplibre-gl-directions", // DIRECTIONS_PLUGIN_ID
   "maplibre-reverse-geocode", // REVERSE_GEOCODE_PLUGIN_ID
   "maplibre-deckgl-viz", // DECK_VIZ_PLUGIN_ID
+  "maplibre-layer-control", // LAYER_CONTROL_PLUGIN_ID
 ]);
 
 /** The plugin ids that participate in the UI profile (excludes the menu-managed
@@ -595,6 +596,12 @@ export const MENU_ITEM_CATALOG: readonly MenuItemCatalogEntry[] = [
     tier: "advanced",
   },
   // Controls — built-in map controls
+  {
+    id: "controls.layerControl",
+    menuId: "controls",
+    labelKey: "toolbar.plugin.maplibre-layer-control",
+    tier: "basic",
+  },
   {
     id: "controls.mapControl.navigation",
     menuId: "controls",
