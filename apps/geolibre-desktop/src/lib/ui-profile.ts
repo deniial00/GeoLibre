@@ -224,6 +224,7 @@ export const PLUGIN_TIERS: Record<string, ComplexityTier> = {
   "geolibre-s3-browser": "advanced",
   "maplibre-gl-huggingface": "advanced",
   "maplibre-gl-vantor": "advanced",
+  "maplibre-gl-usgs-dem": "advanced",
   "maplibre-gl-esri-wayback": "advanced",
   "maplibre-gl-geoagent": "advanced",
   "maplibre-samgeo": "advanced",

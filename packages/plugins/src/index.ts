@@ -775,6 +775,31 @@ export {
   type SourceCoopProduct,
 } from "./plugins/source-coop-api";
 export { maplibreNationalMapPlugin } from "./plugins/maplibre-national-map";
+export {
+  DEFAULT_USGS_DEM_LABELS,
+  maplibreUsgsDemPlugin,
+  setUsgsDemLabels,
+  USGS_DEM_PLUGIN_ID,
+  type UsgsDemLabels,
+} from "./plugins/maplibre-usgs-dem";
+export {
+  buildUsgsDemSearchUrl,
+  extractRawDemName,
+  filterRedundantDemItems,
+  footprintCollection as usgsDemFootprintCollection,
+  footprintFeature as usgsDemFootprintFeature,
+  get24kQuadGeometry,
+  parseSearchResponse as parseUsgsDemSearchResponse,
+  searchUsgsDem,
+  USGS_24K_QUAD_ENDPOINT,
+  USGS_DEM_DATASETS,
+  USGS_TNM_PRODUCTS_ENDPOINT,
+  type UsgsDemDatasetInfo,
+  type UsgsDemFootprintProps,
+  type UsgsDemItem,
+  type UsgsDemSearchOptions,
+  type UsgsDemSearchResult,
+} from "./plugins/usgs-dem-api";
 export { maplibreOvertureMapsPlugin } from "./plugins/maplibre-overture-maps";
 export { maplibreStreetViewPlugin } from "./plugins/maplibre-streetview";
 export {

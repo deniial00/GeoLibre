@@ -7,9 +7,11 @@ import os
 import re
 import secrets
 import shutil
+import threading
+import time
 import uuid
 from contextlib import asynccontextmanager, suppress
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Annotated, Callable, Literal
 from urllib.parse import quote, urlparse
@@ -46,6 +48,8 @@ from geolibre_server_api.auth import (
     make_oauth_config,
     now,
     optional_principal,
+    password_hash,
+    password_matches,
     require_scope,
     token_digest,
 )
@@ -79,11 +83,18 @@ from geolibre_server_api.project_models import (
     Version,
 )
 from geolibre_server_api.projects import demote_disallowed_public_projects, log_project_activity
-from geolibre_server_api.proxy_identity import load_trusted_proxy_config
+from geolibre_server_api.proxy_identity import client_ip, load_trusted_proxy_config
 from geolibre_server_api.scim import SCIM_MEDIA_TYPE, ScimError, build_scim_router
 
 Visibility = Literal["public", "unlisted", "private", "organization"]
 PublicSharingPolicy = Literal["yes", "publishers", "no"]
+SHARE_ACCESS_MAX_FAILURES = 10
+SHARE_ACCESS_WINDOW_SECONDS = 300
+SHARE_EXPIRY_DELTAS = {
+    "24h": timedelta(hours=24),
+    "7d": timedelta(days=7),
+    "30d": timedelta(days=30),
+}
 JoinPolicy = Literal["invite", "request", "open"]
 SLUG_RE = re.compile(r"[^a-z0-9]+")
 # One entity-tag (RFC 9110 §8.8.3): optional weak prefix, then a quoted opaque
@@ -112,6 +123,9 @@ class ProjectCreate(BaseModel):
     visibility: Visibility | None = None
     organization_id: str | None = Field(default=None, alias="organizationId")
     group_ids: list[str] = Field(default_factory=list, alias="groupIds", max_length=20)
+    role: Literal["view", "comment", "edit"] = "edit"
+    expires_in: Literal["24h", "7d", "30d", "never"] | None = Field(default=None, alias="expiresIn")
+    password: str | None = Field(default=None, min_length=1, max_length=200)
 
 
 class ProjectPatch(BaseModel):
@@ -196,6 +210,10 @@ class ContentUpdate(BaseModel):
 
 class ForkRequest(BaseModel):
     visibility: Visibility = "private"
+
+
+class ShareAccessRequest(BaseModel):
+    password: str = Field(min_length=1, max_length=200)
 
 
 class ProjectTransferCreate(BaseModel):
@@ -337,6 +355,10 @@ def postgresql_upgrade_statements() -> list[str]:
         "ALTER TABLE projects ADD COLUMN IF NOT EXISTS created_by_id VARCHAR(36)",
         "ALTER TABLE projects ADD COLUMN IF NOT EXISTS delete_protected "
         "BOOLEAN NOT NULL DEFAULT FALSE",
+        "ALTER TABLE projects ADD COLUMN IF NOT EXISTS share_role VARCHAR(8) "
+        "NOT NULL DEFAULT 'edit'",
+        "ALTER TABLE projects ADD COLUMN IF NOT EXISTS share_expires_at VARCHAR(32)",
+        "ALTER TABLE projects ADD COLUMN IF NOT EXISTS share_password_hash VARCHAR(200)",
         "ALTER TABLE projects ALTER COLUMN visibility TYPE VARCHAR(16)",
         "ALTER TABLE projects ALTER COLUMN owner_id DROP NOT NULL",
         "UPDATE projects SET created_by_id = owner_id WHERE created_by_id IS NULL",
@@ -459,6 +481,9 @@ def upgrade_sqlite_schema(engine) -> None:
             ("organization_id", "VARCHAR(36)"),
             ("created_by_id", "VARCHAR(36)"),
             ("delete_protected", "BOOLEAN NOT NULL DEFAULT 0"),
+            ("share_role", "VARCHAR(8) NOT NULL DEFAULT 'edit'"),
+            ("share_expires_at", "VARCHAR(32)"),
+            ("share_password_hash", "VARCHAR(200)"),
         ],
     }
     with engine.begin() as connection:
@@ -569,6 +594,9 @@ def upgrade_sqlite_schema(engine) -> None:
                 fork_count INTEGER NOT NULL DEFAULT 0,
                 featured BOOLEAN NOT NULL DEFAULT 0,
                 delete_protected BOOLEAN NOT NULL DEFAULT 0,
+                share_role VARCHAR(8) NOT NULL DEFAULT 'edit',
+                share_expires_at VARCHAR(32),
+                share_password_hash VARCHAR(200),
                 created_at VARCHAR(32) NOT NULL,
                 updated_at VARCHAR(32) NOT NULL,
                 CONSTRAINT uq_project_owner_slug UNIQUE (owner_id, slug),
@@ -579,11 +607,13 @@ def upgrade_sqlite_schema(engine) -> None:
             INSERT INTO projects (
                 id, owner_id, created_by_id, organization_id, slug, title,
                 description, visibility, tags_json, thumbnail_type, views,
-                fork_count, featured, delete_protected, created_at, updated_at
+                fork_count, featured, delete_protected, share_role, share_expires_at,
+                share_password_hash, created_at, updated_at
             )
             SELECT id, owner_id, COALESCE(created_by_id, owner_id), organization_id,
                 slug, title, description, visibility, tags_json, thumbnail_type,
-                views, fork_count, featured, delete_protected, created_at, updated_at
+                views, fork_count, featured, delete_protected, share_role, share_expires_at,
+                share_password_hash, created_at, updated_at
             FROM projects_legacy
         """)
         cursor.execute("DROP TABLE projects_legacy")
@@ -1317,6 +1347,9 @@ def create_app(
             "versionCount": len(project.versions),
             "featured": project.featured,
             "deleteProtected": project.delete_protected,
+            "role": project.share_role,
+            "expiresAt": project.share_expires_at,
+            "hasPassword": project.share_password_hash is not None,
             "createdAt": project.created_at,
             "updatedAt": project.updated_at,
             "tags": json.loads(project.tags_json),
@@ -1364,14 +1397,43 @@ def create_app(
             return project
         raise HTTPException(404, "project not found")
 
+    def link_gate(
+        session: Session,
+        project: Project,
+        principal: AuthPrincipal | None,
+        password: str | None,
+    ) -> None:
+        """Enforce a share link's expiry and password against a non-manager reader.
+
+        Managers always read their own projects. Everyone else gets 410 once the
+        link has expired, and 401 until the project's password is supplied.
+        """
+        if project.share_expires_at is None and project.share_password_hash is None:
+            return
+        if principal is not None and can_manage_project(session, project, principal.account):
+            return
+        if project.share_expires_at is not None and (
+            datetime.fromisoformat(project.share_expires_at.replace("Z", "+00:00"))
+            <= datetime.now(UTC)
+        ):
+            raise HTTPException(410, "share link expired")
+        if project.share_password_hash is not None and not (
+            password is not None and password_matches(password, project.share_password_hash)
+        ):
+            raise HTTPException(401, "share password required")
+
     def visible_read(
-        session: Session, project: Project | None, principal: AuthPrincipal | None
+        session: Session,
+        project: Project | None,
+        principal: AuthPrincipal | None,
+        password: str | None = None,
     ) -> Project:
         """visible() plus the read:projects scope for any non-public read.
 
         A public or unlisted project is readable anonymously, so no scope is
         needed. Anything else (private, organization, or reached only through
         a group share) is the caller's protected data and needs read:projects.
+        A share link's expiry and password are enforced here for every reader.
         """
         project = visible(session, project, principal)
         if project.visibility not in {"public", "unlisted"}:
@@ -1379,6 +1441,7 @@ def create_app(
             # reaching here implies an authenticated principal.
             assert principal is not None
             ensure_scope(principal, "read:projects")
+        link_gate(session, project, principal, password)
         return project
 
     def can_manage_project(session: Session, project: Project, account: Account) -> bool:
@@ -1419,7 +1482,9 @@ def create_app(
 
     def protected(project: Project) -> bool:
         """Whether a project's responses must not be publicly cached."""
-        return project.visibility in {"private", "organization"}
+        return project.visibility in {"private", "organization"} or (
+            project.share_password_hash is not None
+        )
 
     def transfer_json(transfer: ProjectTransfer) -> dict:
         """Serialize a transfer row with the API's camelCase field names."""
@@ -1542,6 +1607,9 @@ def create_app(
         visibility: Visibility,
         organization_id: str | None = None,
         group_ids: list[str] | None = None,
+        share_role: str = "edit",
+        share_expires_at: str | None = None,
+        share_password: str | None = None,
         *,
         commit: bool = True,
     ) -> Project:
@@ -1572,6 +1640,9 @@ def create_app(
                 description="",
                 visibility=visibility,
                 tags_json="[]",
+                share_role=share_role,
+                share_expires_at=share_expires_at,
+                share_password_hash=password_hash(share_password) if share_password else None,
                 created_at=timestamp,
                 updated_at=timestamp,
             )
@@ -2564,6 +2635,19 @@ def create_app(
         )
         if visibility == "public":
             ensure_scope(principal, "share:public")
+        if visibility not in {"public", "unlisted"} and (
+            body.password or body.role != "edit" or body.expires_in not in (None, "never")
+        ):
+            # Link settings gate readers who reach the project through the link.
+            # On an organization or private project they would lock out members
+            # who have no way to learn the password.
+            raise HTTPException(
+                422, "role, expiry, and password apply only to public or unlisted shares"
+            )
+        delta = SHARE_EXPIRY_DELTAS.get(body.expires_in or "never")
+        expires_at = (
+            (datetime.now(UTC) + delta).isoformat().replace("+00:00", "Z") if delta else None
+        )
         return {
             "project": project_json(
                 create_project(
@@ -2574,11 +2658,71 @@ def create_app(
                     visibility,
                     body.organization_id,
                     body.group_ids,
+                    body.role,
+                    expires_at,
+                    body.password,
                 ),
                 session,
                 principal.account,
             )
         }
+
+    @app.get("/api/shares")
+    def list_shares(
+        principal: AuthPrincipal = Depends(require_scope("read:projects")),
+        session: Session = Depends(get_session),
+    ):
+        """The caller's active shares: managed public or unlisted projects.
+
+        A share's id is its project id. Expired links stay listed so the owner can
+        see and revoke them.
+        """
+        account = principal.account
+        candidates = session.scalars(
+            select(Project)
+            .options(*LISTING_EAGER_LOADS)
+            .where(
+                (Project.owner_id == account.id)
+                | (Project.created_by_id == account.id)
+                | Project.organization_id.in_(
+                    select(OrganizationMember.organization_id).where(
+                        OrganizationMember.account_id == account.id,
+                        OrganizationMember.role == "administrator",
+                    )
+                ),
+                Project.visibility.in_(("public", "unlisted")),
+            )
+            .order_by(Project.updated_at.desc())
+        ).all()
+        return {
+            "shares": [
+                project_json(project, session, account) | {"projectSlug": project.slug}
+                for project in candidates
+                if can_manage_project(session, project, account)
+            ]
+        }
+
+    @app.delete("/api/shares/{share_id}", status_code=204)
+    def revoke_share(
+        share_id: str,
+        principal: AuthPrincipal = Depends(require_scope("write:projects")),
+        session: Session = Depends(get_session),
+    ):
+        """Revoke a share: make the project private and clear its link settings.
+
+        The project and its versions are kept; only the link stops working.
+        """
+        project = owned(session, session.get(Project, share_id), principal)
+        if project.visibility not in {"public", "unlisted"}:
+            # Organization-wide access is not a link share; revoking it here would
+            # silently remove it, so it stays managed through project settings.
+            raise HTTPException(404, "share not found")
+        project.visibility = "private"
+        project.share_role = "edit"
+        project.share_expires_at = None
+        project.share_password_hash = None
+        project.updated_at = now()
+        session.commit()
 
     @app.get("/api/projects")
     def list_projects(
@@ -3245,6 +3389,7 @@ def create_app(
     ):
         """List a visible project's versions, newest first (needs read:projects)."""
         project = visible(session, session.get(Project, project_id), principal)
+        link_gate(session, project, principal, None)
         body = {
             "versions": [
                 {
@@ -3455,6 +3600,109 @@ def create_app(
         )
         session.commit()
         return body
+
+    access_attempts: dict[tuple[str, str], list[float]] = {}
+    access_attempts_lock = threading.Lock()
+
+    def reserve_access_attempt(key: tuple[str, str]) -> float:
+        """Count one attempt against ``key`` or raise 429, atomically.
+
+        The attempt is reserved before the password is checked so concurrent
+        requests cannot all pass the limit check ahead of any recorded failure.
+        """
+        stamp = time.monotonic()
+        cutoff = stamp - SHARE_ACCESS_WINDOW_SECONDS
+        with access_attempts_lock:
+            if len(access_attempts) > 1024:
+                for stale in [
+                    other
+                    for other, stamps in access_attempts.items()
+                    if not stamps or stamps[-1] <= cutoff
+                ]:
+                    del access_attempts[stale]
+            recent = [seen for seen in access_attempts.get(key, []) if seen > cutoff]
+            if len(recent) >= SHARE_ACCESS_MAX_FAILURES:
+                access_attempts[key] = recent
+                raise HTTPException(429, "too many incorrect passwords; try again later")
+            access_attempts[key] = [*recent, stamp]
+        return stamp
+
+    def release_access_attempt(key: tuple[str, str], stamp: float) -> None:
+        """Give back a reserved attempt that was not a wrong password."""
+        with access_attempts_lock:
+            stamps = access_attempts.get(key, [])
+            if stamp in stamps:
+                stamps.remove(stamp)
+
+    def share_access_response(
+        request: Request,
+        session: Session,
+        project: Project | None,
+        principal: AuthPrincipal | None,
+        password: str,
+    ) -> Response:
+        """Return the latest content and share role once the link password checks out.
+
+        Wrong guesses are throttled per project and client address, because each
+        check costs a scrypt hash and the route is anonymous.
+        """
+        project = visible(session, project, principal)
+        key = (project.id, str(client_ip(request) or ""))
+        stamp = reserve_access_attempt(key)
+        try:
+            project = visible_read(session, project, principal, password)
+        except HTTPException as error:
+            if error.status_code != 401:
+                release_access_attempt(key, stamp)
+            raise
+        release_access_attempt(key, stamp)
+        try:
+            content = object_storage.get(project.versions[-1].object_key)
+        except KeyError:
+            raise HTTPException(404, "project content not found")
+        return Response(
+            json.dumps({"content": content.decode(), "role": project.share_role}),
+            media_type="application/json",
+            headers={"Cache-Control": "private, no-store"},
+        )
+
+    @app.post("/org/{organization_slug}/{slug}/access")
+    def organization_share_access(
+        organization_slug: str,
+        slug: str,
+        body: ShareAccessRequest,
+        request: Request,
+        principal: AuthPrincipal | None = Depends(optional_principal),
+        session: Session = Depends(get_session),
+    ):
+        """Unlock a password-protected organization project link."""
+        project = session.scalar(
+            select(Project)
+            .join(Organization)
+            .where(Organization.slug == organization_slug, Project.slug == slug)
+        )
+        return share_access_response(request, session, project, principal, body.password)
+
+    @app.post("/{username}/{slug}/access")
+    def share_access(
+        username: str,
+        slug: str,
+        body: ShareAccessRequest,
+        request: Request,
+        principal: AuthPrincipal | None = Depends(optional_principal),
+        session: Session = Depends(get_session),
+    ):
+        """Unlock a password-protected personal project link."""
+        project = session.scalar(
+            select(Project)
+            .join(Account, Project.owner_id == Account.id)
+            .where(
+                Account.username == username,
+                Project.slug == slug,
+                Project.organization_id.is_(None),
+            )
+        )
+        return share_access_response(request, session, project, principal, body.password)
 
     @app.get("/{username}/{slug}")
     def project_page(

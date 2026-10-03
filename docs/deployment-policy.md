@@ -7,13 +7,15 @@ library, sharing endpoints, and branding.
 
 ## Loading
 
-The web, desktop and Jupyter builds fetch `deployment.json` from the app's base
-URL (`<base>/deployment.json`) before the first render, so nothing paints with a
-setting the policy then changes. No policy applies when the file is absent
-(404 or an HTML fallback page), unreachable, not JSON, of an unknown `version`,
-or does not arrive within 3 seconds. In those cases the app behaves exactly as
-it does without the file. Reading the file from a container mount or the
-desktop config directory arrives in a later release.
+The web and Jupyter builds fetch `deployment.json` from the app's base URL
+(`<base>/deployment.json`) before the first render, so nothing paints with a
+setting the policy then changes. Desktop first reads the app config directory
+(see [Desktop](#desktop)), falling back to that web URL only when the config-dir
+file is absent or cannot be read. No policy applies when the selected file is
+absent (404 or an HTML fallback page), not JSON, or of an unknown `version`.
+An unreachable web file or a fetch that takes more than 3 seconds also yields
+no policy. In those cases the app behaves exactly as it does without the file.
+The container image writes the file on every boot (see [Docker](#docker)).
 
 What each section does today:
 
@@ -198,9 +200,86 @@ The client parser is lenient and works section by section:
 - Unknown top-level keys are ignored with one warning.
 - Non-JSON content or a non-object is ignored silently.
 
-A stricter container-side validator is planned. The schema cannot express some
-rules that the parser enforces: duplicate service ids after trimming, and
-numeric service field values beyond the safe-integer range.
+The container validates strictly: it rejects unknown keys, duplicate or invalid
+ids, service ids that collide after trimming, and numeric service field values
+beyond the safe-integer range, none of which JSON Schema alone can all express.
+
+## Desktop
+
+Place `deployment.json` in Tauri's `<app_config_dir>`, next to any
+`admin-profile.json`. For the standard `org.geolibre.desktop` application
+identifier, the paths are:
+
+| OS | Policy path |
+| --- | --- |
+| Linux | `$XDG_CONFIG_HOME/org.geolibre.desktop/deployment.json`, or `~/.config/org.geolibre.desktop/deployment.json` when `XDG_CONFIG_HOME` is unset |
+| macOS | `~/Library/Application Support/org.geolibre.desktop/deployment.json` |
+| Windows | `%APPDATA%\org.geolibre.desktop\deployment.json` (normally `C:\Users\<user>\AppData\Roaming\org.geolibre.desktop\deployment.json`) |
+
+These follow Tauri's [app config directory](https://v2.tauri.app/reference/javascript/api/namespacepath/#appconfigdir).
+Sandboxed installations may resolve the directory inside their sandbox;
+custom builds with a different application identifier use that identifier
+instead.
+
+The `read_deployment_policy` command returns raw UTF-8 text, or `null` when
+the file is absent. A leading UTF-8 BOM is accepted by the parser. The selected
+policy is applied before the first render, including capability restrictions,
+without rebuilding the app. Restart GeoLibre after changing the file; there is
+no runtime file watching.
+
+An existing config-dir file is authoritative, even if empty, malformed or of
+an unsupported version: it yields no policy rather than falling back to a
+bundled file. Config-dir and bundled policies are never merged. When the file
+is absent, GeoLibre fetches `<base>/deployment.json` instead. Other read errors
+(including permission failures) produce a console warning in every build and
+fall back to that same web file. Unsupported versions also warn in every build.
+With no file in either location, existing behavior is unchanged.
+
+A non-empty policy `interface` replaces `admin-profile.json` whole, just as
+on the web; an absent or empty `interface` leaves the admin profile in force.
+The config directory is user-writable: this is desktop provisioning, not a
+security boundary or server-side enforcement.
+
+## Docker
+
+The image writes a validated `/usr/share/nginx/html/deployment.json` on every
+boot, served `Cache-Control: no-store`. The source is the file mounted at
+`GEOLIBRE_DEPLOYMENT_FILE`, or an empty `{"version": 1}` when none is mounted.
+Environment variables then override it field by field; a blank variable counts
+as unset.
+
+```bash
+docker run -p 8080:80 \
+  -v ./deployment.json:/etc/geolibre/deployment.json:ro \
+  -e GEOLIBRE_DEPLOYMENT_FILE=/etc/geolibre/deployment.json \
+  -e GEOLIBRE_CAPABILITIES=data:add,export:data \
+  ghcr.io/opengeos/geolibre
+```
+
+| Variable | Policy field |
+| --- | --- |
+| `GEOLIBRE_CAPABILITIES` | `capabilities`: comma-separated names, or `none` for no grants |
+| `GEOLIBRE_SERVICES_FILE` | `services.catalog` |
+| `GEOLIBRE_BUILTIN_SERVICES=off` | `services.builtins: false` |
+| `GEOLIBRE_SHARE_URL` | `sharing.shareUrl` |
+| `GEOLIBRE_COLLAB_URL` | `sharing.collabUrl` |
+| `GEOLIBRE_EMBED_ORIGINS` | `sharing.embedOrigins` |
+| `GEOLIBRE_GEOLENS_URL` | `geolens.url` |
+| `GEOLIBRE_APP_NAME` | `branding.appName`: whitespace collapsed, cut to 60 characters |
+| `GEOLIBRE_AI_URL` / `GEOLIBRE_AI_MODEL` | `ai.enabled: true` / `ai.model` |
+
+The boot log has one `Deployment policy: <path> from <VAR> = <value>` line per
+override. Tokens never appear in it, and a query string or fragment on a URL is
+replaced with `[redacted]`.
+
+Invalid input stops the boot with an `ERROR:` line that names the JSON path (for
+example `ERROR: GEOLIBRE_DEPLOYMENT_FILE capabilities[1] must be one of: ...`),
+so nginx never starts with a weaker policy than you asked for. A file with
+`ai.enabled: true` also needs `GEOLIBRE_AI_URL`, `GEOLIBRE_AI_PROXY_URL` and
+`GEOLIBRE_AI_PROXY_TOKEN`, otherwise the boot fails.
+
+`GEOLIBRE_CAPABILITIES` is also published into the runtime config, so the grant
+holds even if `deployment.json` is blocked or arrives late.
 
 !!! warning "Public file, no secrets"
     `deployment.json` is served to every browser. Never put secrets in it. The

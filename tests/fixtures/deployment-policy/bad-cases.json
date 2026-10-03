@@ -3,6 +3,7 @@
     "input": {
       "version": 2
     },
+    "container": "version must be the integer 1",
     "schema": "reject",
     "parser": "null"
   },
@@ -10,6 +11,7 @@
     "input": {
       "capabilities": ["data:add"]
     },
+    "container": "version must be the integer 1",
     "schema": "reject",
     "parser": "null"
   },
@@ -17,11 +19,13 @@
     "input": {
       "version": "1"
     },
+    "container": "version must be the integer 1",
     "schema": "reject",
     "parser": "null"
   },
   "not-object": {
     "input": [],
+    "container": "must contain a JSON object",
     "schema": "reject",
     "parser": "null"
   },
@@ -30,6 +34,7 @@
       "version": 1,
       "theme": "dark"
     },
+    "container": "theme is not a known key",
     "schema": "reject",
     "parser": {
       "dropped": []
@@ -40,6 +45,7 @@
       "version": 1,
       "capabilities": ["data:add", "data:delete"]
     },
+    "container": "capabilities[1] must be one of: project:edit",
     "schema": "reject",
     "parser": {
       "dropped": ["capabilities"]
@@ -50,6 +56,7 @@
       "version": 1,
       "capabilities": ["data:add", "data:add"]
     },
+    "container": "capabilities[1] is a duplicate",
     "schema": "reject",
     "parser": {
       "dropped": ["capabilities"]
@@ -63,6 +70,7 @@
         "sideload": "no"
       }
     },
+    "container": "plugins.sideload must be a boolean",
     "schema": "reject",
     "parser": {
       "dropped": ["plugins"]
@@ -76,6 +84,7 @@
         "allowed": ["a", " a"]
       }
     },
+    "container": "plugins.allowed[1] is a duplicate after trimming",
     "schema": "accept",
     "parser": {
       "dropped": ["plugins"]
@@ -90,6 +99,7 @@
         "token": "x"
       }
     },
+    "container": "interface.token is not a known key",
     "schema": "reject",
     "parser": {
       "dropped": ["interface"]
@@ -102,6 +112,7 @@
         "level": "expert"
       }
     },
+    "container": "interface.level must be one of: beginner, intermediate, advanced",
     "schema": "reject",
     "parser": {
       "dropped": ["interface"]
@@ -131,6 +142,7 @@
         ]
       }
     },
+    "container": "services.catalog[1].id is a duplicate after trimming",
     "schema": "accept",
     "parser": {
       "dropped": ["services"]
@@ -150,6 +162,7 @@
         ]
       }
     },
+    "container": "services.catalog[0].fields must be a nonempty object",
     "schema": "reject",
     "parser": {
       "dropped": ["services"]
@@ -171,6 +184,7 @@
         ]
       }
     },
+    "container": "services.catalog[0].kind must be one of: wms",
     "schema": "reject",
     "parser": {
       "dropped": ["services"]
@@ -192,6 +206,7 @@
         ]
       }
     },
+    "container": "services.catalog[0].fields must be a nonempty object",
     "schema": "accept",
     "parser": {
       "dropped": ["services"]
@@ -204,6 +219,7 @@
         "shareUrl": "ftp://x"
       }
     },
+    "container": "sharing.shareUrl must be a https:// URL",
     "schema": "reject",
     "parser": {
       "dropped": ["sharing"]
@@ -216,6 +232,7 @@
         "collabUrl": "https://relay.example.com"
       }
     },
+    "container": "sharing.collabUrl must be a wss:// URL",
     "schema": "reject",
     "parser": {
       "dropped": ["sharing"]
@@ -228,6 +245,7 @@
         "url": "on"
       }
     },
+    "container": "geolens.url must be",
     "schema": "reject",
     "parser": {
       "dropped": ["geolens"]
@@ -242,6 +260,7 @@
         "token": "x"
       }
     },
+    "container": "ai.token is not a known key",
     "schema": "reject",
     "parser": {
       "dropped": ["ai"]
@@ -254,6 +273,7 @@
         "appName": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
       }
     },
+    "container": "branding.appName must be at most 60 characters",
     "schema": "reject",
     "parser": {
       "dropped": ["branding"]
@@ -264,6 +284,7 @@
       "version": 1,
       "branding": "Acme"
     },
+    "container": "branding must be an object",
     "schema": "reject",
     "parser": {
       "dropped": ["branding"]

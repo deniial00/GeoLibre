@@ -889,6 +889,25 @@ a non-administrator may list only that organization's groups. When `visibility`
 is omitted, the organization's `defaultVisibility` applies, or `private` for a
 personal project.
 
+Optional share-link settings (only for `public` or `unlisted` projects; any other
+visibility answers `422` when one is set): `role` (`view`, `comment`, or `edit`; default
+`edit`), `expiresIn` (`24h`, `7d`, `30d`, or `never`), and `password`. They are
+echoed in every project representation as `role`, `expiresAt` (ISO timestamp or
+`null`), and `hasPassword`. `role` is metadata for viewers; the server enforces
+only the expiry and the password. Once `expiresAt` has passed, anyone but a
+manager of the project gets `410` (`share link expired`) from every read route.
+While a password is set, those readers get `401` (`share password required`)
+until they unlock the link with `POST /{username}/{slug}/access` (or
+`POST /org/{organization}/{slug}/access` for an organization project) with
+`{"password": "..."}`. That returns `{"content": "<project JSON>", "role": "view"}`
+with `Cache-Control: private, no-store`. After 10 wrong passwords within 5 minutes
+from one client address, the route answers `429` for that project, even for the
+right password. The count is kept in memory, per server process.
+
+The version-list route (`GET /api/projects/{id}/versions`) takes no password, so
+while a password is set it answers `401` to everyone except a manager of the
+project.
+
 ### `GET /api/projects`
 
 Returns a page in newest-updated-first order:
@@ -985,6 +1004,22 @@ on it to explain the refusal. Turning the switch off with
 `PATCH /api/projects/{id}` `{"deleteProtected": false}` unblocks the delete.
 
 Deleting a project also removes its pending transfers and its redirect rows.
+
+### `GET /api/shares`
+
+Requires `read:projects`. Returns `{"shares": [<project>, ...]}`, newest-updated
+first: the projects the caller manages whose `visibility` is `public` or `unlisted`
+(organization-visible projects are not link shares). Each
+entry is a project representation plus `projectSlug`. A share's `id` is its
+project id. Expired links stay listed so they can be revoked.
+
+### `DELETE /api/shares/{id}`
+
+Requires `write:projects` and management of the project. Revokes the share: the
+project becomes `private` and its `role`, expiry, and password are reset. The
+project, its versions, and its group shares are kept. Response: `204`; `403` when
+the caller does not manage the project; `404` when the project is unknown, already
+private, or organization-visible.
 
 ### `GET /api/projects/{id}/activity`
 

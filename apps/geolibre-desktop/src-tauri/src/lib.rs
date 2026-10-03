@@ -488,6 +488,7 @@ pub fn run() {
             pick_image_paths,
             read_selected_image,
             read_admin_profile,
+            read_deployment_policy,
             read_env_vars,
             take_pending_project_paths,
             allow_raster_asset,
@@ -1182,6 +1183,21 @@ fn is_safe_absolute_path(path: &str) -> bool {
     !path.split(['/', '\\']).any(|segment| segment == "..")
 }
 
+/// Read optional configuration without parsing or normalizing its UTF-8 text.
+/// Only a missing file is treated as absent; all other read errors propagate.
+fn read_optional_config_file(path: &Path) -> Result<Option<String>, std::io::Error> {
+    match fs::read_to_string(path) {
+        Ok(contents) => Ok(Some(contents)),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(error) => Err(error),
+    }
+}
+
+fn read_admin_profile_file(path: &Path) -> Result<Option<String>, String> {
+    read_optional_config_file(path)
+        .map_err(|error| format!("Could not read admin profile: {error}"))
+}
+
 /// Read the optional admin UI-profile file (`<app_config_dir>/admin-profile.json`).
 ///
 /// Returns `Ok(None)` when the file is absent so a missing file is not an error;
@@ -1194,11 +1210,19 @@ fn read_admin_profile(app: tauri::AppHandle) -> Result<Option<String>, String> {
         .app_config_dir()
         .map_err(|error| format!("Could not resolve config directory: {error}"))?;
     let path = config_dir.join("admin-profile.json");
-    match fs::read_to_string(&path) {
-        Ok(contents) => Ok(Some(contents)),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
-        Err(error) => Err(format!("Could not read admin profile: {error}")),
-    }
+    read_admin_profile_file(&path)
+}
+
+/// Read the optional deployment policy (`<app_config_dir>/deployment.json`).
+/// Returns its raw UTF-8 text, or `None` only when the file is absent.
+#[tauri::command]
+fn read_deployment_policy(app: tauri::AppHandle) -> Result<Option<String>, String> {
+    let config_dir = app
+        .path()
+        .app_config_dir()
+        .map_err(|error| format!("Could not resolve config directory: {error}"))?;
+    read_optional_config_file(&config_dir.join("deployment.json"))
+        .map_err(|error| format!("Could not read deployment policy: {error}"))
 }
 
 /// The only environment variable names `read_env_vars` will ever return. This
@@ -4892,7 +4916,6 @@ mod tests {
     #[cfg(not(feature = "mas"))]
     use std::io::{Cursor, Write};
     use std::net::IpAddr;
-    #[cfg(not(feature = "mas"))]
     use std::path::PathBuf;
     #[cfg(not(feature = "mas"))]
     use std::process::Command;
@@ -4951,10 +4974,8 @@ mod tests {
     // on drop, so scratch dirs are cleaned up even when an assertion panics.
     // Uses the process id (no rand dependency) and clears any leftover from a
     // prior run at construction.
-    #[cfg(not(feature = "mas"))]
     struct ScratchDir(PathBuf);
 
-    #[cfg(not(feature = "mas"))]
     impl ScratchDir {
         fn new(name: &str) -> Self {
             let dir = std::env::temp_dir().join(format!("geolibre-{name}-{}", std::process::id()));
@@ -4968,10 +4989,59 @@ mod tests {
         }
     }
 
-    #[cfg(not(feature = "mas"))]
     impl Drop for ScratchDir {
         fn drop(&mut self) {
             let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+
+    #[test]
+    fn optional_config_file_returns_none_only_when_missing() {
+        let root = ScratchDir::new("optional-config-missing");
+        let path = root.path().join("deployment.json");
+        assert_eq!(super::read_optional_config_file(&path).unwrap(), None);
+        assert_eq!(super::read_admin_profile_file(&path).unwrap(), None);
+    }
+
+    #[test]
+    fn optional_config_file_preserves_raw_utf8_text() {
+        let root = ScratchDir::new("optional-config-text");
+        let path = root.path().join("deployment.json");
+        for contents in [
+            "",
+            " \r\n{\"name\":\"café\"}\r\n ",
+            "\u{feff}{\"enabled\":true}\n",
+        ] {
+            fs::write(&path, contents).unwrap();
+            assert_eq!(
+                super::read_optional_config_file(&path).unwrap(),
+                Some(contents.to_owned())
+            );
+            assert_eq!(
+                super::read_admin_profile_file(&path).unwrap(),
+                Some(contents.to_owned())
+            );
+        }
+    }
+
+    #[test]
+    fn optional_config_file_propagates_non_not_found_errors() {
+        let root = ScratchDir::new("optional-config-errors");
+        let directory = root.path().join("deployment.json");
+        fs::create_dir(&directory).unwrap();
+        let invalid_utf8 = root.path().join("admin-profile.json");
+        fs::write(&invalid_utf8, [0xff]).unwrap();
+
+        for path in [&directory, &invalid_utf8] {
+            let original_error = fs::read_to_string(path).unwrap_err();
+            let error = super::read_optional_config_file(path).unwrap_err();
+            assert_ne!(error.kind(), std::io::ErrorKind::NotFound);
+            assert_eq!(error.kind(), original_error.kind());
+            assert_eq!(error.to_string(), original_error.to_string());
+            assert_eq!(
+                super::read_admin_profile_file(path).unwrap_err(),
+                format!("Could not read admin profile: {original_error}")
+            );
         }
     }
 

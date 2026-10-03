@@ -17,6 +17,7 @@ import {
   parseDeploymentPolicy,
   resolveDeploymentPolicy,
 } from "../apps/geolibre-desktop/src/lib/deployment-policy";
+import { loadAdminProfile } from "../apps/geolibre-desktop/src/lib/admin-profile";
 
 const FIXTURES = fileURLToPath(new URL("./fixtures/deployment-policy/", import.meta.url));
 const SCHEMA_PATH = fileURLToPath(new URL("../schema/deployment.schema.json", import.meta.url));
@@ -71,7 +72,11 @@ const GOOD_DOCUMENTS: Record<string, string> = {
     services: { builtins: false },
     branding: { welcome: false },
   }),
-  "with $schema": JSON.stringify({ $schema: SCHEMA_ID, version: 1, capabilities: ["data:add"] }),
+  "with $schema": JSON.stringify({
+    $schema: SCHEMA_ID,
+    version: 1,
+    capabilities: ["data:add"],
+  }),
 };
 
 test("good documents validate and round-trip silently", (t) => {
@@ -89,6 +94,8 @@ interface BadCase {
   input: unknown;
   /** Whether JSON Schema alone rejects it; "accept" marks rules only the parser enforces. */
   schema: "reject" | "accept";
+  /** Substring the container entrypoint error must contain (docker/deployment_policy.py). */
+  container: string;
   parser: "null" | { dropped: string[] };
 }
 
@@ -141,6 +148,13 @@ test("non-objects and non-JSON return null silently", (t) => {
   assert.equal(warnings.length, 0);
 });
 
+test("a leading UTF-8 BOM is accepted", () => {
+  assert.deepEqual(parseDeploymentPolicy('\uFEFF{"version":1,"capabilities":[]}'), {
+    version: 1,
+    capabilities: [],
+  });
+});
+
 test("an invalid section does not affect the others", (t) => {
   captureWarnings(t);
   const policy = resolveDeploymentPolicy({
@@ -162,7 +176,10 @@ test("omitted differs from empty", () => {
 });
 
 test("id lists are trimmed", () => {
-  const policy = resolveDeploymentPolicy({ version: 1, plugins: { blocked: [" a "] } });
+  const policy = resolveDeploymentPolicy({
+    version: 1,
+    plugins: { blocked: [" a "] },
+  });
   assert.deepEqual(policy?.plugins?.blocked, ["a"]);
 });
 
@@ -267,12 +284,115 @@ test("loadDeploymentPolicy fetches once and installs the policy", async (t) => {
   }
 });
 
+test("desktop config delivery is authoritative or falls back by read result", async (t) => {
+  const cases = [
+    {
+      name: "valid BOM",
+      text: '\uFEFF{"version":1,"capabilities":["data:add"]}',
+      expected: { version: 1, capabilities: ["data:add"] },
+      warnings: 0,
+    },
+    {
+      name: "empty grants",
+      text: '{"version":1,"capabilities":[]}',
+      expected: { version: 1, capabilities: [] },
+      warnings: 0,
+    },
+    {
+      name: "interface replaces admin profile",
+      text: '{"version":1,"interface":{"lock":true}}',
+      expected: { version: 1, interface: { lock: true } },
+      warnings: 0,
+    },
+    { name: "invalid JSON", text: "{", expected: null, warnings: 0 },
+    { name: "empty file", text: "", expected: null, warnings: 0 },
+    {
+      name: "unknown version",
+      text: '{"version":2}',
+      expected: null,
+      warnings: 1,
+    },
+    {
+      name: "absent",
+      text: null,
+      expected: { version: 1, branding: { welcome: false } },
+      warnings: 0,
+    },
+    {
+      name: "absent everywhere",
+      text: null,
+      webAbsent: true,
+      expected: null,
+      warnings: 0,
+    },
+    {
+      name: "read error",
+      text: null,
+      error: "Could not read deployment policy: denied",
+      expected: { version: 1, branding: { welcome: false } },
+      warnings: 1,
+    },
+  ];
+  const globals = globalThis as typeof globalThis & { window?: unknown };
+  const previousWindow = globals.window;
+  try {
+    for (const [index, scenario] of cases.entries()) {
+      await t.test(scenario.name, async (t) => {
+        const warnings = captureWarnings(t);
+        let fetches = 0;
+        globals.window = {
+          __TAURI_INTERNALS__: {
+            invoke: async (command: string) => {
+              assert.equal(command, "read_deployment_policy");
+              if (scenario.error) throw scenario.error;
+              return scenario.text;
+            },
+          },
+        };
+        t.mock.method(globalThis, "fetch", async () => {
+          fetches += 1;
+          if (scenario.webAbsent) return new Response("", { status: 404 });
+          return new Response('{"version":1,"branding":{"welcome":false}}');
+        });
+        // Each case exercises a fresh module's one-shot startup boundary;
+        // a static import would reuse the previous case's cached promise.
+        const { loadDeploymentPolicy: load } = await import(
+          `../apps/geolibre-desktop/src/lib/deployment-policy.ts?desktop=${index}`
+        );
+        const pending = load();
+        assert.equal(load(), pending);
+        assert.deepEqual(await pending, scenario.expected);
+        assert.deepEqual(getDeploymentPolicy(), scenario.expected);
+        assert.equal(fetches, scenario.text === null ? 1 : 0);
+        assert.equal(warnings.length, scenario.warnings);
+        if (scenario.error) assert.match(warnings[0], /read_deployment_policy failed.*denied/);
+        if (scenario.name === "interface replaces admin profile") {
+          const profile = await loadAdminProfile([]);
+          assert.equal(profile?.locked, true);
+          assert.deepEqual(profile?.hiddenMenus, []);
+          // The invoke stub rejects any admin-profile read; fetch stays unused.
+          assert.equal(fetches, 0);
+        }
+      });
+    }
+  } finally {
+    if (previousWindow === undefined) delete globals.window;
+    else globals.window = previousWindow;
+    setDeploymentPolicy(null);
+  }
+});
+
 test("catalog id and name are stored trimmed", () => {
   const policy = resolveDeploymentPolicy({
     version: 1,
     services: {
       catalog: [
-        { id: " city ", name: " City WMS ", kind: "wms", fields: { url: "https://e.example/wms" } },
+        {
+          id: " city ",
+          name: " City WMS ",
+          kind: "wms",
+          fields: { url: "https://e.example/wms" },
+        },
       ],
     },
   });

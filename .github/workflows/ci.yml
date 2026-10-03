@@ -204,6 +204,22 @@ jobs:
         if: ${{ always() }}
         run: docker logs collab
 
+  entrypoint:
+    name: Container entrypoint
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      # Runs the real docker/entrypoint.sh, nginx.conf and deployment_policy.py
+      # in a small image (no app build) and checks deployment.json end to end:
+      # headers, env overrides, good fixtures, and every bad fixture failing boot
+      # with its ERROR. Schema drift is caught by docker/tests in the checks job.
+      - name: Run the entrypoint harness
+        run: bash scripts/test-entrypoint.sh
+
   checks:
     name: Build and test
     runs-on: ubuntu-22.04
