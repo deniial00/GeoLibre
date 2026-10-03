@@ -596,6 +596,13 @@ def _adopt_orphan(
         else:
             deactivate_account(session, account_id, now_ts)
 
+    if provider.break_glass_account_id == orphan_id or is_last_active_admin(
+        session, organization_id, orphan_id
+    ):
+        # Removing it would leave the organization without an administrator, the
+        # removal SCIM refuses with a 409; the orphan keeps its membership.
+        logger.warning("scim orphan kept: it is the last administrator")
+        return
     deactivate_account(session, orphan_id, now_ts)
     session.execute(
         delete(OrganizationMember).where(

@@ -457,8 +457,17 @@ def touch_policy(session: Session, token_digest: str, now_ts: int) -> None:
         session.commit()
 
 
-def backfill_policy(session: Session, digest: str) -> PersonalTokenPolicy:
-    """Create legacy PAT metadata without racing another request doing the same."""
+def backfill_policy(session: Session, digest: str, *, commit: bool = True) -> PersonalTokenPolicy:
+    """Create legacy PAT metadata without racing another request doing the same.
+
+    Args:
+        session: The request session.
+        digest: Digest of the legacy personal token.
+        commit: Commit afterwards; pass False when the caller owns the transaction.
+
+    Returns:
+        The new or already-existing policy row.
+    """
     policy = PersonalTokenPolicy(
         id=str(uuid.uuid4()),
         token_digest=digest,
@@ -479,7 +488,8 @@ def backfill_policy(session: Session, digest: str) -> PersonalTokenPolicy:
         if existing is None:
             raise
         return existing
-    session.commit()
+    if commit:
+        session.commit()
     return policy
 
 
@@ -1190,14 +1200,21 @@ def owned_project_session(
     return project
 
 
-def backfill_account_policies(session: Session, account_id: str) -> None:
+def backfill_account_policies(session: Session, account_id: str, *, commit: bool = True) -> None:
+    """Give every legacy token of the account a policy row.
+
+    Args:
+        session: The request session.
+        account_id: Account whose legacy tokens are backfilled.
+        commit: Commit per row; pass False when the caller owns the transaction.
+    """
     missing = session.scalars(
         select(Token.digest)
         .outerjoin(PersonalTokenPolicy, PersonalTokenPolicy.token_digest == Token.digest)
         .where(Token.account_id == account_id, PersonalTokenPolicy.id.is_(None))
     ).all()
     for digest in missing:
-        backfill_policy(session, digest)
+        backfill_policy(session, digest, commit=commit)
 
 
 def _validate_pat_lifetime(days: int | None) -> None:

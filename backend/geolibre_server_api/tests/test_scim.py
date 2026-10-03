@@ -10,7 +10,7 @@ from fastapi.testclient import TestClient
 from geolibre_server_api import auth as server_auth
 from geolibre_server_api.auth_models import Account
 from geolibre_server_api.enterprise_models import ScimUser
-from geolibre_server_api.org_models import OrganizationMember
+from geolibre_server_api.org_models import GroupMember, OrganizationMember
 from geolibre_server_api.policy import deactivate_account
 from helpers import (
     add_member,
@@ -261,6 +261,37 @@ def test_scim_email_link_requires_verified_email_and_never_double_links(oauth_cl
         "user"
     ]["id"]
     assert separate_id not in {provisioned["id"], first_id}
+
+
+def test_sign_in_adopts_orphan_scim_user_and_group_memberships(oauth_client, fake_idp):
+    _, org_id, scim_token = _scim_org(oauth_client)
+    claims = fake_idp.base_claims("adopter-sub", preferred_username="adopter@example.org")
+    tokens = _sso_tokens(oauth_client, *sso_sign_in(oauth_client, fake_idp, "acme", claims))
+    real_id = oauth_client.get("/api/users/me", headers=auth(tokens["access_token"])).json()[
+        "user"
+    ]["id"]
+    orphan = _create_user(oauth_client, scim_token, org_id, "orphan@example.org")
+    group = _scim(
+        oauth_client,
+        scim_token,
+        "POST",
+        org_id,
+        "/Groups",
+        {"displayName": "GIS", "members": [{"value": orphan["id"]}]},
+    )
+    assert group.status_code == 201, group.text
+    assert orphan["id"] != real_id
+
+    moved = {**claims, "preferred_username": "orphan@example.org"}
+    _sso_tokens(oauth_client, *sso_sign_in(oauth_client, fake_idp, "acme", moved))
+    with oauth_client.app.state.session_factory() as session:
+        scim_user = session.scalar(
+            select(ScimUser).where(ScimUser.user_name == "orphan@example.org")
+        )
+        assert scim_user.account_id == real_id
+        assert session.get(GroupMember, (group.json()["id"], real_id)) is not None
+        assert session.get(GroupMember, (group.json()["id"], orphan["id"])) is None
+        assert session.get(OrganizationMember, (org_id, orphan["id"])) is None
 
 
 def test_deleted_sso_user_can_be_reprovisioned_without_resurrecting_credentials(

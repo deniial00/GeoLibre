@@ -268,7 +268,8 @@ def _revoke_credentials(session: Session, account_id: str, now_ts: int) -> None:
         .values(revoked_at=now_ts)
     )
     # Legacy tokens get a policy row first so the revocation below covers them.
-    backfill_account_policies(session, account_id)
+    # The caller owns the transaction, so the backfill must not commit.
+    backfill_account_policies(session, account_id, commit=False)
     session.execute(
         update(PersonalTokenPolicy)
         .where(
