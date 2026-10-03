@@ -118,8 +118,11 @@ describe("recovering a URL plugin blocked by its integrity pin", () => {
     served.set(
       MANIFEST_URL,
       JSON.stringify({
-        id: "pin-demo", name: "Pin Demo", version: "1.0.0",
-        entry: "entry.js", style: "style.css",
+        id: "pin-demo",
+        name: "Pin Demo",
+        version: "1.0.0",
+        entry: "entry.js",
+        style: "style.css",
       }),
     );
     const result = await externalPlugins.loadExternalPlugins(manager, [], [MANIFEST_URL], {
@@ -134,12 +137,15 @@ describe("recovering a URL plugin blocked by its integrity pin", () => {
 
   it("allowed empty denies URLs but exempts bundled drop-ins", async () => {
     const policy = { version: 1 as const, plugins: { allowed: [] } };
-    const denied = await externalPlugins.loadExternalPlugins(manager, [], [MANIFEST_URL], { policy });
+    const denied = await externalPlugins.loadExternalPlugins(manager, [], [MANIFEST_URL], {
+      policy,
+    });
     assert.deepEqual(requests, [MANIFEST_URL]);
     assert.match(denied.issues[0].message, /not allowed/);
     requests = [];
     const bundled = await externalPlugins.loadExternalPlugins(manager, [], [MANIFEST_URL], {
-      policy, bundledManifestUrls: [MANIFEST_URL],
+      policy,
+      bundledManifestUrls: [MANIFEST_URL],
     });
     assert.deepEqual(bundled.loadedPluginIds, ["pin-demo"]);
     assert.deepEqual(bundled.issues, []);
@@ -148,11 +154,14 @@ describe("recovering a URL plugin blocked by its integrity pin", () => {
 
   it("sideload false denies stored manual URLs but permits registry URLs", async () => {
     const policy = { version: 1 as const, plugins: { sideload: false } };
-    const denied = await externalPlugins.loadExternalPlugins(manager, [], [MANIFEST_URL], { policy });
+    const denied = await externalPlugins.loadExternalPlugins(manager, [], [MANIFEST_URL], {
+      policy,
+    });
     assert.deepEqual(requests, []);
     assert.match(denied.issues[0].message, /sideloading/);
     const registry = await externalPlugins.loadExternalPlugins(manager, [], [MANIFEST_URL], {
-      policy, registryManifestUrls: [MANIFEST_URL],
+      policy,
+      registryManifestUrls: [MANIFEST_URL],
     });
     assert.deepEqual(registry.loadedPluginIds, ["pin-demo"]);
     assert.deepEqual(registry.issues, []);
@@ -183,7 +192,10 @@ describe("recovering a URL plugin blocked by its integrity pin", () => {
           { policy, ...(filteredByHook ? { configuredPluginDirectories: directories } : {}) },
         );
         assert.deepEqual(result.loadedPluginIds, []);
-        assert.deepEqual(result.issues.map((issue) => issue.archiveName), directories);
+        assert.deepEqual(
+          result.issues.map((issue) => issue.archiveName),
+          directories,
+        );
         for (const issue of result.issues) {
           assert.match(issue.message, /sideloading is disabled by deployment policy/);
         }
@@ -197,7 +209,8 @@ describe("recovering a URL plugin blocked by its integrity pin", () => {
   it("programmatic archive installation refuses before unpacking with a load issue", async () => {
     await assert.rejects(
       externalPlugins.installWebPluginArchive(manager, "denied.zip", new Uint8Array(), app, {
-        version: 1, plugins: { sideload: false },
+        version: 1,
+        plugins: { sideload: false },
       }),
       (error: unknown) => {
         assert.ok(error instanceof externalPlugins.PluginPolicyError);
@@ -216,7 +229,8 @@ describe("recovering a URL plugin blocked by its integrity pin", () => {
     });
     await assert.rejects(
       externalPlugins.installWebPluginArchive(manager, "blocked.zip", bytes, app, {
-        version: 1, plugins: { blocked: ["pin-demo"] },
+        version: 1,
+        plugins: { blocked: ["pin-demo"] },
       }),
       (error: unknown) => {
         assert.ok(error instanceof externalPlugins.PluginPolicyError);

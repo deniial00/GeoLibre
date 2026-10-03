@@ -407,9 +407,12 @@ export function ManagePluginsDialog({
   // id collision. Keep entries that were previously installed by URL visible
   // so users can remove that old installation after a plugin moves built-in.
   const entries = useMemo(
-    () => registryEntries.filter((entry) =>
-      evaluatePlugin(entry.id, "registry", policy).allowed &&
-      (isInstalled(entry) || !loadedVersions.has(entry.id))),
+    () =>
+      registryEntries.filter(
+        (entry) =>
+          evaluatePlugin(entry.id, "registry", policy).allowed &&
+          (isInstalled(entry) || !loadedVersions.has(entry.id)),
+      ),
     [isInstalled, loadedVersions, registryEntries, policy],
   );
   const installedCount = useMemo(() => entries.filter(isInstalled).length, [entries, isInstalled]);
@@ -870,21 +873,14 @@ function SettingsTab({
               </p>
             </div>
           ) : null}
-          {installError ? (
-            <p className="text-xs text-destructive">{installError}</p>
-          ) : null}
+          {installError ? <p className="text-xs text-destructive">{installError}</p> : null}
           {installNotice ? (
-            <p className="text-xs text-emerald-600 dark:text-emerald-400">
-              {installNotice}
-            </p>
+            <p className="text-xs text-emerald-600 dark:text-emerald-400">{installNotice}</p>
           ) : null}
           {installedFromFile.length > 0 ? (
             <div className="space-y-2">
               {installedFromFile.map((plugin) => (
-                <div
-                  key={plugin.id}
-                  className="flex items-center gap-2 rounded-md border p-2"
-                >
+                <div key={plugin.id} className="flex items-center gap-2 rounded-md border p-2">
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center gap-2">
                       <span className="truncate text-xs font-medium">
@@ -962,13 +958,8 @@ function SettingsTab({
           ) : (
             <div className="space-y-2">
               {directories.map((directory) => (
-                <div
-                  key={directory}
-                  className="flex items-center gap-2 rounded-md border p-2"
-                >
-                  <span className="min-w-0 flex-1 truncate text-xs">
-                    {directory}
-                  </span>
+                <div key={directory} className="flex items-center gap-2 rounded-md border p-2">
+                  <span className="min-w-0 flex-1 truncate text-xs">{directory}</span>
                   <Button
                     type="button"
                     size="icon"
@@ -1024,10 +1015,7 @@ function SettingsTab({
           ) : (
             <div className="space-y-2">
               {manifestUrls.map((url) => (
-                <div
-                  key={url}
-                  className="flex items-center gap-2 rounded-md border p-2"
-                >
+                <div key={url} className="flex items-center gap-2 rounded-md border p-2">
                   <span className="min-w-0 flex-1 truncate text-xs">{url}</span>
                   <Button
                     type="button"

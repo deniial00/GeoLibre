@@ -804,9 +804,11 @@ export function reloadExternalUrlPlugin(
 ): Promise<GeoLibrePlugin> {
   const inFlight = inFlightUrlUpgrades.get(manifestUrl);
   if (inFlight) return inFlight;
-  const promise = reloadExternalUrlPluginUncoalesced(manager, manifestUrl, app, options).finally(() => {
-    inFlightUrlUpgrades.delete(manifestUrl);
-  });
+  const promise = reloadExternalUrlPluginUncoalesced(manager, manifestUrl, app, options).finally(
+    () => {
+      inFlightUrlUpgrades.delete(manifestUrl);
+    },
+  );
   inFlightUrlUpgrades.set(manifestUrl, promise);
   return promise;
 }

@@ -106,9 +106,11 @@ test("installs a plugin from an uploaded zip, persists it across reload, and uni
 test("blocked archive installs report denial without registering or persisting the plugin", async ({
   page,
 }) => {
-  await page.route("**/deployment.json", (route) => route.fulfill({
-    json: { version: 1, plugins: { blocked: [PLUGIN_ID] } },
-  }));
+  await page.route("**/deployment.json", (route) =>
+    route.fulfill({
+      json: { version: 1, plugins: { blocked: [PLUGIN_ID] } },
+    }),
+  );
   await page.goto("/");
   await expect(page.getByTestId("map-canvas")).toBeVisible();
   const dialog = await openManagePluginsSettings(page);
@@ -121,7 +123,9 @@ test("blocked archive installs report denial without registering or persisting t
     mimeType: "application/zip",
     buffer: buildPluginZip(),
   });
-  await expect(dialog.getByText(`Plugin '${PLUGIN_ID}' is blocked by deployment policy.`)).toBeVisible();
+  await expect(
+    dialog.getByText(`Plugin '${PLUGIN_ID}' is blocked by deployment policy.`),
+  ).toBeVisible();
   await expect(dialog.getByRole("button", { name: `Uninstall ${PLUGIN_NAME}` })).toHaveCount(0);
   await page.reload();
   await expect(page.getByTestId("map-canvas")).toBeVisible();
@@ -158,55 +162,67 @@ test("sideload=false hides installation controls and ignores project manifest UR
     mapControlPositions: {},
     settings: {},
   };
-  project.layers = [{
-    id: "policy-project-layer",
-    name: "Policy project loaded",
-    type: "geojson",
-    source: { type: "geojson" },
-    visible: true,
-    opacity: 1,
-    style: DEFAULT_LAYER_STYLE,
-    metadata: {},
-    geojson: { type: "FeatureCollection", features: [] },
-  }];
+  project.layers = [
+    {
+      id: "policy-project-layer",
+      name: "Policy project loaded",
+      type: "geojson",
+      source: { type: "geojson" },
+      visible: true,
+      opacity: 1,
+      style: DEFAULT_LAYER_STYLE,
+      metadata: {},
+      geojson: { type: "FeatureCollection", features: [] },
+    },
+  ];
   await page.evaluate((text) => {
     const dataTransfer = new DataTransfer();
     dataTransfer.items.add(new File([text], "policy.geolibre.json", { type: "application/json" }));
     const target = document.querySelector('[data-testid="desktop-shell"]')!;
     for (const type of ["dragenter", "dragover", "drop"]) {
-      target.dispatchEvent(new DragEvent(type, {
-        bubbles: true,
-        cancelable: true,
-        dataTransfer,
-      }));
+      target.dispatchEvent(
+        new DragEvent(type, {
+          bubbles: true,
+          cancelable: true,
+          dataTransfer,
+        }),
+      );
     }
   }, JSON.stringify(project));
-  await expect(page.locator('[data-testid="layer-row"][data-layer-name="Policy project loaded"]')).toBeVisible();
-  await expect(page.getByRole("dialog", { name: "Load plugins from this project?" })).toHaveCount(0);
+  await expect(
+    page.locator('[data-testid="layer-row"][data-layer-name="Policy project loaded"]'),
+  ).toBeVisible();
+  await expect(page.getByRole("dialog", { name: "Load plugins from this project?" })).toHaveCount(
+    0,
+  );
   await page.getByRole("button", { name: "Plugins", exact: true }).click();
   await expect(page.getByRole("menu").getByText(PLUGIN_NAME)).toHaveCount(0);
   expect(pluginRequests).toEqual([]);
 });
 
 test("deployment plugin rules filter registry installation entries", async ({ page }) => {
-  await page.route("**/deployment.json", (route) => route.fulfill({
-    json: {
-      version: 1,
-      plugins: {
-        registryUrl: "https://example.com/policy-registry.json",
-        allowed: ["allowed-plugin"],
-        blocked: ["blocked-plugin"],
+  await page.route("**/deployment.json", (route) =>
+    route.fulfill({
+      json: {
+        version: 1,
+        plugins: {
+          registryUrl: "https://example.com/policy-registry.json",
+          allowed: ["allowed-plugin"],
+          blocked: ["blocked-plugin"],
+        },
       },
-    },
-  }));
-  await page.route("https://example.com/policy-registry.json", (route) => route.fulfill({
-    json: ["allowed-plugin", "blocked-plugin", "unlisted-plugin"].map((id) => ({
-      id,
-      name: id,
-      version: "2.0.0",
-      manifestUrl: `https://example.com/${id}/plugin.json`,
-    })),
-  }));
+    }),
+  );
+  await page.route("https://example.com/policy-registry.json", (route) =>
+    route.fulfill({
+      json: ["allowed-plugin", "blocked-plugin", "unlisted-plugin"].map((id) => ({
+        id,
+        name: id,
+        version: "2.0.0",
+        manifestUrl: `https://example.com/${id}/plugin.json`,
+      })),
+    }),
+  );
   await page.goto("/");
   await expect(page.getByTestId("map-canvas")).toBeVisible();
   const dialog = await openManagePluginsSettings(page);

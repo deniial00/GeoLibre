@@ -614,13 +614,7 @@ export async function installPluginArchiveFromFile(
 ): Promise<string> {
   const app = createAppAPI(mapControllerRef);
   const policy = getDeploymentPolicy();
-  const pluginId = await installWebPluginArchive(
-    manager,
-    fileName,
-    bytes,
-    app,
-    policy,
-  );
+  const pluginId = await installWebPluginArchive(manager, fileName, bytes, app, policy);
   if (policy?.plugins?.defaultActive?.includes(pluginId)) {
     // Re-enter the normal ready/restore cycle, just like a desktop archive
     // install, so defaults apply only when there is no saved project state.
