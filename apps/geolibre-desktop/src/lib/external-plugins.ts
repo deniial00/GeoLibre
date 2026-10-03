@@ -175,11 +175,17 @@ export async function loadExternalPlugins(
   const loadedPluginIds: string[] = [];
   const registeredPluginIds = new Set(manager.list().map((plugin) => plugin.id));
 
-  for (const bundle of [...filesystemResult.bundles, ...urlBundles, ...webBundles]) {
+  const bundles = [...filesystemResult.bundles, ...urlBundles, ...webBundles];
+  for (let index = 0; index < bundles.length; index++) {
+    const bundle = bundles[index];
     try {
       enforcePluginPolicy(
         bundle.manifest.id,
-        bundle.sourceUrl ? urlSource(bundle.sourceUrl) : "zip",
+        bundle.sourceUrl
+          ? urlSource(bundle.sourceUrl)
+          : index < filesystemResult.bundles.length
+            ? "directory"
+            : "zip",
         policy,
         bundle.archiveName,
         bundle.sourceUrl,
@@ -721,13 +727,18 @@ export function resolvePluginAssetUrlForLoadedPlugin(
  * URLs are always re-injected into the current list. Deactivates each plugin
  * (removing its map control) and drops its injected style, then the manager
  * notifies so the Plugins menu updates without a reload.
+ * `installedManifestUrls` may retain policy-ineligible URLs: unloading those
+ * must preserve their integrity pins until the user actually uninstalls them.
  */
 export function unloadRemovedUrlPlugins(
   manager: PluginManager,
   currentManifestUrls: string[],
   app: GeoLibreAppAPI,
+  installedManifestUrls: readonly string[] = currentManifestUrls,
 ): string[] {
   const keep = new Set(currentManifestUrls);
+  const pinKeep =
+    installedManifestUrls === currentManifestUrls ? keep : new Set(installedManifestUrls);
   // Collect first, then mutate: manager.unregister notifies subscribers
   // synchronously, so removing entries in a separate pass avoids mutating the
   // map while iterating it.
@@ -751,9 +762,10 @@ export function unloadRemovedUrlPlugins(
   // this off `toRemove` alone left exactly that plugin stuck: uninstall could
   // not clear its pin, and reinstalling hit the same stale hash (#2318).
   for (const url of pinnedUrlLoadAttempts) {
-    if (!keep.has(url)) removedUrls.add(url);
+    if (!pinKeep.has(url)) removedUrls.add(url);
   }
   for (const url of removedUrls) {
+    if (pinKeep.has(url)) continue;
     pinnedUrlLoadAttempts.delete(url);
     removePluginBundlePin(url);
   }
@@ -819,6 +831,7 @@ async function reloadExternalUrlPluginUncoalesced(
   app: GeoLibreAppAPI,
   options: { policy?: DeploymentPolicy | null; source?: PluginSource },
 ): Promise<GeoLibrePlugin> {
+  const policy = options.policy === undefined ? getDeploymentPolicy() : options.policy;
   let existingId: string | null = null;
   for (const [id, source] of externallyLoadedPluginSources) {
     if (source === manifestUrl) {
@@ -831,7 +844,7 @@ async function reloadExternalUrlPluginUncoalesced(
     enforcePluginPolicy(
       existingId,
       options.source ?? "manifest-url",
-      options.policy === undefined ? getDeploymentPolicy() : options.policy,
+      policy,
       manifestUrl,
       manifestUrl,
     );
@@ -848,7 +861,7 @@ async function reloadExternalUrlPluginUncoalesced(
     bundle = await loadPluginUrlBundle(
       manifestUrl,
       controller.signal,
-      options.policy === undefined ? getDeploymentPolicy() : options.policy,
+      policy,
       options.source ?? "manifest-url",
     );
     // The timeout only bounds the fetch/stream above; a dynamic import() of a
@@ -886,6 +899,7 @@ async function reloadExternalUrlPluginUncoalesced(
   removeExternalPluginStyle(existingId);
   externallyLoadedPluginSources.delete(existingId);
   manager.register(plugin);
+  if (policy?.plugins?.defaultActive?.includes(plugin.id)) manager.markDefaultActive(plugin.id);
   externallyLoadedPluginSources.set(plugin.id, manifestUrl);
   // Explicit user reload: accept this version as the new trusted baseline so the
   // next auto-scan doesn't flag it as changed.

@@ -907,14 +907,16 @@ async function registryManifestUrlsForPolicy(
   }
   try {
     const registry = await fetchPluginRegistry();
-    return registry.entries.map((entry) => entry.manifestUrl);
+    return registry.entries
+      .filter((entry) => evaluatePlugin(entry.id, "registry", policy).allowed)
+      .map((entry) => entry.manifestUrl);
   } catch (error) {
     console.warn("Could not classify installed plugins against the deployment registry.", error);
     return [];
   }
 }
 
-function ensureExternalPluginsLoadedWithSettings(
+async function ensureExternalPluginsLoadedWithSettings(
   desktopSettings: ReturnType<typeof useDesktopSettingsStore.getState>["desktopSettings"],
   app: ReturnType<typeof createAppAPI>,
   options?: { force?: boolean },
@@ -932,9 +934,22 @@ function ensureExternalPluginsLoadedWithSettings(
     bundledManifestUrls,
     desktopSettings.pluginManifestUrls,
   );
+  const registryManifestUrls = await registryManifestUrlsForPolicy(
+    policy,
+    desktopSettings.pluginManifestUrls,
+    bundledManifestUrls,
+  );
+  const eligibleManifestUrls =
+    policy?.plugins?.sideload === false
+      ? pluginManifestUrls.filter(
+          (url) => bundledManifestUrls.includes(url) || registryManifestUrls.includes(url),
+        )
+      : pluginManifestUrls;
   const loadKey = JSON.stringify({
     additionalPluginDirectories,
+    configuredPluginDirectories: desktopSettings.additionalPluginDirectories,
     pluginManifestUrls,
+    eligibleManifestUrls,
     policy: policy?.plugins,
   });
   // `force` re-scans even when the merged settings are unchanged. Installing a
@@ -958,18 +973,16 @@ function ensureExternalPluginsLoadedWithSettings(
   // previous scan (which never rejects) keeps at most one scan running.
   const previousLoad = externalPluginsLoadPromise ?? Promise.resolve();
   const loadPromise = previousLoad
-    .then(async () => {
-      const registryManifestUrls = await registryManifestUrlsForPolicy(
-        policy,
-        desktopSettings.pluginManifestUrls,
-        bundledManifestUrls,
+    .then(() => {
+      // Remove uninstalled or no-longer-registry-approved URLs after the
+      // previous scan settles, including forced scans. Keep installed URLs'
+      // integrity pins so temporary denial cannot silently trust changed code.
+      const unloaded = unloadRemovedUrlPlugins(
+        manager,
+        eligibleManifestUrls,
+        app,
+        pluginManifestUrls,
       );
-      // Unregister URL plugins whose manifest URL was removed from the merged
-      // list (e.g. uninstalled from the marketplace) so the Plugins menu updates
-      // and any active control is torn down without a reload. This runs after
-      // the previous scan settles so a plugin whose load was still in flight is
-      // already recorded and can be removed.
-      const unloaded = unloadRemovedUrlPlugins(manager, pluginManifestUrls, app);
       if (unloaded.length) {
         console.info(`Unloaded external GeoLibre plugins: ${unloaded.join(", ")}`);
       }

@@ -3,6 +3,7 @@ import { afterEach, before, beforeEach, describe, it } from "node:test";
 import type { PluginManager } from "../packages/plugins/src/plugin-manager";
 import type { GeoLibreAppAPI } from "../packages/plugins/src/types";
 import { strToU8, zipSync } from "fflate";
+import { setDeploymentPolicy } from "../apps/geolibre-desktop/src/lib/deployment-env";
 
 // Recovering from a SHA-256 pin block (#2318). external-plugins pulls in
 // browser-only modules through its import chain, so the module is imported
@@ -257,6 +258,44 @@ describe("recovering a URL plugin blocked by its integrity pin", () => {
     assert.equal(manager.isActive("pin-demo"), false);
   });
 
+  it("URL updates preserve deployment defaults for later fresh projects", async () => {
+    const policy = { version: 1 as const, plugins: { defaultActive: ["pin-demo"] } };
+    const emptyState = {
+      manifestUrls: [],
+      activePluginIds: [],
+      mapControlPositions: {},
+      settings: {},
+    };
+    try {
+      for (const useRuntimePolicy of [false, true]) {
+        served = pluginBundle();
+        manager = new PluginManagerCtor();
+        setDeploymentPolicy(useRuntimePolicy ? policy : null);
+        const options = useRuntimePolicy ? {} : { policy };
+        await externalPlugins.loadExternalPlugins(manager, [], [MANIFEST_URL], options);
+        manager.restoreProjectState(null, app);
+        assert.equal(manager.isActive("pin-demo"), true);
+        served.set(MANIFEST_URL, served.get(MANIFEST_URL)!.replace("1.0.0", "2.0.0"));
+        served.set(ENTRY_URL, served.get(ENTRY_URL)!.replace("1.0.0", "2.0.0"));
+        const updated = await externalPlugins.reloadExternalUrlPlugin(
+          manager,
+          MANIFEST_URL,
+          app,
+          options,
+        );
+        assert.equal(updated.version, "2.0.0");
+        assert.equal(manager.isActive("pin-demo"), true);
+        manager.restoreProjectState(emptyState, app);
+        assert.equal(manager.isActive("pin-demo"), false);
+        manager.restoreProjectState(null, app);
+        assert.equal(manager.isActive("pin-demo"), true);
+        externalPlugins.unloadRemovedUrlPlugins(manager, [], app);
+      }
+    } finally {
+      setDeploymentPolicy(null);
+    }
+  });
+
   it("clears the pin on uninstall even though the blocked plugin never registered", async () => {
     // A bundle whose hash no longer matches the pin recorded on an earlier
     // visit: held back, so nothing registers and no loaded source is recorded.
@@ -293,6 +332,32 @@ describe("recovering a URL plugin blocked by its integrity pin", () => {
 
     assert.deepEqual(externalPlugins.unloadRemovedUrlPlugins(manager, [], app), ["pin-demo"]);
     assert.equal(manager.list().length, 0);
+    assert.equal(integrity.getPluginBundlePin(MANIFEST_URL), null);
+  });
+
+  it("registry denial unloads an active plugin without trusting changed code when approval returns", async () => {
+    const policy = { version: 1 as const, plugins: { sideload: false } };
+    const approved = { policy, registryManifestUrls: [MANIFEST_URL] };
+    await externalPlugins.loadExternalPlugins(manager, [], [MANIFEST_URL], approved);
+    manager.activate("pin-demo", app);
+    const pinned = integrity.getPluginBundlePin(MANIFEST_URL);
+    assert.notEqual(pinned, null);
+    assert.deepEqual(externalPlugins.unloadRemovedUrlPlugins(manager, [], app, [MANIFEST_URL]), [
+      "pin-demo",
+    ]);
+    assert.equal(manager.isActive("pin-demo"), false);
+    assert.deepEqual(manager.list(), []);
+    assert.equal(integrity.getPluginBundlePin(MANIFEST_URL), pinned);
+    served.set(ENTRY_URL, `${served.get(ENTRY_URL)}\n// Changed while delisted`);
+    const returned = await externalPlugins.loadExternalPlugins(
+      manager,
+      [],
+      [MANIFEST_URL],
+      approved,
+    );
+    assert.deepEqual(returned.loadedPluginIds, []);
+    assert.deepEqual(manager.list(), []);
+    externalPlugins.unloadRemovedUrlPlugins(manager, [], app);
     assert.equal(integrity.getPluginBundlePin(MANIFEST_URL), null);
   });
 

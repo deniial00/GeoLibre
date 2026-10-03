@@ -185,16 +185,23 @@ as external plugin load issues.
 With `sideload: false`, manifest URL, zip and directory controls disappear and
 programmatic installs refuse. Project-supplied manifest URLs produce no trust
 prompt and cannot be trusted into settings. Previously installed URLs stay in
-settings, but only URLs recognized by the current configured registry may load
-(plus bundled drop-ins). If that registry is unavailable, these installed URLs
+settings, but only URLs recognized by permitted entries in the current registry
+may load (plus bundled drop-ins). If that registry is unavailable, installed URLs
 fail closed; bundled drop-ins can still load. Existing file-installed archives
 and additional directories cannot load. Each skipped configured directory is
 reported as an external plugin load issue without reading its contents.
+Each settings-triggered or forced scan checks current registry membership before
+reusing a previous load. A previously loaded URL that is no longer approved
+is unloaded, including when the registry is unavailable. Its installed URL and
+integrity pin remain until the user uninstalls it; registry approval returning
+does not silently trust changed code. Denied registry entries are hidden in
+the marketplace, but their installed source URLs remain removable in Settings.
 
 `defaultActive` marks permitted, loaded external plugins for activation in a
 fresh project. It does not override a saved project's active plugin list and
-does not allow a denied plugin to load. Without a `plugins` section, existing
-loading and activation behavior is unchanged.
+does not allow a denied plugin to load. URL updates preserve these deployment
+defaults for later fresh projects. Without a `plugins` section, existing loading
+and activation behavior is unchanged.
 
 Plugin policy is client-side enforcement only, not a server security boundary:
 a modified client can bypass it. It does not provide signing or sandboxing.

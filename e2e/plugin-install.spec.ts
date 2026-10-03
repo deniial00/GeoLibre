@@ -232,6 +232,83 @@ test("deployment plugin rules filter registry installation entries", async ({ pa
   await expect(dialog.getByText("unlisted-plugin", { exact: true })).toHaveCount(0);
 });
 
+for (const registryResult of ["delisted", "unavailable", "blocked-id"] as const) {
+  test(`registry-only policy unloads an active plugin when its registry becomes ${registryResult}`, async ({
+    page,
+  }) => {
+    const registryUrl = "https://example.com/live-registry.json";
+    const manifestUrl = "https://example.com/live-plugin/plugin.json";
+    let approved = true;
+    const pluginRequests: string[] = [];
+    await page.route("**/deployment.json", (route) =>
+      route.fulfill({
+        json: {
+          version: 1,
+          plugins: { sideload: false, registryUrl, blocked: ["blocked-registry-plugin"] },
+        },
+      }),
+    );
+    await page.route(registryUrl, (route) => {
+      if (!approved && registryResult === "unavailable") {
+        return route.fulfill({ status: 503, body: "Registry unavailable" });
+      }
+      return route.fulfill({
+        json: approved
+          ? [{ ...MANIFEST, manifestUrl }]
+          : registryResult === "blocked-id"
+            ? [{ ...MANIFEST, id: "blocked-registry-plugin", manifestUrl }]
+            : [],
+      });
+    });
+    await page.route("https://example.com/live-plugin/**", (route) => {
+      pluginRequests.push(route.request().url());
+      if (route.request().url() === manifestUrl) return route.fulfill({ json: MANIFEST });
+      return route.fulfill({
+        contentType: "text/javascript",
+        body: ENTRY_SOURCE.replace(
+          "activate() {},",
+          `activate() {
+          const output = document.createElement("output");
+          output.id = "registry-plugin-active";
+          document.body.append(output);
+        },`,
+        ).replace(
+          "deactivate() {},",
+          `deactivate() {
+          document.getElementById("registry-plugin-active")?.remove();
+        },`,
+        ),
+      });
+    });
+    await page.addInitScript((url) => {
+      localStorage.setItem(
+        "geolibre.desktopSettings",
+        JSON.stringify({
+          uiProfile: { onboarded: true },
+          pluginManifestUrls: [url],
+        }),
+      );
+    }, manifestUrl);
+    await page.goto("/");
+    await expect(page.getByTestId("map-canvas")).toBeVisible();
+    await page.getByRole("button", { name: "Plugins", exact: true }).click();
+    await page.getByRole("menuitem", { name: PLUGIN_NAME, exact: true }).click();
+    await expect(page.locator("#registry-plugin-active")).toBeAttached();
+    const initialPluginRequests = [...pluginRequests];
+
+    approved = false;
+    // An unrelated settings change must reclassify installed URLs before
+    // reusing the plugin scan cache; German keeps the Plugins menu label.
+    await page.getByRole("button", { name: "Settings", exact: true }).click();
+    await page.getByRole("menuitem", { name: "Language", exact: true }).hover();
+    await page.getByRole("menuitemradio", { name: "Deutsch (German)", exact: true }).click();
+    await expect(page.locator("#registry-plugin-active")).toHaveCount(0);
+    await page.getByRole("button", { name: "Plugins", exact: true }).click();
+    await expect(page.getByRole("menuitem", { name: PLUGIN_NAME, exact: true })).toHaveCount(0);
+    expect(pluginRequests).toEqual(initialPluginRequests);
+  });
+}
+
 test("external plugins reproject coordinates with the host's shared proj4", async ({ page }) => {
   const manifest = {
     id: "e2e-proj4-plugin",
