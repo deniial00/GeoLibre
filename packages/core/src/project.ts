@@ -1873,7 +1873,11 @@ function prepareLayerForSave(layer: GeoLibreLayer): GeoLibreLayer {
   // WFS feature URLs can contain inline authentication supplied by a plugin.
   // Persist a sanitized reference, and keep the fetched collection embedded so
   // the saved project remains renderable without storing those credentials.
-  let wfsCredentialsRedacted = false;
+  // The stripped flag is persisted alongside that sanitized reference: once the
+  // reference is stored credential-free, a later save of the reopened project
+  // cannot tell that the URL ever needed a secret, and would drop the embedded
+  // features the reference can no longer re-fetch without it.
+  let wfsCredentialsRedacted = layer.metadata.wfsCredentialsRedacted === true;
   if (layer.metadata.sourceKind === "wfs-getfeature") {
     const sourceUrl =
       typeof layer.source.url === "string"
@@ -1887,19 +1891,21 @@ function prepareLayerForSave(layer: GeoLibreLayer): GeoLibreLayer {
       typeof layer.metadata.originalUrl === "string"
         ? redactUrlCredentials(layer.metadata.originalUrl)
         : layer.metadata.originalUrl;
-    wfsCredentialsRedacted =
+    const stripped =
       sourceUrl !== layer.source.url ||
       sourcePath !== layer.sourcePath ||
       originalUrl !== layer.metadata.originalUrl;
-    if (wfsCredentialsRedacted) {
+    wfsCredentialsRedacted ||= stripped;
+    if (stripped) {
       layer = {
         ...layer,
         source: sourceUrl === layer.source.url ? layer.source : { ...layer.source, url: sourceUrl },
         sourcePath,
-        metadata:
-          originalUrl === layer.metadata.originalUrl
-            ? layer.metadata
-            : { ...layer.metadata, originalUrl },
+        metadata: {
+          ...layer.metadata,
+          ...(originalUrl === layer.metadata.originalUrl ? {} : { originalUrl }),
+          wfsCredentialsRedacted: true,
+        },
       };
     }
   }

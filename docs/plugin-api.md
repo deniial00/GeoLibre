@@ -775,7 +775,7 @@ const cogId = await app.addCogLayer?.(
 );
 ```
 
-WFS layers use the host's GetFeature loader, including GeoJSON/GML fallback, reprojection, desktop native HTTP, and refresh. `addWfsLayer` resolves with the new layer id and rejects if loading fails or the service returns no features. Saved projects keep the request URL rather than embedding the downloaded collection; reopening fetches it again. The optional bbox is WGS84 `[west, south, east, north]`; the host applies the existing 1,000-feature limit.
+WFS layers use the host's GetFeature loader, including GeoJSON/GML fallback, reprojection, desktop native HTTP, and refresh. `addWfsLayer` resolves with the new layer id and rejects if loading fails or the service returns no features. Saved projects keep the request URL rather than embedding the downloaded collection; reopening fetches it again. The optional bbox is WGS84 `[west, south, east, north]` and must not cross the antimeridian (`west` must not exceed `east` — a Pacific-spanning box throws); the host applies the existing 1,000-feature limit.
 
 `addWfsLayer` requires an absolute HTTP(S) URL and sends its request through the same host-managed WFS path Add Data uses: the desktop app fetches through the native HTTP client (bypassing CORS) and the web build through its development proxy. Credentials in the URL are never written to diagnostics or a saved project: the native diagnostics log records userinfo and credential query values (including AWS `x-amz-*` parameters) as `[redacted]`, and a save strips the URL's userinfo and credential parameters while keeping the fetched collection embedded so it stays visible without persisting the secret.
 

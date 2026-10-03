@@ -12,39 +12,14 @@
  */
 
 import { invoke } from "@tauri-apps/api/core";
-import { redactUrlCredentials } from "@geolibre/core";
+import { isCredentialUrlParam, redactUrlCredentials } from "@geolibre/core";
 import { appendDiagnostic, formatUnknown, type DiagnosticInput } from "./diagnostics";
 import { classifyFetchFailure } from "./fetch-error";
 
-// URL query keys whose values are credentials (an API token, a signature, an
-// Azure SAS field) or AWS presigned-URL fields. Diagnostics URL/detail text is
-// redacted for every native command so a fetch of a token-bearing WFS, tile, or
-// archive URL never records the secret.
-const CREDENTIAL_QUERY_KEYS = new Set([
-  "token",
-  "access_token",
-  "api_key",
-  "apikey",
-  "key",
-  "signature",
-  "password",
-  "secret",
-  "sig",
-  "se",
-  "sp",
-  "sr",
-  "st",
-  "sv",
-  "skoid",
-]);
-
-function isCredentialQueryKey(key: string): boolean {
-  const normalized = key.toLowerCase();
-  return normalized.startsWith("x-amz-") || CREDENTIAL_QUERY_KEYS.has(normalized);
-}
-
-const CREDENTIAL_QUERY_PATTERN =
-  /([?&](?:token|access_token|api_key|apikey|key|signature|password|secret|sig|se|sp|sr|st|sv|skoid|x-amz-[^=&#\s]+)=)[^&#\s]*/gi;
+// Diagnostics URL/detail text is redacted for every native command so a fetch of
+// a token-bearing WFS, tile, or archive URL never records the secret. The key
+// registry is @geolibre/core's (the one `redactUrlCredentials` uses), so a
+// credential name added there is covered here too.
 
 /** The native HTTP commands exposed by the Tauri backend. */
 export type NativeHttpCommand = "fetch_url_bytes" | "fetch_url_response" | "resolve_url_redirect";
@@ -79,7 +54,7 @@ function diagnosticUrl(url: string): string {
     parsed.password = "";
     const keys = [...parsed.searchParams.keys()];
     for (const key of keys) {
-      if (isCredentialQueryKey(key)) {
+      if (isCredentialUrlParam(key)) {
         parsed.searchParams.set(key, "[redacted]");
       }
     }
@@ -92,8 +67,7 @@ function diagnosticUrl(url: string): string {
 function diagnosticError(error: unknown): string {
   return formatUnknown(error)
     .replace(/https?:\/\/[^\s"'<>]+/gi, (url) => redactUrlCredentials(url))
-    .replace(/(https?:\/\/)[^/@\s]+@/gi, "$1[credentials]@")
-    .replace(CREDENTIAL_QUERY_PATTERN, "$1[redacted]");
+    .replace(/(https?:\/\/)[^/@\s]+@/gi, "$1[credentials]@");
 }
 
 function recordSource(command: NativeHttpCommand, context?: string): string {

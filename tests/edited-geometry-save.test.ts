@@ -152,6 +152,32 @@ it("preserves edited WFS features when no-embed has no reload URL", () => {
   assert.equal(reopened.source.url, undefined);
 });
 
+it("keeps edited WFS features when only metadata.originalUrl looks reloadable", () => {
+  const layer = geojsonLayer({
+    geojson: {
+      type: "FeatureCollection",
+      features: [
+        {
+          type: "Feature",
+          properties: { name: "Edited" },
+          geometry: { type: "Point", coordinates: [1, 2] },
+        },
+      ],
+    },
+    source: { type: "geojson" },
+    metadata: {
+      sourceKind: "wfs-getfeature",
+      geometryEdited: true,
+      originalUrl: "https://example.com/wfs",
+    },
+  });
+
+  // Hydration re-fetches from the layer's own HTTP(S) `source.url`; a
+  // `metadata.originalUrl` (a tile-layer field) restores nothing, so a no-embed
+  // save must keep the only copy of the features.
+  assert.equal(discardEditedWfsGeometry(layer), layer);
+});
+
 it("scrubs plugin WFS URL credentials and embeds the collection on save", () => {
   const url =
     "https://alice:secret@example.com/wfs?service=WFS&request=GetFeature&token=secret-token&api_key=secret-key";

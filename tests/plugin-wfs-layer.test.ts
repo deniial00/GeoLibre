@@ -30,7 +30,7 @@ describe("addPluginWfsLayer", () => {
   it("adds the fetched WFS collection as an editable, refreshable store layer", async () => {
     globalThis.fetch = (async () => new Response(JSON.stringify(JSON_FEATURES))) as typeof fetch;
     const id = await addPluginWfsLayer("Plugin features", {
-      url: " https://8.8.8.8/wfs?token=secret&request=GetCapabilities&bbox=bad ",
+      url: " https://8.8.8.8/wfs?token=secret&request=GetCapabilities&bbox=bad#view ",
       typeName: " ns:roads ",
       bbox: [10, 40, 12, 42],
     });
@@ -41,6 +41,7 @@ describe("addPluginWfsLayer", () => {
     assert.deepEqual((layer.geojson?.features[0].geometry as Point).coordinates, [11, 41]);
     assert.equal(layer.metadata.sourceKind, "wfs-getfeature");
     const request = new URL(layer.source.url!);
+    assert.equal(request.hash, "", "a fragment would hide the GetFeature parameters");
     assert.equal(request.searchParams.get("token"), "secret");
     assert.equal(request.searchParams.get("request"), "GetFeature");
     assert.equal(request.searchParams.get("bbox"), "40,10,42,12,urn:ogc:def:crs:EPSG::4326");

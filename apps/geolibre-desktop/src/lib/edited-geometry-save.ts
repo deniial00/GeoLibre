@@ -26,18 +26,20 @@ export function embedEditedGeometry(layer: GeoLibreLayer): GeoLibreLayer {
   };
 }
 function hasRestorableWfsUrl(layer: GeoLibreLayer): boolean {
-  return [layer.source.url, layer.metadata.originalUrl].some((value) => {
-    if (typeof value !== "string") return false;
-    try {
-      const url = new URL(value);
-      return (
-        (url.protocol === "http:" || url.protocol === "https:") &&
-        redactUrlCredentials(value) === value
-      );
-    } catch {
-      return false;
-    }
-  });
+  // Only the layer's own request URL counts: WFS hydration needs an HTTP(S)
+  // `source.url`, so a stray `metadata.originalUrl` (a tile-layer field) must
+  // not let a no-embed save drop features nothing can re-fetch.
+  const value = layer.source.url;
+  if (typeof value !== "string") return false;
+  try {
+    const url = new URL(value);
+    return (
+      (url.protocol === "http:" || url.protocol === "https:") &&
+      redactUrlCredentials(value) === value
+    );
+  } catch {
+    return false;
+  }
 }
 
 /** Honor an explicit no-embed choice for edited WFS layers with a reload URL. */

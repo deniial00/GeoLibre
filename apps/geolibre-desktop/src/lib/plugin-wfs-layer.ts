@@ -48,7 +48,10 @@ export async function addPluginWfsLayer(
   validateBbox(options?.bbox);
 
   const projectGeneration = useAppStore.getState().projectGeneration;
-  const endpoint = stripOgcOperationParams(url, "WFS");
+  // A fragment would swallow the GetFeature parameters appended below it — the
+  // request line never carries the fragment, so the service would receive the
+  // bare endpoint and answer with something other than the feature collection.
+  const endpoint = stripOgcOperationParams(url.split("#", 1)[0], "WFS");
   const result = await fetchWfsGeoJson(
     {
       endpoint,

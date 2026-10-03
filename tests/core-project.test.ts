@@ -742,6 +742,48 @@ describe("project parsing", () => {
     assert.ok(ordinaryGeoJson.layers[0].geojson);
   });
 
+  it("keeps the embedded collection across repeated saves of a sanitized WFS reference", () => {
+    const featureCollection = {
+      type: "FeatureCollection" as const,
+      features: [
+        {
+          type: "Feature" as const,
+          properties: { name: "Road" },
+          geometry: { type: "Point" as const, coordinates: [1, 2] as [number, number] },
+        },
+      ],
+    };
+    const state = {
+      projectName: "Credentialed WFS",
+      mapView: { center: [0, 0] as [number, number], zoom: 2, bearing: 0, pitch: 0 },
+      basemapStyleUrl: DEFAULT_BASEMAP,
+      basemapVisible: true,
+      basemapOpacity: 1,
+      layers: [
+        geojsonLayer({
+          id: "wfs-credentialed",
+          name: "Credentialed WFS",
+          geojson: featureCollection,
+          source: { type: "geojson", url: "https://example.test/wfs?request=GetFeature&token=abc" },
+          metadata: { sourceKind: "wfs-getfeature", featureCount: 1 },
+        }),
+      ],
+      preferences: createEmptyProject().preferences,
+      metadata: {},
+    };
+    const first = parseProject(serializeProject(projectFromStore(state))).layers[0];
+    assert.equal(first.source.url, "https://example.test/wfs?request=GetFeature");
+    assert.equal(first.metadata.wfsCredentialsRedacted, true);
+    assert.deepEqual(first.geojson, featureCollection);
+
+    // Reopening gives a credential-free reference that can no longer fetch these
+    // features, so the next save must not drop the embedded collection.
+    const second = parseProject(serializeProject(projectFromStore({ ...state, layers: [first] })))
+      .layers[0];
+    assert.equal(second.source.url, "https://example.test/wfs?request=GetFeature");
+    assert.deepEqual(second.geojson, featureCollection);
+  });
+
   it("preserves edited host WFS geometry as authoritative embedded data", () => {
     const editedGeojson = {
       type: "FeatureCollection" as const,

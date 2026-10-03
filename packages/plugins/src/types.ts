@@ -149,7 +149,11 @@ export interface GeoLibreWfsLayerOptions {
   typeName: string;
   /** WFS protocol version (default "2.0.0"). */
   version?: string;
-  /** Optional WGS84 extent as [west, south, east, north]. */
+  /**
+   * Optional WGS84 extent as [west, south, east, north]. A request extent is a
+   * single rectangle, so it must not cross the antimeridian: `west` greater than
+   * `east` throws instead of being read as a Pacific-spanning box.
+   */
   bbox?: [number, number, number, number];
 }
 

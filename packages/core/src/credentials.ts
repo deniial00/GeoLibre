@@ -215,6 +215,17 @@ function isCredentialParam(name: string): boolean {
   );
 }
 
+/**
+ * Whether a URL query-parameter name carries a credential. This is the wider of
+ * the two registries (see `URL_CREDENTIAL_PARAMS`). Exported so a caller that
+ * must leave the parameter in place — the native diagnostics log rewrites its
+ * value to `[redacted]` rather than dropping the pair — shares this registry
+ * instead of keeping a second, narrower list that can drift from it.
+ */
+export function isCredentialUrlParam(name: string): boolean {
+  return isCredentialParam(name);
+}
+
 function redactParameterString(value: string): string {
   return value
     .split("&")
