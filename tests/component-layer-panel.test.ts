@@ -6,28 +6,27 @@ import { geojsonLayer } from "./helpers/layer-fixtures";
 
 // Loaded after the harness so its CSS imports and Vite globals are handled.
 const { LayerPanel } = await import("../apps/geolibre-desktop/src/components/panels/LayerPanel");
-const { LayerRefreshProvider } =
-  await import("../apps/geolibre-desktop/src/components/panels/layer-panel/LayerRefreshProvider");
+const { useLayerRefresh } =
+  await import("../apps/geolibre-desktop/src/components/panels/layer-panel/useLayerRefresh");
 
 const noop = () => {};
 
-/** Render the Layers panel with the shell-owned refresh provider. */
+/** Render the Layers panel with the same shell-owned refresh hook. */
 function LayerPanelHarness() {
-  return createElement(
-    LayerRefreshProvider,
-    { isCollapsed: false },
-    createElement(LayerPanel, {
-      themeMode: "light",
-      mapControllerRef: { current: null },
-      onResizeStart: noop,
-      geometryEditLayerId: null,
-      onToggleGeometryEdit: noop,
-      onCancelGeometryEdit: noop,
-      onMaterializeDuckDBLayer: noop,
-      onOpenRasterStylePanel: noop,
-      onOpenRasterSubset: noop,
-    }),
-  );
+  const layers = useAppStore((state) => state.layers);
+  const refresh = useLayerRefresh({ layers, isCollapsed: false });
+  return createElement(LayerPanel, {
+    themeMode: "light",
+    mapControllerRef: { current: null },
+    refresh,
+    onResizeStart: noop,
+    geometryEditLayerId: null,
+    onToggleGeometryEdit: noop,
+    onCancelGeometryEdit: noop,
+    onMaterializeDuckDBLayer: noop,
+    onOpenRasterStylePanel: noop,
+    onOpenRasterSubset: noop,
+  });
 }
 
 function renderLayerPanel() {

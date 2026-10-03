@@ -193,8 +193,7 @@ function isPrivateIPv4(octets: number[]): boolean {
   if (a === 192 && b === 0 && octets[2] === 2) return true; // 192.0.2.0/24 TEST-NET-1
   if (a === 198 && (b === 18 || b === 19)) return true; // 198.18.0.0/15 benchmarking
   if (a === 198 && b === 51 && octets[2] === 100) return true; // 198.51.100.0/24 documentation
-  if (a === 192 && b === 88 && octets[2] === 99) return true; // deprecated 6to4 relay
-  if (a === 203 && b === 0 && octets[2] === 113) return true; // 203.0.113.0/24 TEST-NET-3
+  if (a === 203 && b === 0 && octets[2] === 113) return true; // 203.0.113.0/24 documentation
   if (a >= 224) return true; // 224.0.0.0+ multicast + reserved
   return false;
 }
@@ -224,17 +223,6 @@ function isPrivateIPv6(addr: string): boolean {
   // ULA fc00::/7
   if (Number.isFinite(firstHextet) && (firstHextet & 0xfe00) === 0xfc00) return true;
 
-  // Transition, documentation and protocol-assignment prefixes are not public
-  // destinations even though they sit inside global-unicast address space.
-  const secondHextet = parseInt(lower.split(":")[1] || "", 16);
-  if (
-    /^2002:/i.test(lower) ||
-    /^2001:0:/i.test(lower) ||
-    (firstHextet === 0x2001 &&
-      (secondHextet === 0x0db8 || secondHextet === 0x0010 || secondHextet === 0x0002))
-  ) {
-    return true;
-  }
   return false;
 }
 
@@ -388,31 +376,29 @@ export async function fetchWithGuard(
   for (let hop = 0; hop <= PROXY_MAX_REDIRECT_HOPS; hop++) {
     const { signal: callerSignal, ...rest } = init;
     const signal = mergeAbortSignals(timeoutMs, callerSignal ?? null);
-    const currentUrl = new URL(current);
-    const requestUrl = new URL(currentUrl);
-    const headers = new Headers(rest.headers);
     let response: Response;
     if (fetchImpl) {
+      // No undici dispatcher on this path — resolve+validate before fetching.
       await assertResolvedPublicHost(new URL(current).hostname, options.lookup);
-      response = await fetchImpl(requestUrl.toString(), {
+      response = await fetchImpl(current, {
         ...rest,
-        headers,
         signal,
         redirect: "manual",
       });
     } else {
-      response = (await undiciFetch(requestUrl.toString(), {
+      response = (await undiciFetch(current, {
         ...rest,
-        headers,
         signal,
         redirect: "manual",
         dispatcher: guardedDispatcher,
       })) as unknown as Response;
     }
-    if (!REDIRECT_STATUSES.has(response.status)) return response;
+    if (!REDIRECT_STATUSES.has(response.status)) {
+      return response;
+    }
     const location = response.headers.get("location");
     if (!location) return response;
-    const next = new URL(location, currentUrl).toString();
+    const next = new URL(location, current).toString();
     assertPublicHttpUrl(next);
     current = next;
   }
@@ -961,6 +947,8 @@ export async function proxyBinaryRequestGuarded(
   try {
     response = await fetchWithGuard(target, { headers });
   } catch (err) {
+    // Do not echo err.message — resolved private IPs / undici connect details
+    // would turn this proxy into an internal-network disclosure oracle.
     console.warn("[vite-proxy-guard] upstream fetch blocked or failed:", err);
     res.statusCode = 502;
     res.setHeader("content-type", "text/plain");

@@ -474,8 +474,8 @@ pub fn run() {
             close_oauth_popups,
             native_duckdb::count_native_vector_file_features,
             ensure_martin_binary,
-            fetch_url_response,
             fetch_url_bytes,
+            fetch_url_response,
             arcgis_http::fetch_arcgis_response,
             arcgis_http::cancel_arcgis_request,
             aws_credentials::aws_list_profiles,
@@ -1409,6 +1409,7 @@ fn ensure_fetchable_url(url: &str) -> Result<(), String> {
     let parsed = reqwest::Url::parse(url).map_err(|error| format!("Invalid URL: {error}"))?;
     url_is_fetchable(&parsed)
 }
+
 /// A redirect policy that re-applies [`url_is_fetchable`] to every hop, so a
 /// public URL that 3xx-redirects to an internal address is not followed.
 ///
@@ -1638,22 +1639,19 @@ fn guarded_http_client() -> Result<reqwest::blocking::Client, String> {
 }
 
 fn build_guarded_http_client() -> Result<reqwest::blocking::Client, String> {
-    build_guarded_http_client_with_resolver(
-        guarded_redirect_policy(),
-        std::sync::Arc::new(GuardedDnsResolver),
-    )
+    build_guarded_http_client_with_redirects(guarded_redirect_policy())
 }
 
-fn build_guarded_http_client_with_resolver<R: reqwest::dns::Resolve + 'static>(
+fn build_guarded_http_client_with_redirects(
     redirects: reqwest::redirect::Policy,
-    resolver: std::sync::Arc<R>,
 ) -> Result<reqwest::blocking::Client, String> {
-    // Apply the request-specific SSRF resolver and redirect policy with the
-    // same CA and mutual-TLS configuration as the general native HTTP client.
+    // The SSRF guard (GuardedDnsResolver + redirect re-validation) is applied
+    // here, independent of the TLS backend chosen below, so it holds on both the
+    // rustls and native-tls paths.
     let mut builder = reqwest::blocking::Client::builder()
         .connect_timeout(Duration::from_secs(REMOTE_TILE_CONNECT_TIMEOUT_SECS))
         .redirect(redirects)
-        .dns_resolver(resolver)
+        .dns_resolver(std::sync::Arc::new(GuardedDnsResolver))
         .user_agent("GeoLibre Desktop");
 
     for certificate in extra_ca_certificates()? {
@@ -5437,6 +5435,7 @@ mod tests {
         assert!(ensure_fetchable_url("http://127.0.0.1:8081/tiles/0/0/0.png").is_ok());
         assert!(ensure_fetchable_url("http://[::1]:8081/data.pmtiles").is_ok());
     }
+
     #[test]
     fn ssrf_guard_error_is_detected_through_the_source_chain() {
         use std::error::Error;
