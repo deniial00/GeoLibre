@@ -139,7 +139,6 @@ import type {
   GeoLibreMapControlPosition,
   GeoLibreTileLayerOptions,
   GeoLibreWmsLayerOptions,
-  GeoLibreWfsLayerOptions,
   GeoLibreZarrLayerOptions,
   GeoLibreZarrQueryGeometry,
   GeoLibreZarrQueryOptions,

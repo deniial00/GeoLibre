@@ -108,6 +108,96 @@ it("keeps edited WFS references only when the user chooses no embedding", () => 
   assert.equal(reopened.geojson, undefined);
 });
 
+it("preserves edited WFS features when no-embed has no reload URL", () => {
+  const original = geojsonLayer({
+    geojson: {
+      type: "FeatureCollection",
+      features: [
+        {
+          type: "Feature",
+          properties: { name: "First edit" },
+          geometry: { type: "Point", coordinates: [1, 2] },
+        },
+      ],
+    },
+    source: { type: "geojson", url: "https://example.com/wfs?request=GetFeature" },
+    metadata: { sourceKind: "wfs-getfeature", geometryEdited: true },
+  });
+  const embedded = embedEditedGeometry(original);
+  const editedAgain = {
+    ...embedded,
+    geojson: {
+      type: "FeatureCollection" as const,
+      features: [
+        {
+          type: "Feature" as const,
+          properties: { name: "Second edit" },
+          geometry: { type: "Point" as const, coordinates: [3, 4] as [number, number] },
+        },
+      ],
+    },
+    metadata: { ...embedded.metadata, geometryEdited: true },
+  };
+  const noEmbed = discardEditedWfsGeometry(editedAgain);
+  const project = createEmptyProject();
+  const saved = projectFromStore({
+    ...project,
+    projectName: project.name,
+    layers: [noEmbed],
+  });
+  const reopened = parseProject(serializeProject(saved)).layers[0];
+
+  assert.deepEqual(noEmbed.geojson, editedAgain.geojson);
+  assert.deepEqual(reopened.geojson, editedAgain.geojson);
+  assert.equal(reopened.source.url, undefined);
+});
+
+it("scrubs plugin WFS URL credentials and embeds the collection on save", () => {
+  const url =
+    "https://alice:secret@example.com/wfs?service=WFS&request=GetFeature&token=secret-token&api_key=secret-key";
+  const layer = geojsonLayer({
+    geojson: {
+      type: "FeatureCollection",
+      features: [
+        {
+          type: "Feature",
+          properties: { name: "Saved" },
+          geometry: { type: "Point", coordinates: [1, 2] },
+        },
+      ],
+    },
+    source: { type: "geojson", url },
+    sourcePath: url,
+    metadata: { sourceKind: "wfs-getfeature", geometryEdited: true },
+  });
+  const project = createEmptyProject();
+  const saved = projectFromStore({
+    ...project,
+    projectName: project.name,
+    layers: [discardEditedWfsGeometry(layer)],
+  });
+  const serialized = serializeProject(saved);
+  const reopened = parseProject(serialized).layers[0];
+  const cleanUrl = "https://example.com/wfs?service=WFS&request=GetFeature";
+
+  assert.doesNotMatch(serialized, /alice|secret-token|secret-key|token=|api_key=/);
+  assert.equal(reopened.source.url, undefined, "edited WFS saves omit the re-fetch URL");
+  assert.equal(reopened.sourcePath, cleanUrl);
+  assert.deepEqual(reopened.geojson, layer.geojson);
+  const unedited = { ...layer, metadata: { sourceKind: "wfs-getfeature" } };
+  const uneditedSaved = projectFromStore({
+    ...project,
+    projectName: project.name,
+    layers: [unedited],
+  });
+  const uneditedSerialized = serializeProject(uneditedSaved);
+  const uneditedReopened = parseProject(uneditedSerialized).layers[0];
+  assert.doesNotMatch(uneditedSerialized, /alice|secret-token|secret-key|token=|api_key=/);
+  assert.equal(uneditedReopened.source.url, cleanUrl);
+  assert.equal(uneditedReopened.sourcePath, cleanUrl);
+  assert.deepEqual(uneditedReopened.geojson, layer.geojson);
+});
+
 it("marks committed changes but not a no-op editor session", () => {
   const layer = geojsonLayer({
     geojson: {

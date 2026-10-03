@@ -1,7 +1,7 @@
 /**
  * Thin wrappers around the native Tauri HTTP commands (`fetch_url_bytes`,
- * `fetch_url_response`, `fetch_plugin_wfs_response`, and
- * `resolve_url_redirect`) that record every call in the Diagnostics network log.
+ * `fetch_url_response`, and `resolve_url_redirect`) that record every call in
+ * the Diagnostics network log.
  *
  * These commands run in Rust and never pass through `window.fetch`, so the
  * diagnostics fetch interceptor cannot see them; their failures used to surface
@@ -12,15 +12,42 @@
  */
 
 import { invoke } from "@tauri-apps/api/core";
+import { redactUrlCredentials } from "@geolibre/core";
 import { appendDiagnostic, formatUnknown, type DiagnosticInput } from "./diagnostics";
 import { classifyFetchFailure } from "./fetch-error";
 
+// URL query keys whose values are credentials (an API token, a signature, an
+// Azure SAS field) or AWS presigned-URL fields. Diagnostics URL/detail text is
+// redacted for every native command so a fetch of a token-bearing WFS, tile, or
+// archive URL never records the secret.
+const CREDENTIAL_QUERY_KEYS = new Set([
+  "token",
+  "access_token",
+  "api_key",
+  "apikey",
+  "key",
+  "signature",
+  "password",
+  "secret",
+  "sig",
+  "se",
+  "sp",
+  "sr",
+  "st",
+  "sv",
+  "skoid",
+]);
+
+function isCredentialQueryKey(key: string): boolean {
+  const normalized = key.toLowerCase();
+  return normalized.startsWith("x-amz-") || CREDENTIAL_QUERY_KEYS.has(normalized);
+}
+
+const CREDENTIAL_QUERY_PATTERN =
+  /([?&](?:token|access_token|api_key|apikey|key|signature|password|secret|sig|se|sp|sr|st|sv|skoid|x-amz-[^=&#\s]+)=)[^&#\s]*/gi;
+
 /** The native HTTP commands exposed by the Tauri backend. */
-export type NativeHttpCommand =
-  | "fetch_url_bytes"
-  | "fetch_url_response"
-  | "fetch_plugin_wfs_response"
-  | "resolve_url_redirect";
+export type NativeHttpCommand = "fetch_url_bytes" | "fetch_url_response" | "resolve_url_redirect";
 
 interface NativeHttpOptions {
   /** Short feature label (e.g. "WFS GetCapabilities") added to the record. */
@@ -44,26 +71,15 @@ interface FetchUrlBytesOptions extends NativeHttpOptions {
   /** Optional response byte limit, enforced while the native body is read. */
   maxBytes?: number;
 }
-const PLUGIN_WFS_CREDENTIAL_QUERY_KEYS: Record<string, true> = {
-  token: true,
-  access_token: true,
-  api_key: true,
-  apikey: true,
-  key: true,
-  signature: true,
-  password: true,
-  secret: true,
-};
 
-function diagnosticUrl(command: NativeHttpCommand, url: string): string {
-  if (command !== "fetch_plugin_wfs_response") return url;
+function diagnosticUrl(url: string): string {
   try {
     const parsed = new URL(url);
     parsed.username = "";
     parsed.password = "";
     const keys = [...parsed.searchParams.keys()];
     for (const key of keys) {
-      if (PLUGIN_WFS_CREDENTIAL_QUERY_KEYS[key.toLowerCase()]) {
+      if (isCredentialQueryKey(key)) {
         parsed.searchParams.set(key, "[redacted]");
       }
     }
@@ -73,15 +89,11 @@ function diagnosticUrl(command: NativeHttpCommand, url: string): string {
   }
 }
 
-function diagnosticError(command: NativeHttpCommand, error: unknown): string {
-  const text = formatUnknown(error);
-  if (command !== "fetch_plugin_wfs_response") return text;
-  return text
+function diagnosticError(error: unknown): string {
+  return formatUnknown(error)
+    .replace(/https?:\/\/[^\s"'<>]+/gi, (url) => redactUrlCredentials(url))
     .replace(/(https?:\/\/)[^/@\s]+@/gi, "$1[credentials]@")
-    .replace(
-      /([?&](?:token|access_token|api_key|apikey|key|signature|password|secret)=)[^&#\s]*/gi,
-      "$1[redacted]",
-    );
+    .replace(CREDENTIAL_QUERY_PATTERN, "$1[redacted]");
 }
 
 function recordSource(command: NativeHttpCommand, context?: string): string {
@@ -105,7 +117,7 @@ export function nativeHttpSuccessRecord(
     durationMs,
     method: "GET",
     source: recordSource(command, context),
-    url: diagnosticUrl(command, url),
+    url: diagnosticUrl(url),
   };
 }
 
@@ -122,7 +134,7 @@ export function nativeHttpFailureRecord(
   context?: string,
 ): DiagnosticInput {
   const { kind, label, hint } = classifyFetchFailure(error);
-  const rawError = diagnosticError(command, error);
+  const rawError = diagnosticError(error);
   return {
     category: "network",
     level: "error",
@@ -134,7 +146,7 @@ export function nativeHttpFailureRecord(
     durationMs,
     method: "GET",
     source: recordSource(command, context),
-    url: diagnosticUrl(command, url),
+    url: diagnosticUrl(url),
   };
 }
 
@@ -155,7 +167,7 @@ async function invokeNativeHttp<T>(
     appendDiagnostic(
       nativeHttpSuccessRecord(
         command,
-        diagnosticUrl(command, url),
+        url,
         Math.round(performance.now() - startedAt),
         options?.context,
       ),
@@ -165,7 +177,7 @@ async function invokeNativeHttp<T>(
     appendDiagnostic(
       nativeHttpFailureRecord(
         command,
-        diagnosticUrl(command, url),
+        url,
         error,
         Math.round(performance.now() - startedAt),
         options?.context,
@@ -218,22 +230,6 @@ export async function fetchUrlResponse(
     content_type: string | null;
     body: number[] | Uint8Array;
   }>("fetch_url_response", url, options);
-  return {
-    status: raw.status,
-    contentType: raw.content_type,
-    body: raw.body instanceof Uint8Array ? raw.body : new Uint8Array(raw.body),
-  };
-}
-/** Fetches a plugin WFS response through the stricter public-destination policy. */
-export async function fetchPluginWfsResponse(
-  url: string,
-  options?: FetchUrlBytesOptions,
-): Promise<NativeHttpResponse> {
-  const raw = await invokeNativeHttp<{
-    status: number;
-    content_type: string | null;
-    body: number[] | Uint8Array;
-  }>("fetch_plugin_wfs_response", url, options);
   return {
     status: raw.status,
     contentType: raw.content_type,

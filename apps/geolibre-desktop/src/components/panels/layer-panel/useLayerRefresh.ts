@@ -107,6 +107,19 @@ export function useLayerRefresh({ layers, isCollapsed }: UseLayerRefreshOptions)
     async (layer: GeoLibreLayer, automatic = false) => {
       const requestGeneration = projectGeneration;
       const requestSourceUrl = layer.source.url;
+      const getCurrentRequestLayer = (): GeoLibreLayer | undefined => {
+        const state = useAppStore.getState();
+        if (state.projectGeneration !== requestGeneration) return undefined;
+        const current = state.layers.find((candidate) => candidate.id === layer.id);
+        if (
+          !current ||
+          current.source.url !== requestSourceUrl ||
+          current.sourcePath !== layer.sourcePath
+        ) {
+          return undefined;
+        }
+        return current;
+      };
       const requestKey = `${requestGeneration}:${layer.id}:${requestSourceUrl}`;
       if (refreshingLayerIdsRef.current.has(requestKey)) return;
 
@@ -129,9 +142,7 @@ export function useLayerRefresh({ layers, isCollapsed }: UseLayerRefreshOptions)
             layer,
             useAppStore.getState().layers,
           );
-          const latest = useAppStore
-            .getState()
-            .layers.find((candidate) => candidate.id === layer.id);
+          const latest = getCurrentRequestLayer();
           if (!latest) return;
 
           updateLayer(layer.id, {
@@ -163,9 +174,7 @@ export function useLayerRefresh({ layers, isCollapsed }: UseLayerRefreshOptions)
           // only path that re-reads the table: they are excluded from the
           // interval scheduling below, so `automatic` is never true here.
           const { geojson, featureCount, totalRows, truncated } = await refreshIcebergLayer(layer);
-          const latest = useAppStore
-            .getState()
-            .layers.find((candidate) => candidate.id === layer.id);
+          const latest = getCurrentRequestLayer();
           if (!latest) return;
 
           updateLayer(layer.id, {
@@ -203,9 +212,7 @@ export function useLayerRefresh({ layers, isCollapsed }: UseLayerRefreshOptions)
           // Local-file vector layers re-read their features from disk (the same
           // conversion the import ran) rather than fetching a URL.
           const { geojson, featureCount } = await reloadLocalFileLayer(layer);
-          const latest = useAppStore
-            .getState()
-            .layers.find((candidate) => candidate.id === layer.id);
+          const latest = getCurrentRequestLayer();
           if (!latest) return;
 
           updateLayer(layer.id, {
@@ -240,6 +247,8 @@ export function useLayerRefresh({ layers, isCollapsed }: UseLayerRefreshOptions)
           const info =
             (await reloadVectorControlLayer(layer.id)) ??
             (await replayVectorControlLayerById(layer.id));
+          const latest = getCurrentRequestLayer();
+          if (!latest) return;
           if (!info) {
             // The control is unavailable (panel never opened, or torn down
             // and not yet replayed) or the replay above did not succeed.
@@ -264,9 +273,6 @@ export function useLayerRefresh({ layers, isCollapsed }: UseLayerRefreshOptions)
           // write would risk clobbering the synced values. `info` feeds only
           // the toast below.
           const featureCount = typeof info.featureCount === "number" ? info.featureCount : null;
-          const latest = useAppStore
-            .getState()
-            .layers.find((candidate) => candidate.id === layer.id);
           if (latest) {
             updateLayer(
               layer.id,
@@ -296,12 +302,7 @@ export function useLayerRefresh({ layers, isCollapsed }: UseLayerRefreshOptions)
           featureCount,
           metadata: refreshedMetadata,
         } = await refreshGeoJsonLayer(layer);
-        const latest = useAppStore.getState().layers.find((candidate) => candidate.id === layer.id);
-        if (
-          requestGeneration !== useAppStore.getState().projectGeneration ||
-          latest?.source.url !== requestSourceUrl
-        )
-          return;
+        const latest = getCurrentRequestLayer();
         if (!latest) return;
 
         updateLayer(layer.id, {
@@ -330,12 +331,8 @@ export function useLayerRefresh({ layers, isCollapsed }: UseLayerRefreshOptions)
         }));
         scheduleStatusClear(layer.id);
       } catch (error) {
-        const latest = useAppStore.getState().layers.find((candidate) => candidate.id === layer.id);
-        if (
-          requestGeneration !== useAppStore.getState().projectGeneration ||
-          latest?.source.url !== requestSourceUrl
-        )
-          return;
+        const latest = getCurrentRequestLayer();
+        if (!latest) return;
         const message = error instanceof Error ? error.message : t("layers.refreshError");
         if (latest) {
           updateLayer(layer.id, {
@@ -392,15 +389,19 @@ export function useLayerRefresh({ layers, isCollapsed }: UseLayerRefreshOptions)
       if (!currentIds.has(id)) observedWfsSourceUrlsRef.current.delete(id);
     }
     for (const layer of layers) {
-      if (observedWfsSourceUrlsRef.current.get(layer.id) === layer.source.url) continue;
-      observedWfsSourceUrlsRef.current.set(layer.id, layer.source.url);
-      if (
-        layer.type !== "geojson" ||
-        layer.metadata.sourceKind !== "wfs-getfeature" ||
-        layer.geojson ||
-        typeof layer.source.url !== "string"
-      )
+      if (layer.type !== "geojson" || layer.metadata.sourceKind !== "wfs-getfeature") {
+        observedWfsSourceUrlsRef.current.delete(layer.id);
         continue;
+      }
+      const alreadyObserved = observedWfsSourceUrlsRef.current.has(layer.id);
+      if (alreadyObserved && observedWfsSourceUrlsRef.current.get(layer.id) === layer.source.url) {
+        continue;
+      }
+      observedWfsSourceUrlsRef.current.set(layer.id, layer.source.url);
+      // A hydrated layer present at first observation needs no bootstrap. Once
+      // observed, a changed URL must refresh even if old features are still set.
+      if (layer.geojson && !alreadyObserved) continue;
+      if (typeof layer.source.url !== "string") continue;
       let requestUrl: URL;
       try {
         requestUrl = new URL(layer.source.url);

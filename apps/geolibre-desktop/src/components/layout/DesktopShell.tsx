@@ -83,7 +83,7 @@ import { AttributeTable } from "../panels/AttributeTable";
 import { RasterAttributeTable } from "../panels/RasterAttributeTable";
 import { BrowserPanel } from "../panels/BrowserPanel";
 import { LayerPanel } from "../panels/LayerPanel";
-import { useLayerRefresh } from "../panels/layer-panel/useLayerRefresh";
+import { LayerRefreshProvider } from "../panels/layer-panel/LayerRefreshProvider";
 import { ViewerLayerPanel } from "../panels/ViewerLayerPanel";
 import { FloatingPanels } from "../panels/FloatingPanels";
 import { SunPanel } from "../panels/SunPanel";
@@ -224,7 +224,6 @@ export function DesktopShell({
   // the Raster Subset panel and opened from the Add Data menu in the toolbar.
   const [basemapExtractOpen, setBasemapExtractOpen] = useState(false);
   const projectGeneration = useAppStore((s) => s.projectGeneration);
-  const layers = useAppStore((s) => s.layers);
   const pythonConsoleOpen = useAppStore((s) => s.ui.pythonConsoleOpen);
   const setPythonConsoleOpen = useAppStore((s) => s.setPythonConsoleOpen);
   const sqlWorkspaceOpen = useAppStore((s) => s.ui.sqlWorkspaceOpen);
@@ -253,16 +252,6 @@ export function DesktopShell({
   // Style (right) or Layers (left) sidebar surface (issue #765).
   const replaceStylePanelId = useReplaceStylePanelId();
   const replaceLayersPanelId = useReplaceLayersPanelId();
-  const layerRefresh = useLayerRefresh({
-    layers,
-    isCollapsed:
-      layoutOptions.panelsHidden ||
-      layoutOptions.viewer ||
-      !layoutOptions.layerPanelVisible ||
-      layoutOptions.panelsCollapsed ||
-      storymapPresenting ||
-      autoCollapsedPanel === "layers",
-  });
   const enforceViewerPlugins = useViewerPluginGuard(layoutOptions, mapControllerRef);
   const {
     activePanelId,
@@ -443,126 +432,171 @@ export function DesktopShell({
     });
 
   return (
-    <div
-      ref={shellRef}
-      data-testid="desktop-shell"
-      className="relative flex h-full min-w-0 flex-col overflow-hidden bg-background"
-      style={shellStyle}
-      onDragEnter={handleDragEnter}
-      onDragLeave={handleDragLeave}
-      onDragOver={handleDragOver}
-      onDrop={handleDrop}
+    <LayerRefreshProvider
+      isCollapsed={
+        layoutOptions.panelsHidden ||
+        layoutOptions.viewer ||
+        !layoutOptions.layerPanelVisible ||
+        layoutOptions.panelsCollapsed ||
+        storymapPresenting ||
+        autoCollapsedPanel === "layers"
+      }
     >
-      {layoutOptions.toolbarVisible ? (
-        <SectionErrorBoundary label="Toolbar" displayName={t("shell.section.toolbar")}>
-          <TopToolbar
-            compact={layoutOptions.compact}
-            diagnosticsErrorCount={diagnostics.errorCount}
-            mapControllerRef={mapControllerRef}
-            mapReadyGeneration={mapReadyGeneration}
-            showLabels={layoutOptions.toolbarLabels}
-            showProjectInfo={layoutOptions.showProjectInfo}
-            themeMode={themeMode}
-            collaboration={collaboration}
-            projectFiles={projectFiles}
-            onOpenDiagnostics={() => setDiagnosticsOpen(true)}
-            onOpenProjectHistory={() => {
-              projectHistory.clearRestoreError();
-              void projectHistory.refresh();
-              setProjectHistoryOpen(true);
-            }}
-            onToggleThemeMode={onToggleThemeMode}
-            onOpenBasemapExtract={() => setBasemapExtractOpen(true)}
-            onAddComment={commentTool.toggleTool}
-            viewer={layoutOptions.viewer}
-          />
-        </SectionErrorBoundary>
-      ) : null}
-      <div data-workspace-row="" className="relative flex min-h-0 flex-1 flex-col md:flex-row">
-        {/* The Browser panel body is portaled into its dedicated content host
+      <div
+        ref={shellRef}
+        data-testid="desktop-shell"
+        className="relative flex h-full min-w-0 flex-col overflow-hidden bg-background"
+        style={shellStyle}
+        onDragEnter={handleDragEnter}
+        onDragLeave={handleDragLeave}
+        onDragOver={handleDragOver}
+        onDrop={handleDrop}
+      >
+        {layoutOptions.toolbarVisible ? (
+          <SectionErrorBoundary label="Toolbar" displayName={t("shell.section.toolbar")}>
+            <TopToolbar
+              compact={layoutOptions.compact}
+              diagnosticsErrorCount={diagnostics.errorCount}
+              mapControllerRef={mapControllerRef}
+              mapReadyGeneration={mapReadyGeneration}
+              showLabels={layoutOptions.toolbarLabels}
+              showProjectInfo={layoutOptions.showProjectInfo}
+              themeMode={themeMode}
+              collaboration={collaboration}
+              projectFiles={projectFiles}
+              onOpenDiagnostics={() => setDiagnosticsOpen(true)}
+              onOpenProjectHistory={() => {
+                projectHistory.clearRestoreError();
+                void projectHistory.refresh();
+                setProjectHistoryOpen(true);
+              }}
+              onToggleThemeMode={onToggleThemeMode}
+              onOpenBasemapExtract={() => setBasemapExtractOpen(true)}
+              onAddComment={commentTool.toggleTool}
+              viewer={layoutOptions.viewer}
+            />
+          </SectionErrorBoundary>
+        ) : null}
+        <div data-workspace-row="" className="relative flex min-h-0 flex-1 flex-col md:flex-row">
+          {/* The Browser panel body is portaled into its dedicated content host
             (which the dock slots relocate between positions), so it shares the
             app's React context and the shell owns its dock chrome. */}
-        {activePanelId === BROWSER_PANEL_ID && !layoutOptions.panelsHidden && !layoutOptions.viewer
-          ? createPortal(
-              <BrowserPanel
-                mapControllerRef={mapControllerRef}
-                onOpenRecentProject={projectFiles.handleOpenRecent}
-                onAddFilePath={addFilePath}
-              />,
-              browserContentEl,
-            )
-          : null}
-        {activePanelId === COMMENTS_PANEL_ID && !layoutOptions.panelsHidden
-          ? createPortal(
-              <CommentsPanel
-                mapControllerRef={mapControllerRef}
-                collaboration={collaboration}
-                onActivateCommentTool={commentTool.toggleTool}
-                isCommentToolActive={commentTool.isActive}
-                onShowResolvedChange={setShowResolvedComments}
-                selectedCommentId={selectedCommentId}
-                onClearSelectedComment={() => setSelectedCommentId(null)}
-              />,
-              commentsContentEl,
-            )
-          : null}
-        {/* Map-only / hidden-panels embeds show nothing but the map: skip the
+          {activePanelId === BROWSER_PANEL_ID &&
+          !layoutOptions.panelsHidden &&
+          !layoutOptions.viewer
+            ? createPortal(
+                <BrowserPanel
+                  mapControllerRef={mapControllerRef}
+                  onOpenRecentProject={projectFiles.handleOpenRecent}
+                  onAddFilePath={addFilePath}
+                />,
+                browserContentEl,
+              )
+            : null}
+          {activePanelId === COMMENTS_PANEL_ID && !layoutOptions.panelsHidden
+            ? createPortal(
+                <CommentsPanel
+                  mapControllerRef={mapControllerRef}
+                  collaboration={collaboration}
+                  onActivateCommentTool={commentTool.toggleTool}
+                  isCommentToolActive={commentTool.isActive}
+                  onShowResolvedChange={setShowResolvedComments}
+                  selectedCommentId={selectedCommentId}
+                  onClearSelectedComment={() => setSelectedCommentId(null)}
+                />,
+                commentsContentEl,
+              )
+            : null}
+          {/* Map-only / hidden-panels embeds show nothing but the map: skip the
             whole left side-dock (Layers, plugin panels, and the shared rail that
             hosts the Browser entry), not just the built-in Layers panel. */}
-        {layoutOptions.panelsHidden ? null : (
-          <>
-            {/* The positional plugin docks flank whichever middle surface the
+          {layoutOptions.panelsHidden ? null : (
+            <>
+              {/* The positional plugin docks flank whichever middle surface the
                 Layers side shows (the shared rail or the standalone Layers
                 panel): a panel moved to left/right-of-layers must stay
                 reachable while a shared-rail panel such as the Browser is
                 open. */}
-            {!layoutOptions.viewer ? (
-              <SectionErrorBoundary
-                label="Plugin panel (left of Layers)"
-                displayName={t("shell.section.pluginPanelLeftOfLayers")}
-              >
-                <PluginRightPanel
-                  dock="left-of-layers"
-                  contentEl={dockContentEl}
-                  width={pluginPanelWidth}
-                  onWidthChange={setPluginPanelWidth}
-                />
-              </SectionErrorBoundary>
-            ) : null}
-            {replaceLayersPanelId && !layoutOptions.viewer ? (
-              // Shared-rail mode on the Layers (left) side: the plugin panel shares
-              // the Layers sidebar surface, so a single rail lists both the workbench
-              // and Layers instead of the built-in panel standing on its own.
-              <SectionErrorBoundary
-                label="Shared left sidebar"
-                displayName={t("shell.section.sharedLeftSidebar")}
-              >
-                <SharedSidebar
-                  key={replaceLayersPanelId}
-                  side="layers"
-                  pluginId={replaceLayersPanelId}
-                  additionalPanelIds={replaceLayersPanelIds}
-                  pluginContentEl={dockContentEl}
-                  pluginWidth={pluginPanelWidth}
-                  onPluginWidthChange={setPluginPanelWidth}
-                  builtinVisible={layoutOptions.layerPanelVisible}
-                  builtinTitle={t("sharedRail.layers")}
-                  builtinIcon={<Layers className="h-4 w-4" />}
-                  // The Browser docks here on by default but must not bury Layers:
-                  // start with Layers expanded and Browser a collapsed rail entry.
-                  // On a phone-width viewport both start collapsed (panels overlay
-                  // there), matching the mobile "panels default collapsed" behavior.
-                  initialBuiltinExpanded={
-                    replaceLayersPanelId === BROWSER_PANEL_ID &&
-                    !getIsMobileViewport() &&
-                    !layoutOptions.panelsCollapsed
-                  }
-                  // The story-map presentation is the only standalone Layers
-                  // autoCollapse trigger (the notebook collapses Style, not Layers).
-                  forceBuiltinCollapsed={storymapPresenting}
-                  renderBuiltin={({ collapsed, onCollapsedChange }) => (
+              {!layoutOptions.viewer ? (
+                <SectionErrorBoundary
+                  label="Plugin panel (left of Layers)"
+                  displayName={t("shell.section.pluginPanelLeftOfLayers")}
+                >
+                  <PluginRightPanel
+                    dock="left-of-layers"
+                    contentEl={dockContentEl}
+                    width={pluginPanelWidth}
+                    onWidthChange={setPluginPanelWidth}
+                  />
+                </SectionErrorBoundary>
+              ) : null}
+              {replaceLayersPanelId && !layoutOptions.viewer ? (
+                // Shared-rail mode on the Layers (left) side: the plugin panel shares
+                // the Layers sidebar surface, so a single rail lists both the workbench
+                // and Layers instead of the built-in panel standing on its own.
+                <SectionErrorBoundary
+                  label="Shared left sidebar"
+                  displayName={t("shell.section.sharedLeftSidebar")}
+                >
+                  <SharedSidebar
+                    key={replaceLayersPanelId}
+                    side="layers"
+                    pluginId={replaceLayersPanelId}
+                    additionalPanelIds={replaceLayersPanelIds}
+                    pluginContentEl={dockContentEl}
+                    pluginWidth={pluginPanelWidth}
+                    onPluginWidthChange={setPluginPanelWidth}
+                    builtinVisible={layoutOptions.layerPanelVisible}
+                    builtinTitle={t("sharedRail.layers")}
+                    builtinIcon={<Layers className="h-4 w-4" />}
+                    // The Browser docks here on by default but must not bury Layers:
+                    // start with Layers expanded and Browser a collapsed rail entry.
+                    // On a phone-width viewport both start collapsed (panels overlay
+                    // there), matching the mobile "panels default collapsed" behavior.
+                    initialBuiltinExpanded={
+                      replaceLayersPanelId === BROWSER_PANEL_ID &&
+                      !getIsMobileViewport() &&
+                      !layoutOptions.panelsCollapsed
+                    }
+                    // The story-map presentation is the only standalone Layers
+                    // autoCollapse trigger (the notebook collapses Style, not Layers).
+                    forceBuiltinCollapsed={storymapPresenting}
+                    renderBuiltin={({ collapsed, onCollapsedChange }) => (
+                      <LayerPanel
+                        themeMode={themeMode}
+                        mapControllerRef={mapControllerRef}
+                        collaborationApi={collaboration}
+                        onResizeStart={startLayerPanelResize}
+                        geometryEditLayerId={geometryEditLayerId}
+                        onToggleGeometryEdit={handleToggleGeometryEdit}
+                        onCancelGeometryEdit={handleCancelGeometryEdit}
+                        onMaterializeDuckDBLayer={handleMaterializeDuckDBLayer}
+                        onOpenRasterStylePanel={() =>
+                          openRasterLayerPanel(createAppAPI(mapControllerRef))
+                        }
+                        onOpenStylePanel={
+                          layoutOptions.stylePanelVisible ? openStylePanel : undefined
+                        }
+                        onOpenRasterSubset={setRasterSubsetLayer}
+                        collapsed={collapsed}
+                        onCollapsedChange={onCollapsedChange}
+                        hideOwnRail
+                      />
+                    )}
+                  />
+                </SectionErrorBoundary>
+              ) : layoutOptions.layerPanelVisible ? (
+                <SectionErrorBoundary
+                  label="Layer panel"
+                  displayName={t("shell.section.layerPanel")}
+                >
+                  {layoutOptions.viewer ? (
+                    <ViewerLayerPanel
+                      mapControllerRef={mapControllerRef}
+                      mapReadyGeneration={mapReadyGeneration}
+                    />
+                  ) : (
                     <LayerPanel
-                      refresh={layerRefresh}
                       themeMode={themeMode}
                       mapControllerRef={mapControllerRef}
                       collaborationApi={collaboration}
@@ -578,650 +612,630 @@ export function DesktopShell({
                         layoutOptions.stylePanelVisible ? openStylePanel : undefined
                       }
                       onOpenRasterSubset={setRasterSubsetLayer}
-                      collapsed={collapsed}
-                      onCollapsedChange={onCollapsedChange}
-                      hideOwnRail
+                      autoCollapse={
+                        storymapPresenting ||
+                        layoutOptions.panelsCollapsed ||
+                        autoCollapsedPanel === "layers"
+                      }
                     />
                   )}
-                />
-              </SectionErrorBoundary>
-            ) : layoutOptions.layerPanelVisible ? (
-              <SectionErrorBoundary label="Layer panel" displayName={t("shell.section.layerPanel")}>
-                {layoutOptions.viewer ? (
-                  <ViewerLayerPanel
-                    mapControllerRef={mapControllerRef}
-                    mapReadyGeneration={mapReadyGeneration}
+                </SectionErrorBoundary>
+              ) : null}
+              {!layoutOptions.viewer ? (
+                <SectionErrorBoundary
+                  label="Plugin panel (right of Layers)"
+                  displayName={t("shell.section.pluginPanelRightOfLayers")}
+                >
+                  <PluginRightPanel
+                    dock="right-of-layers"
+                    contentEl={dockContentEl}
+                    width={pluginPanelWidth}
+                    onWidthChange={setPluginPanelWidth}
                   />
-                ) : (
-                  <LayerPanel
-                    refresh={layerRefresh}
-                    themeMode={themeMode}
-                    mapControllerRef={mapControllerRef}
-                    collaborationApi={collaboration}
-                    onResizeStart={startLayerPanelResize}
-                    geometryEditLayerId={geometryEditLayerId}
-                    onToggleGeometryEdit={handleToggleGeometryEdit}
-                    onCancelGeometryEdit={handleCancelGeometryEdit}
-                    onMaterializeDuckDBLayer={handleMaterializeDuckDBLayer}
-                    onOpenRasterStylePanel={() =>
-                      openRasterLayerPanel(createAppAPI(mapControllerRef))
-                    }
-                    onOpenStylePanel={layoutOptions.stylePanelVisible ? openStylePanel : undefined}
-                    onOpenRasterSubset={setRasterSubsetLayer}
-                    autoCollapse={
-                      storymapPresenting ||
-                      layoutOptions.panelsCollapsed ||
-                      autoCollapsedPanel === "layers"
-                    }
-                  />
-                )}
-              </SectionErrorBoundary>
-            ) : null}
-            {!layoutOptions.viewer ? (
-              <SectionErrorBoundary
-                label="Plugin panel (right of Layers)"
-                displayName={t("shell.section.pluginPanelRightOfLayers")}
-              >
-                <PluginRightPanel
-                  dock="right-of-layers"
-                  contentEl={dockContentEl}
-                  width={pluginPanelWidth}
-                  onWidthChange={setPluginPanelWidth}
-                />
-              </SectionErrorBoundary>
-            ) : null}
-          </>
-        )}
-        <main
-          // `isolate` creates a stacking context so map-panel z-indexes (up to 10000) stay below body-portaled dialogs. See #451.
-          className={`relative isolate min-w-0 flex-1 overflow-hidden ${
-            layoutOptions.compact ? "min-h-0" : "min-h-72 md:min-h-0"
-          }`}
-        >
-          {/* Visually-hidden page title: gives the document the single
+                </SectionErrorBoundary>
+              ) : null}
+            </>
+          )}
+          <main
+            // `isolate` creates a stacking context so map-panel z-indexes (up to 10000) stay below body-portaled dialogs. See #451.
+            className={`relative isolate min-w-0 flex-1 overflow-hidden ${
+              layoutOptions.compact ? "min-h-0" : "min-h-72 md:min-h-0"
+            }`}
+          >
+            {/* Visually-hidden page title: gives the document the single
               top-level heading that assistive tech (and the axe
               `page-has-heading-one` check) expect, without altering the
               chrome-free visual layout. Placed inside the main landmark so it
               is not flagged as content outside a landmark. */}
-          <h1 className="sr-only">{t("shell.workspaceTitle")}</h1>
-          <SectionErrorBoundary
-            label="Map"
-            displayName={t("shell.section.map")}
-            fallbackClassName="h-full w-full"
-          >
-            <MapGrid>
-              {/* The primary map area is one renderer or the other (#2217).
+            <h1 className="sr-only">{t("shell.workspaceTitle")}</h1>
+            <SectionErrorBoundary
+              label="Map"
+              displayName={t("shell.section.map")}
+              fallbackClassName="h-full w-full"
+            >
+              <MapGrid>
+                {/* The primary map area is one renderer or the other (#2217).
                   Everything below that takes `mapControllerRef` is MapLibre-only
                   — it drives a `MapController` that the globe does not have — so
                   it mounts with the 2D map and stays unmounted on the globe,
                   where `PrimaryCesiumCanvas` explains the absence. Renderer-
                   neutral, store-driven overlays sit outside the branch and are
                   available under either engine. */}
-              {primaryRenderer === "mapbox" ? (
-                <PrimaryMapboxCanvas
-                  canUseRemoteElevation={hasElevationConsent}
-                  engineRef={mapControllerRef}
-                  identifyAllLabels={identifyAllLabels}
-                  identifyRasterLayerAt={identifyRasterLayerAt}
-                  onEngineReady={handleMapControllerReady}
-                  onMapDiagnosticEvent={handleMapDiagnosticEvent}
-                />
-              ) : primaryRenderer === "arcgis" ? (
-                <PrimaryArcgisCanvas
-                  canUseRemoteElevation={hasElevationConsent}
-                  engineRef={mapControllerRef}
-                  identifyAllLabels={identifyAllLabels}
-                  identifyRasterLayerAt={identifyRasterLayerAt}
-                  onEngineReady={handleMapControllerReady}
-                  onMapDiagnosticEvent={handleMapDiagnosticEvent}
-                />
-              ) : cesiumPrimary ? (
-                <PrimaryCesiumCanvas
-                  engineRef={mapControllerRef}
-                  onEngineReady={handleMapControllerReady}
-                  onMapDiagnosticEvent={handleMapDiagnosticEvent}
-                />
-              ) : (
-                <>
-                  <MapCanvas
+                {primaryRenderer === "mapbox" ? (
+                  <PrimaryMapboxCanvas
                     canUseRemoteElevation={hasElevationConsent}
-                    controllerRef={mapControllerRef}
+                    engineRef={mapControllerRef}
                     identifyAllLabels={identifyAllLabels}
                     identifyRasterLayerAt={identifyRasterLayerAt}
+                    onEngineReady={handleMapControllerReady}
                     onMapDiagnosticEvent={handleMapDiagnosticEvent}
-                    onControllerReady={handleMapControllerReady}
                   />
-                  <MountWhenOpened isOpen={(ui) => ui.objectDetectionOpen}>
-                    <Suspense fallback={null}>
-                      <ObjectDetectionDialog mapControllerRef={mapControllerRef} />
-                    </Suspense>
-                  </MountWhenOpened>
-                  <MountWhenOpened isOpen={(ui) => ui.segmentEverythingOpen}>
-                    <Suspense fallback={null}>
-                      <SegmentEverythingPanel mapControllerRef={mapControllerRef} />
-                    </Suspense>
-                  </MountWhenOpened>
-                </>
-              )}
-              {/* Renderer-neutral: these use the store or `MapEngine`, so they
+                ) : primaryRenderer === "arcgis" ? (
+                  <PrimaryArcgisCanvas
+                    canUseRemoteElevation={hasElevationConsent}
+                    engineRef={mapControllerRef}
+                    identifyAllLabels={identifyAllLabels}
+                    identifyRasterLayerAt={identifyRasterLayerAt}
+                    onEngineReady={handleMapControllerReady}
+                    onMapDiagnosticEvent={handleMapDiagnosticEvent}
+                  />
+                ) : cesiumPrimary ? (
+                  <PrimaryCesiumCanvas
+                    engineRef={mapControllerRef}
+                    onEngineReady={handleMapControllerReady}
+                    onMapDiagnosticEvent={handleMapDiagnosticEvent}
+                  />
+                ) : (
+                  <>
+                    <MapCanvas
+                      canUseRemoteElevation={hasElevationConsent}
+                      controllerRef={mapControllerRef}
+                      identifyAllLabels={identifyAllLabels}
+                      identifyRasterLayerAt={identifyRasterLayerAt}
+                      onMapDiagnosticEvent={handleMapDiagnosticEvent}
+                      onControllerReady={handleMapControllerReady}
+                    />
+                    <MountWhenOpened isOpen={(ui) => ui.objectDetectionOpen}>
+                      <Suspense fallback={null}>
+                        <ObjectDetectionDialog mapControllerRef={mapControllerRef} />
+                      </Suspense>
+                    </MountWhenOpened>
+                    <MountWhenOpened isOpen={(ui) => ui.segmentEverythingOpen}>
+                      <Suspense fallback={null}>
+                        <SegmentEverythingPanel mapControllerRef={mapControllerRef} />
+                      </Suspense>
+                    </MountWhenOpened>
+                  </>
+                )}
+                {/* Renderer-neutral: these use the store or `MapEngine`, so they
                   stay available on every renderer. */}
-              <MapModeBanner mapControllerRef={mapControllerRef} />
-              <PixelTimeSeriesControl
-                mapControllerRef={mapControllerRef}
-                mapReadyGeneration={mapReadyGeneration}
-              />
-              <NetcdfSampleMarkers
-                mapControllerRef={mapControllerRef}
-                mapReadyGeneration={mapReadyGeneration}
-              />
-              {/* Its own boundary: the cube window builds a `WebGLRenderer`,
+                <MapModeBanner mapControllerRef={mapControllerRef} />
+                <PixelTimeSeriesControl
+                  mapControllerRef={mapControllerRef}
+                  mapReadyGeneration={mapReadyGeneration}
+                />
+                <NetcdfSampleMarkers
+                  mapControllerRef={mapControllerRef}
+                  mapReadyGeneration={mapReadyGeneration}
+                />
+                {/* Its own boundary: the cube window builds a `WebGLRenderer`,
                   whose constructor throws outright when the browser or driver
                   gives it no context. Sharing the map's boundary would turn a
                   failure to draw one panel into the loss of the whole map. */}
-              <SilentErrorBoundary label="NetCDF 3D cube">
-                <NetcdfCubeWindow mapControllerRef={mapControllerRef} />
-              </SilentErrorBoundary>
-              <NetcdfCubeSetupDialog mapControllerRef={mapControllerRef} />
-              <RemoteCursorsOverlay
-                mapControllerRef={mapControllerRef}
-                mapReadyGeneration={mapReadyGeneration}
-              />
-              <CommentMapOverlay
-                mapControllerRef={mapControllerRef}
-                mapReadyGeneration={mapReadyGeneration}
-                onSelectComment={(commentId) => {
-                  setSelectedCommentId(commentId);
-                  openRightPanel(COMMENTS_PANEL_ID);
-                }}
-                showResolved={showResolvedComments}
-              />
-              {/* Isolate the collaboration badge in its own boundary: it renders
+                <SilentErrorBoundary label="NetCDF 3D cube">
+                  <NetcdfCubeWindow mapControllerRef={mapControllerRef} />
+                </SilentErrorBoundary>
+                <NetcdfCubeSetupDialog mapControllerRef={mapControllerRef} />
+                <RemoteCursorsOverlay
+                  mapControllerRef={mapControllerRef}
+                  mapReadyGeneration={mapReadyGeneration}
+                />
+                <CommentMapOverlay
+                  mapControllerRef={mapControllerRef}
+                  mapReadyGeneration={mapReadyGeneration}
+                  onSelectComment={(commentId) => {
+                    setSelectedCommentId(commentId);
+                    openRightPanel(COMMENTS_PANEL_ID);
+                  }}
+                  showResolved={showResolvedComments}
+                />
+                {/* Isolate the collaboration badge in its own boundary: it renders
                   over the map, so a fault here must never take down the map. */}
-              <SilentErrorBoundary label="Collaboration status">
-                <CollaborationStatusBadge api={collaboration} mapControllerRef={mapControllerRef} />
-              </SilentErrorBoundary>
-              <MapLegendPanel
-                mapControllerRef={mapControllerRef}
-                mapReadyGeneration={mapReadyGeneration}
-              />
-              <MapContextMenu
-                mapControllerRef={mapControllerRef}
-                mapReadyGeneration={mapReadyGeneration}
-                onExplorePlace={handleExplorePlace}
-              />
-              <KnowledgeCardPanel
-                place={knowledgePlace}
-                lang={wikipediaLang(i18n.language)}
-                onClose={() => setKnowledgePlace(null)}
-                onFlyTo={handleKnowledgeFlyTo}
-              />
-              <StoryMapComposeBar
-                mapControllerRef={mapControllerRef}
-                mapReadyGeneration={mapReadyGeneration}
-              />
-              <TerrainSettingsDialog mapControllerRef={mapControllerRef} />
-              <RasterSubsetPanel
-                layer={rasterSubsetLayer}
-                onClose={() => setRasterSubsetLayer(null)}
-                mapControllerRef={mapControllerRef}
-                mapReadyGeneration={mapReadyGeneration}
-              />
-              <BasemapExtractPanel
-                open={basemapExtractOpen}
-                onClose={() => setBasemapExtractOpen(false)}
-                mapControllerRef={mapControllerRef}
-                mapReadyGeneration={mapReadyGeneration}
-              />
-              <BoundsRestrictionIndicator />
-              <QuickAnalysisBanner />
-              <NetcdfProfileWindow />
-              <MountWhenOpened isOpen={(ui) => ui.styleManagerOpen}>
-                <Suspense fallback={null}>
-                  <StyleManagerPanel />
-                </Suspense>
-              </MountWhenOpened>
-            </MapGrid>
-          </SectionErrorBoundary>
-          <SectionErrorBoundary
-            label="Plugin floating panels"
-            displayName={t("shell.section.pluginFloatingPanels")}
-          >
-            <FloatingPanels />
-          </SectionErrorBoundary>
-          {/* Mounted inside the map area (like FloatingPanels) so the canvas
+                <SilentErrorBoundary label="Collaboration status">
+                  <CollaborationStatusBadge
+                    api={collaboration}
+                    mapControllerRef={mapControllerRef}
+                  />
+                </SilentErrorBoundary>
+                <MapLegendPanel
+                  mapControllerRef={mapControllerRef}
+                  mapReadyGeneration={mapReadyGeneration}
+                />
+                <MapContextMenu
+                  mapControllerRef={mapControllerRef}
+                  mapReadyGeneration={mapReadyGeneration}
+                  onExplorePlace={handleExplorePlace}
+                />
+                <KnowledgeCardPanel
+                  place={knowledgePlace}
+                  lang={wikipediaLang(i18n.language)}
+                  onClose={() => setKnowledgePlace(null)}
+                  onFlyTo={handleKnowledgeFlyTo}
+                />
+                <StoryMapComposeBar
+                  mapControllerRef={mapControllerRef}
+                  mapReadyGeneration={mapReadyGeneration}
+                />
+                <TerrainSettingsDialog mapControllerRef={mapControllerRef} />
+                <RasterSubsetPanel
+                  layer={rasterSubsetLayer}
+                  onClose={() => setRasterSubsetLayer(null)}
+                  mapControllerRef={mapControllerRef}
+                  mapReadyGeneration={mapReadyGeneration}
+                />
+                <BasemapExtractPanel
+                  open={basemapExtractOpen}
+                  onClose={() => setBasemapExtractOpen(false)}
+                  mapControllerRef={mapControllerRef}
+                  mapReadyGeneration={mapReadyGeneration}
+                />
+                <BoundsRestrictionIndicator />
+                <QuickAnalysisBanner />
+                <NetcdfProfileWindow />
+                <MountWhenOpened isOpen={(ui) => ui.styleManagerOpen}>
+                  <Suspense fallback={null}>
+                    <StyleManagerPanel />
+                  </Suspense>
+                </MountWhenOpened>
+              </MapGrid>
+            </SectionErrorBoundary>
+            <SectionErrorBoundary
+              label="Plugin floating panels"
+              displayName={t("shell.section.pluginFloatingPanels")}
+            >
+              <FloatingPanels />
+            </SectionErrorBoundary>
+            {/* Mounted inside the map area (like FloatingPanels) so the canvas
               floats over the map and drag-clamps to it, not to the whole
               window — the user keeps their layers in view while building. */}
-          <SectionErrorBoundary label="Model Builder" displayName={t("shell.section.modelBuilder")}>
-            <MountWhenOpened isOpen={(ui) => ui.modelBuilderOpen}>
-              <Suspense fallback={null}>
-                <ModelBuilderPanel
-                  mapControllerRef={mapControllerRef}
-                  onAddRaster={async (bytes, name, fileName) => {
-                    // Same Uint8Array -> BlobPart cast as ProcessingDialog below.
-                    const file = new File([bytes as BlobPart], fileName ?? `${name}.tif`, {
-                      type: "image/tiff",
-                    });
-                    await addRasterToMap(createAppAPI(mapControllerRef), file, {
-                      name,
-                    });
-                  }}
-                />
-              </Suspense>
-            </MountWhenOpened>
-          </SectionErrorBoundary>
-          {/* Mounted here (inside the map area, like FloatingPanels) so the
+            <SectionErrorBoundary
+              label="Model Builder"
+              displayName={t("shell.section.modelBuilder")}
+            >
+              <MountWhenOpened isOpen={(ui) => ui.modelBuilderOpen}>
+                <Suspense fallback={null}>
+                  <ModelBuilderPanel
+                    mapControllerRef={mapControllerRef}
+                    onAddRaster={async (bytes, name, fileName) => {
+                      // Same Uint8Array -> BlobPart cast as ProcessingDialog below.
+                      const file = new File([bytes as BlobPart], fileName ?? `${name}.tif`, {
+                        type: "image/tiff",
+                      });
+                      await addRasterToMap(createAppAPI(mapControllerRef), file, {
+                        name,
+                      });
+                    }}
+                  />
+                </Suspense>
+              </MountWhenOpened>
+            </SectionErrorBoundary>
+            {/* Mounted here (inside the map area, like FloatingPanels) so the
               selection panels anchor to the map canvas's top-left corner and
               drag-clamp to the map, not the whole window (#1314). */}
-          <SectionErrorBoundary
-            label="Selection panels"
-            displayName={t("shell.section.selectionPanels")}
-          >
-            <MountWhenOpened isOpen={(ui) => ui.selectByExpressionOpen}>
-              <Suspense fallback={null}>
-                <SelectByExpressionDialog canEditLayer={collaboration.canEditLayer} />
-              </Suspense>
-            </MountWhenOpened>
-            <MountWhenOpened isOpen={(ui) => ui.selectByLocationOpen}>
-              <Suspense fallback={null}>
-                <SelectByLocationDialog />
-              </Suspense>
-            </MountWhenOpened>
-          </SectionErrorBoundary>
-          <SectionErrorBoundary
-            label="Sun simulation panel"
-            displayName={t("shell.section.sunSimulationPanel")}
-          >
-            <SunPanel />
-          </SectionErrorBoundary>
-          <SectionErrorBoundary
-            label="Route animation panel"
-            displayName={t("shell.section.routeAnimationPanel")}
-          >
-            <RouteAnimationPanel mapControllerRef={mapControllerRef} />
-          </SectionErrorBoundary>
-          <SectionErrorBoundary
-            label="Flight simulator panel"
-            displayName={t("shell.section.flightSimulatorPanel")}
-          >
-            <FlightSimulatorPanel />
-          </SectionErrorBoundary>
-          <KnowledgeCardConsentDialog
-            open={knowledgeNoticeOpen}
-            onOpenChange={(open) => {
-              setKnowledgeNoticeOpen(open);
-              // Clear the paired pending place when the notice is dismissed
-              // (Cancel/Escape/overlay), mirroring dismissRoutingNotice so no
-              // stale target lingers. Confirm sets the place before this runs.
-              if (!open) setPendingKnowledgePlace(null);
-            }}
-            onConfirm={confirmKnowledgeConsent}
-          />
-          {/* Rendered here (not in TopToolbar) so the dialog the status badge
-              reopens stays mounted even in toolbar-hidden layouts (#754). */}
-          {collaboration.enabled && (
-            <CollaborateDialog
-              open={collaborateDialogOpen}
-              onOpenChange={setCollaborateDialogOpen}
-              api={collaboration}
+            <SectionErrorBoundary
+              label="Selection panels"
+              displayName={t("shell.section.selectionPanels")}
+            >
+              <MountWhenOpened isOpen={(ui) => ui.selectByExpressionOpen}>
+                <Suspense fallback={null}>
+                  <SelectByExpressionDialog canEditLayer={collaboration.canEditLayer} />
+                </Suspense>
+              </MountWhenOpened>
+              <MountWhenOpened isOpen={(ui) => ui.selectByLocationOpen}>
+                <Suspense fallback={null}>
+                  <SelectByLocationDialog />
+                </Suspense>
+              </MountWhenOpened>
+            </SectionErrorBoundary>
+            <SectionErrorBoundary
+              label="Sun simulation panel"
+              displayName={t("shell.section.sunSimulationPanel")}
+            >
+              <SunPanel />
+            </SectionErrorBoundary>
+            <SectionErrorBoundary
+              label="Route animation panel"
+              displayName={t("shell.section.routeAnimationPanel")}
+            >
+              <RouteAnimationPanel mapControllerRef={mapControllerRef} />
+            </SectionErrorBoundary>
+            <SectionErrorBoundary
+              label="Flight simulator panel"
+              displayName={t("shell.section.flightSimulatorPanel")}
+            >
+              <FlightSimulatorPanel />
+            </SectionErrorBoundary>
+            <KnowledgeCardConsentDialog
+              open={knowledgeNoticeOpen}
+              onOpenChange={(open) => {
+                setKnowledgeNoticeOpen(open);
+                // Clear the paired pending place when the notice is dismissed
+                // (Cancel/Escape/overlay), mirroring dismissRoutingNotice so no
+                // stale target lingers. Confirm sets the place before this runs.
+                if (!open) setPendingKnowledgePlace(null);
+              }}
+              onConfirm={confirmKnowledgeConsent}
             />
-          )}
-        </main>
-        {/* Same as the left dock: a map-only / hidden-panels embed skips the
+            {/* Rendered here (not in TopToolbar) so the dialog the status badge
+              reopens stays mounted even in toolbar-hidden layouts (#754). */}
+            {collaboration.enabled && (
+              <CollaborateDialog
+                open={collaborateDialogOpen}
+                onOpenChange={setCollaborateDialogOpen}
+                api={collaboration}
+              />
+            )}
+          </main>
+          {/* Same as the left dock: a map-only / hidden-panels embed skips the
             entire right side-dock (Style, plugin panels, and their shared rail). */}
-        {layoutOptions.panelsHidden || layoutOptions.viewer ? null : (
-          <>
-            {/* Shared-rail panels such as Comments must not remove the ordinary
+          {layoutOptions.panelsHidden || layoutOptions.viewer ? null : (
+            <>
+              {/* Shared-rail panels such as Comments must not remove the ordinary
                 positional docks: enabled Web Services panels still live in
                 left/right-of-style and need their vertical rail entries. Both
                 flank whichever middle surface applies, so they are rendered
                 once here rather than duplicated per branch. */}
-            <SectionErrorBoundary
-              label="Plugin panel (left of Style)"
-              displayName={t("shell.section.pluginPanelLeftOfStyle")}
-            >
-              <PluginRightPanel
-                dock="left-of-style"
-                contentEl={dockContentEl}
-                width={pluginPanelWidth}
-                onWidthChange={setPluginPanelWidth}
-              />
-            </SectionErrorBoundary>
-            {replaceStylePanelId ? (
               <SectionErrorBoundary
-                label="Shared right sidebar"
-                displayName={t("shell.section.sharedRightSidebar")}
+                label="Plugin panel (left of Style)"
+                displayName={t("shell.section.pluginPanelLeftOfStyle")}
               >
-                <SharedSidebar
-                  // Key by the active panel id so switching between two replace-style
-                  // plugins remounts the sidebar, resetting its per-panel local state
-                  // (the Style opt-in) rather than carrying the previous plugin over.
-                  key={replaceStylePanelId}
-                  side="style"
-                  pluginId={replaceStylePanelId}
-                  additionalPanelIds={replaceStylePanelIds}
-                  pluginContentEl={dockContentEl}
-                  pluginWidth={pluginPanelWidth}
-                  onPluginWidthChange={setPluginPanelWidth}
-                  builtinVisible={layoutOptions.stylePanelVisible}
-                  builtinTitle={t("sharedRail.style")}
-                  builtinIcon={<SlidersHorizontal className="h-4 w-4" />}
-                  // Mirror the standalone Style panel's autoCollapse triggers so the
-                  // notebook / story-map presentation collapses Style here too.
-                  // `autoCollapsedPanel` is omitted because it is always null in a
-                  // shared-rail mode (the panel is the sole active one).
-                  forceBuiltinCollapsed={notebookOpen || storymapPresenting}
-                  renderBuiltin={({ collapsed, onCollapsedChange }) => (
-                    <StylePanel
-                      mapControllerRef={mapControllerRef}
-                      mapReadyGeneration={mapReadyGeneration}
-                      onResizeStart={startStylePanelResize}
-                      openRequest={stylePanelOpenRequest}
-                      collapsed={collapsed}
-                      onCollapsedChange={onCollapsedChange}
-                      // Controlled mode ignores autoCollapse for collapsing (the
-                      // rail owns that via forceBuiltinCollapsed); it is passed so
-                      // a layer selection cannot expand Style over the notebook.
-                      autoCollapse={notebookOpen || storymapPresenting}
-                      hideOwnRail
-                    />
-                  )}
+                <PluginRightPanel
+                  dock="left-of-style"
+                  contentEl={dockContentEl}
+                  width={pluginPanelWidth}
+                  onWidthChange={setPluginPanelWidth}
                 />
               </SectionErrorBoundary>
-            ) : /* The notebook claims the workspace's right half, so the Style panel
+              {replaceStylePanelId ? (
+                <SectionErrorBoundary
+                  label="Shared right sidebar"
+                  displayName={t("shell.section.sharedRightSidebar")}
+                >
+                  <SharedSidebar
+                    // Key by the active panel id so switching between two replace-style
+                    // plugins remounts the sidebar, resetting its per-panel local state
+                    // (the Style opt-in) rather than carrying the previous plugin over.
+                    key={replaceStylePanelId}
+                    side="style"
+                    pluginId={replaceStylePanelId}
+                    additionalPanelIds={replaceStylePanelIds}
+                    pluginContentEl={dockContentEl}
+                    pluginWidth={pluginPanelWidth}
+                    onPluginWidthChange={setPluginPanelWidth}
+                    builtinVisible={layoutOptions.stylePanelVisible}
+                    builtinTitle={t("sharedRail.style")}
+                    builtinIcon={<SlidersHorizontal className="h-4 w-4" />}
+                    // Mirror the standalone Style panel's autoCollapse triggers so the
+                    // notebook / story-map presentation collapses Style here too.
+                    // `autoCollapsedPanel` is omitted because it is always null in a
+                    // shared-rail mode (the panel is the sole active one).
+                    forceBuiltinCollapsed={notebookOpen || storymapPresenting}
+                    renderBuiltin={({ collapsed, onCollapsedChange }) => (
+                      <StylePanel
+                        mapControllerRef={mapControllerRef}
+                        mapReadyGeneration={mapReadyGeneration}
+                        onResizeStart={startStylePanelResize}
+                        openRequest={stylePanelOpenRequest}
+                        collapsed={collapsed}
+                        onCollapsedChange={onCollapsedChange}
+                        // Controlled mode ignores autoCollapse for collapsing (the
+                        // rail owns that via forceBuiltinCollapsed); it is passed so
+                        // a layer selection cannot expand Style over the notebook.
+                        autoCollapse={notebookOpen || storymapPresenting}
+                        hideOwnRail
+                      />
+                    )}
+                  />
+                </SectionErrorBoundary>
+              ) : /* The notebook claims the workspace's right half, so the Style panel
                 collapses to its rail while the notebook is open (Processing →
                 Jupyter Notebook) rather than unmounting; the user can re-expand it.
                 A story map presentation collapses it for the same reason. */
-            layoutOptions.stylePanelVisible ? (
-              <SectionErrorBoundary label="Style panel" displayName={t("shell.section.stylePanel")}>
-                <StylePanel
-                  mapControllerRef={mapControllerRef}
-                  mapReadyGeneration={mapReadyGeneration}
-                  onResizeStart={startStylePanelResize}
-                  openRequest={stylePanelOpenRequest}
-                  autoCollapse={
-                    notebookOpen ||
-                    storymapPresenting ||
-                    layoutOptions.panelsCollapsed ||
-                    autoCollapsedPanel === "style"
-                  }
+              layoutOptions.stylePanelVisible ? (
+                <SectionErrorBoundary
+                  label="Style panel"
+                  displayName={t("shell.section.stylePanel")}
+                >
+                  <StylePanel
+                    mapControllerRef={mapControllerRef}
+                    mapReadyGeneration={mapReadyGeneration}
+                    onResizeStart={startStylePanelResize}
+                    openRequest={stylePanelOpenRequest}
+                    autoCollapse={
+                      notebookOpen ||
+                      storymapPresenting ||
+                      layoutOptions.panelsCollapsed ||
+                      autoCollapsedPanel === "style"
+                    }
+                  />
+                </SectionErrorBoundary>
+              ) : null}
+              <SectionErrorBoundary
+                label="Plugin panel (right of Style)"
+                displayName={t("shell.section.pluginPanelRightOfStyle")}
+              >
+                <PluginRightPanel
+                  dock="right-of-style"
+                  contentEl={dockContentEl}
+                  width={pluginPanelWidth}
+                  onWidthChange={setPluginPanelWidth}
                 />
               </SectionErrorBoundary>
-            ) : null}
-            <SectionErrorBoundary
-              label="Plugin panel (right of Style)"
-              displayName={t("shell.section.pluginPanelRightOfStyle")}
-            >
-              <PluginRightPanel
-                dock="right-of-style"
-                contentEl={dockContentEl}
-                width={pluginPanelWidth}
-                onWidthChange={setPluginPanelWidth}
-              />
+            </>
+          )}
+          {notebookOpen ? (
+            <SectionErrorBoundary label="Notebook" displayName={t("shell.section.notebook")}>
+              <Suspense fallback={null}>
+                <NotebookPanel
+                  onResizeStart={startNotebookPanelResize}
+                  mapControllerRef={mapControllerRef}
+                  mapReadyGeneration={mapReadyGeneration}
+                  themeMode={themeMode}
+                />
+              </Suspense>
             </SectionErrorBoundary>
-          </>
-        )}
-        {notebookOpen ? (
-          <SectionErrorBoundary label="Notebook" displayName={t("shell.section.notebook")}>
+          ) : null}
+        </div>
+        {layoutOptions.attributePanelVisible ? (
+          <SectionErrorBoundary
+            label="Attribute table"
+            displayName={t("shell.section.attributeTable")}
+          >
+            <AttributeTable mapControllerRef={mapControllerRef} />
+          </SectionErrorBoundary>
+        ) : null}
+        {layoutOptions.attributePanelVisible ? (
+          <SectionErrorBoundary
+            label="Raster attribute table"
+            displayName={t("shell.section.rasterAttributeTable")}
+          >
+            <RasterAttributeTable />
+          </SectionErrorBoundary>
+        ) : null}
+        {dashboardOpen ? (
+          <SectionErrorBoundary label="Dashboard" displayName={t("shell.section.dashboard")}>
             <Suspense fallback={null}>
-              <NotebookPanel
-                onResizeStart={startNotebookPanelResize}
-                mapControllerRef={mapControllerRef}
-                mapReadyGeneration={mapReadyGeneration}
-                themeMode={themeMode}
-              />
+              <DashboardPanel />
             </Suspense>
           </SectionErrorBoundary>
         ) : null}
-      </div>
-      {layoutOptions.attributePanelVisible ? (
-        <SectionErrorBoundary
-          label="Attribute table"
-          displayName={t("shell.section.attributeTable")}
-        >
-          <AttributeTable mapControllerRef={mapControllerRef} />
-        </SectionErrorBoundary>
-      ) : null}
-      {layoutOptions.attributePanelVisible ? (
-        <SectionErrorBoundary
-          label="Raster attribute table"
-          displayName={t("shell.section.rasterAttributeTable")}
-        >
-          <RasterAttributeTable />
-        </SectionErrorBoundary>
-      ) : null}
-      {dashboardOpen ? (
-        <SectionErrorBoundary label="Dashboard" displayName={t("shell.section.dashboard")}>
-          <Suspense fallback={null}>
-            <DashboardPanel />
-          </Suspense>
-        </SectionErrorBoundary>
-      ) : null}
-      {pythonConsoleOpen ? (
-        <SectionErrorBoundary
-          label="Python console"
-          displayName={t("shell.section.pythonConsole")}
-          onClose={() => setPythonConsoleOpen(false)}
-        >
-          <Suspense fallback={null}>
-            <PythonConsolePanel mapControllerRef={mapControllerRef} />
-          </Suspense>
-        </SectionErrorBoundary>
-      ) : null}
-      {sqlWorkspaceOpen ? (
-        <SectionErrorBoundary
-          label="SQL workspace"
-          displayName={t("shell.section.sqlWorkspace")}
-          onClose={() => setSqlWorkspaceOpen(false)}
-        >
-          <Suspense fallback={null}>
-            <SqlWorkspacePanel />
-          </Suspense>
-        </SectionErrorBoundary>
-      ) : null}
-      {assistantOpen ? (
-        <SectionErrorBoundary label="Assistant" displayName={t("shell.section.assistant")}>
-          <Suspense fallback={null}>
-            <AssistantPanel mapControllerRef={mapControllerRef} />
-          </Suspense>
-        </SectionErrorBoundary>
-      ) : null}
-      {layoutOptions.statusBarVisible ? (
-        <SectionErrorBoundary label="Status bar" displayName={t("shell.section.statusBar")}>
-          <StatusBar
-            compact={layoutOptions.compact}
-            diagnosticsErrorCount={diagnostics.errorCount}
-            diagnosticsWarningCount={diagnostics.warningCount}
-            onOpenDiagnostics={() => setDiagnosticsOpen(true)}
-          />
-        </SectionErrorBoundary>
-      ) : null}
-      <DiagnosticsDialog
-        diagnostics={diagnostics}
-        open={diagnosticsOpen}
-        onOpenChange={setDiagnosticsOpen}
-      />
-      <ProjectHistoryDialog
-        open={projectHistoryOpen}
-        onOpenChange={(open) => {
-          setProjectHistoryOpen(open);
-          if (!open) projectHistory.clearRestoreError();
-        }}
-        snapshots={projectHistory.snapshots}
-        restoreError={projectHistory.restoreError}
-        onRestore={projectHistory.restore}
-      />
-      <ProjectRecoveryDialog
-        snapshot={projectHistory.recoverySnapshot}
-        restoreError={projectHistory.restoreError}
-        onRestore={projectHistory.restore}
-        onDiscard={() => {
-          projectHistory.clearRestoreError();
-          projectHistory.discardRecovery();
-        }}
-        onDismiss={() => {
-          projectHistory.clearRestoreError();
-          projectHistory.dismissRecovery();
-        }}
-      />
-      {/* Mounted in the always-rendered shell (not the toolbar) so the bookmark
-          export name prompt works even when the toolbar is hidden (`?maponly`). */}
-      <FileNamePromptDialog />
-      {/* Trust prompt for plugin URLs carried by an opened project (#1062);
-          inert unless the project references an untrusted plugin URL. */}
-      <ProjectPluginTrustDialog trust={projectPluginTrust} />
-      <MountWhenOpened isOpen={(ui) => ui.processingOpen}>
-        <Suspense fallback={null}>
-          <ProcessingDialog
-            mapControllerRef={mapControllerRef}
-            onAddRaster={async (bytes, name, fileName) => {
-              // Cast required: TS types Uint8Array as Uint8Array<ArrayBufferLike>,
-              // which is not directly assignable to BlobPart under this lib.
-              // `fileName` (when given) becomes the layer's sourcePath while `name`
-              // stays the human-readable display name; the control keeps them
-              // separate (info.source.fileName vs info.name).
-              const file = new File([bytes as BlobPart], fileName ?? `${name}.tif`, {
-                type: "image/tiff",
-              });
-              await addRasterToMap(createAppAPI(mapControllerRef), file, {
-                name,
-              });
-            }}
-          />
-        </Suspense>
-      </MountWhenOpened>
-      <MountWhenOpened isOpen={(ui) => ui.conversionOpen}>
-        <Suspense fallback={null}>
-          <ConversionDialog />
-        </Suspense>
-      </MountWhenOpened>
-      <MountWhenOpened isOpen={(ui) => ui.vectorToolOpen}>
-        <Suspense fallback={null}>
-          <VectorToolsDialog mapControllerRef={mapControllerRef} />
-        </Suspense>
-      </MountWhenOpened>
-      <MountWhenOpened isOpen={(ui) => ui.networkToolOpen}>
-        <Suspense fallback={null}>
-          <NetworkToolsDialog mapControllerRef={mapControllerRef} />
-        </Suspense>
-      </MountWhenOpened>
-      <MountWhenOpened isOpen={(ui) => ui.batchToolsOpen}>
-        <Suspense fallback={null}>
-          <BatchToolsDialog mapControllerRef={mapControllerRef} />
-        </Suspense>
-      </MountWhenOpened>
-      <MountWhenOpened isOpen={(ui) => ui.statisticsToolOpen}>
-        <Suspense fallback={null}>
-          <StatisticsToolsDialog mapControllerRef={mapControllerRef} />
-        </Suspense>
-      </MountWhenOpened>
-      <MountWhenOpened isOpen={(ui) => ui.geocodeOpen}>
-        <Suspense fallback={null}>
-          <GeocodeDialog mapControllerRef={mapControllerRef} />
-        </Suspense>
-      </MountWhenOpened>
-      <MountWhenOpened isOpen={(ui) => ui.processingHistoryOpen}>
-        <Suspense fallback={null}>
-          <ProcessingHistoryDialog />
-        </Suspense>
-      </MountWhenOpened>
-      <MountWhenOpened isOpen={(ui) => ui.rasterToolOpen}>
-        <Suspense fallback={null}>
-          <RasterToolsDialog mapControllerRef={mapControllerRef} />
-        </Suspense>
-      </MountWhenOpened>
-      <MountWhenOpened isOpen={(ui) => ui.segmentationOpen}>
-        <Suspense fallback={null}>
-          <SegmentationDialog mapControllerRef={mapControllerRef} />
-        </Suspense>
-      </MountWhenOpened>
-      <StoryMapPanel mapControllerRef={mapControllerRef} />
-      <StoryMapPresenter
-        mapControllerRef={mapControllerRef}
-        mapReadyGeneration={mapReadyGeneration}
-      />
-      <div
-        ref={verticalResizeGuideRef}
-        className="pointer-events-none fixed bottom-7 top-11 z-50 hidden w-px bg-primary shadow-[0_0_0_1px_hsl(var(--primary)/0.25)]"
-      />
-      {isDraggingFiles ? (
-        <div
-          data-testid="file-drop-overlay"
-          className="pointer-events-none absolute inset-0 z-50 flex items-center justify-center bg-background/70 backdrop-blur-sm"
-        >
-          <div className="max-w-sm rounded-md border bg-background px-4 py-3 text-center shadow-lg">
-            <p className="text-sm font-medium">{t("toolbar.fileDrop.overlayTitle")}</p>
-            <p className="mt-1 text-xs text-muted-foreground">
-              {t("toolbar.fileDrop.overlaySubtext")}
-            </p>
-          </div>
-        </div>
-      ) : null}
-      <div className="pointer-events-none absolute left-1/2 top-14 z-50 flex w-max max-w-[min(90vw,32rem)] -translate-x-1/2 flex-col gap-2">
-        {projectUrlLoadState?.error ? (
-          <UrlLoadErrorBanner
-            key={`project:${projectUrlLoadState.error}`}
-            message={projectUrlLoadState.error}
-          />
-        ) : null}
-        {dataUrlLoadState?.error ? (
-          <UrlLoadErrorBanner
-            key={`data:${dataUrlLoadState.error}`}
-            message={dataUrlLoadState.error}
-          />
-        ) : null}
-      </div>
-      {crsWarning ? (
-        <div
-          data-testid="crs-warning"
-          role="status"
-          aria-live="polite"
-          className="absolute bottom-24 left-1/2 z-50 max-w-[min(90vw,36rem)] -translate-x-1/2 rounded-md border border-destructive/40 bg-background px-3 py-2 text-center text-sm text-destructive shadow-lg"
-        >
-          {crsWarning}
-          <button
-            type="button"
-            onClick={() => setCrsWarning(null)}
-            className="ms-2 underline underline-offset-2"
+        {pythonConsoleOpen ? (
+          <SectionErrorBoundary
+            label="Python console"
+            displayName={t("shell.section.pythonConsole")}
+            onClose={() => setPythonConsoleOpen(false)}
           >
-            {t("common.close")}
-          </button>
-        </div>
-      ) : null}
-      {credentialStorageError && credentialStorageRevision !== dismissedCredentialRevision ? (
-        <div
-          data-testid="credential-storage-warning"
-          role="alert"
-          className="absolute bottom-36 left-1/2 z-50 max-w-[min(90vw,36rem)] -translate-x-1/2 rounded-md border border-destructive/40 bg-background px-3 py-2 text-center text-sm text-destructive shadow-lg"
-        >
-          {t("settings.credentials.unavailable", { error: credentialStorageError })}
-          <button
-            type="button"
-            onClick={() => setDismissedCredentialRevision(credentialStorageRevision)}
-            className="ms-2 underline underline-offset-2"
+            <Suspense fallback={null}>
+              <PythonConsolePanel mapControllerRef={mapControllerRef} />
+            </Suspense>
+          </SectionErrorBoundary>
+        ) : null}
+        {sqlWorkspaceOpen ? (
+          <SectionErrorBoundary
+            label="SQL workspace"
+            displayName={t("shell.section.sqlWorkspace")}
+            onClose={() => setSqlWorkspaceOpen(false)}
           >
-            {t("common.close")}
-          </button>
-        </div>
-      ) : null}
-      {dropMessage || dropError ? (
-        <div
-          data-testid="drop-status"
-          data-drop-error={dropError ? "true" : undefined}
-          aria-live="polite"
-          className={`pointer-events-none absolute bottom-10 left-1/2 z-50 -translate-x-1/2 rounded-md border bg-background px-3 py-2 text-sm shadow-lg ${
-            dropError ? "text-destructive" : "text-foreground"
-          }`}
-        >
-          {dropError ?? dropMessage}
-        </div>
-      ) : null}
-      {commentTool.pendingComment && (
-        <AddCommentDialog
-          pendingComment={commentTool.pendingComment}
-          onSubmit={commentTool.submitComment}
-          onCancel={commentTool.cancelPendingComment}
+            <Suspense fallback={null}>
+              <SqlWorkspacePanel />
+            </Suspense>
+          </SectionErrorBoundary>
+        ) : null}
+        {assistantOpen ? (
+          <SectionErrorBoundary label="Assistant" displayName={t("shell.section.assistant")}>
+            <Suspense fallback={null}>
+              <AssistantPanel mapControllerRef={mapControllerRef} />
+            </Suspense>
+          </SectionErrorBoundary>
+        ) : null}
+        {layoutOptions.statusBarVisible ? (
+          <SectionErrorBoundary label="Status bar" displayName={t("shell.section.statusBar")}>
+            <StatusBar
+              compact={layoutOptions.compact}
+              diagnosticsErrorCount={diagnostics.errorCount}
+              diagnosticsWarningCount={diagnostics.warningCount}
+              onOpenDiagnostics={() => setDiagnosticsOpen(true)}
+            />
+          </SectionErrorBoundary>
+        ) : null}
+        <DiagnosticsDialog
+          diagnostics={diagnostics}
+          open={diagnosticsOpen}
+          onOpenChange={setDiagnosticsOpen}
         />
-      )}
-    </div>
+        <ProjectHistoryDialog
+          open={projectHistoryOpen}
+          onOpenChange={(open) => {
+            setProjectHistoryOpen(open);
+            if (!open) projectHistory.clearRestoreError();
+          }}
+          snapshots={projectHistory.snapshots}
+          restoreError={projectHistory.restoreError}
+          onRestore={projectHistory.restore}
+        />
+        <ProjectRecoveryDialog
+          snapshot={projectHistory.recoverySnapshot}
+          restoreError={projectHistory.restoreError}
+          onRestore={projectHistory.restore}
+          onDiscard={() => {
+            projectHistory.clearRestoreError();
+            projectHistory.discardRecovery();
+          }}
+          onDismiss={() => {
+            projectHistory.clearRestoreError();
+            projectHistory.dismissRecovery();
+          }}
+        />
+        {/* Mounted in the always-rendered shell (not the toolbar) so the bookmark
+          export name prompt works even when the toolbar is hidden (`?maponly`). */}
+        <FileNamePromptDialog />
+        {/* Trust prompt for plugin URLs carried by an opened project (#1062);
+          inert unless the project references an untrusted plugin URL. */}
+        <ProjectPluginTrustDialog trust={projectPluginTrust} />
+        <MountWhenOpened isOpen={(ui) => ui.processingOpen}>
+          <Suspense fallback={null}>
+            <ProcessingDialog
+              mapControllerRef={mapControllerRef}
+              onAddRaster={async (bytes, name, fileName) => {
+                // Cast required: TS types Uint8Array as Uint8Array<ArrayBufferLike>,
+                // which is not directly assignable to BlobPart under this lib.
+                // `fileName` (when given) becomes the layer's sourcePath while `name`
+                // stays the human-readable display name; the control keeps them
+                // separate (info.source.fileName vs info.name).
+                const file = new File([bytes as BlobPart], fileName ?? `${name}.tif`, {
+                  type: "image/tiff",
+                });
+                await addRasterToMap(createAppAPI(mapControllerRef), file, {
+                  name,
+                });
+              }}
+            />
+          </Suspense>
+        </MountWhenOpened>
+        <MountWhenOpened isOpen={(ui) => ui.conversionOpen}>
+          <Suspense fallback={null}>
+            <ConversionDialog />
+          </Suspense>
+        </MountWhenOpened>
+        <MountWhenOpened isOpen={(ui) => ui.vectorToolOpen}>
+          <Suspense fallback={null}>
+            <VectorToolsDialog mapControllerRef={mapControllerRef} />
+          </Suspense>
+        </MountWhenOpened>
+        <MountWhenOpened isOpen={(ui) => ui.networkToolOpen}>
+          <Suspense fallback={null}>
+            <NetworkToolsDialog mapControllerRef={mapControllerRef} />
+          </Suspense>
+        </MountWhenOpened>
+        <MountWhenOpened isOpen={(ui) => ui.batchToolsOpen}>
+          <Suspense fallback={null}>
+            <BatchToolsDialog mapControllerRef={mapControllerRef} />
+          </Suspense>
+        </MountWhenOpened>
+        <MountWhenOpened isOpen={(ui) => ui.statisticsToolOpen}>
+          <Suspense fallback={null}>
+            <StatisticsToolsDialog mapControllerRef={mapControllerRef} />
+          </Suspense>
+        </MountWhenOpened>
+        <MountWhenOpened isOpen={(ui) => ui.geocodeOpen}>
+          <Suspense fallback={null}>
+            <GeocodeDialog mapControllerRef={mapControllerRef} />
+          </Suspense>
+        </MountWhenOpened>
+        <MountWhenOpened isOpen={(ui) => ui.processingHistoryOpen}>
+          <Suspense fallback={null}>
+            <ProcessingHistoryDialog />
+          </Suspense>
+        </MountWhenOpened>
+        <MountWhenOpened isOpen={(ui) => ui.rasterToolOpen}>
+          <Suspense fallback={null}>
+            <RasterToolsDialog mapControllerRef={mapControllerRef} />
+          </Suspense>
+        </MountWhenOpened>
+        <MountWhenOpened isOpen={(ui) => ui.segmentationOpen}>
+          <Suspense fallback={null}>
+            <SegmentationDialog mapControllerRef={mapControllerRef} />
+          </Suspense>
+        </MountWhenOpened>
+        <StoryMapPanel mapControllerRef={mapControllerRef} />
+        <StoryMapPresenter
+          mapControllerRef={mapControllerRef}
+          mapReadyGeneration={mapReadyGeneration}
+        />
+        <div
+          ref={verticalResizeGuideRef}
+          className="pointer-events-none fixed bottom-7 top-11 z-50 hidden w-px bg-primary shadow-[0_0_0_1px_hsl(var(--primary)/0.25)]"
+        />
+        {isDraggingFiles ? (
+          <div
+            data-testid="file-drop-overlay"
+            className="pointer-events-none absolute inset-0 z-50 flex items-center justify-center bg-background/70 backdrop-blur-sm"
+          >
+            <div className="max-w-sm rounded-md border bg-background px-4 py-3 text-center shadow-lg">
+              <p className="text-sm font-medium">{t("toolbar.fileDrop.overlayTitle")}</p>
+              <p className="mt-1 text-xs text-muted-foreground">
+                {t("toolbar.fileDrop.overlaySubtext")}
+              </p>
+            </div>
+          </div>
+        ) : null}
+        <div className="pointer-events-none absolute left-1/2 top-14 z-50 flex w-max max-w-[min(90vw,32rem)] -translate-x-1/2 flex-col gap-2">
+          {projectUrlLoadState?.error ? (
+            <UrlLoadErrorBanner
+              key={`project:${projectUrlLoadState.error}`}
+              message={projectUrlLoadState.error}
+            />
+          ) : null}
+          {dataUrlLoadState?.error ? (
+            <UrlLoadErrorBanner
+              key={`data:${dataUrlLoadState.error}`}
+              message={dataUrlLoadState.error}
+            />
+          ) : null}
+        </div>
+        {crsWarning ? (
+          <div
+            data-testid="crs-warning"
+            role="status"
+            aria-live="polite"
+            className="absolute bottom-24 left-1/2 z-50 max-w-[min(90vw,36rem)] -translate-x-1/2 rounded-md border border-destructive/40 bg-background px-3 py-2 text-center text-sm text-destructive shadow-lg"
+          >
+            {crsWarning}
+            <button
+              type="button"
+              onClick={() => setCrsWarning(null)}
+              className="ms-2 underline underline-offset-2"
+            >
+              {t("common.close")}
+            </button>
+          </div>
+        ) : null}
+        {credentialStorageError && credentialStorageRevision !== dismissedCredentialRevision ? (
+          <div
+            data-testid="credential-storage-warning"
+            role="alert"
+            className="absolute bottom-36 left-1/2 z-50 max-w-[min(90vw,36rem)] -translate-x-1/2 rounded-md border border-destructive/40 bg-background px-3 py-2 text-center text-sm text-destructive shadow-lg"
+          >
+            {t("settings.credentials.unavailable", { error: credentialStorageError })}
+            <button
+              type="button"
+              onClick={() => setDismissedCredentialRevision(credentialStorageRevision)}
+              className="ms-2 underline underline-offset-2"
+            >
+              {t("common.close")}
+            </button>
+          </div>
+        ) : null}
+        {dropMessage || dropError ? (
+          <div
+            data-testid="drop-status"
+            data-drop-error={dropError ? "true" : undefined}
+            aria-live="polite"
+            className={`pointer-events-none absolute bottom-10 left-1/2 z-50 -translate-x-1/2 rounded-md border bg-background px-3 py-2 text-sm shadow-lg ${
+              dropError ? "text-destructive" : "text-foreground"
+            }`}
+          >
+            {dropError ?? dropMessage}
+          </div>
+        ) : null}
+        {commentTool.pendingComment && (
+          <AddCommentDialog
+            pendingComment={commentTool.pendingComment}
+            onSubmit={commentTool.submitComment}
+            onCancel={commentTool.cancelPendingComment}
+          />
+        )}
+      </div>
+    </LayerRefreshProvider>
   );
 }

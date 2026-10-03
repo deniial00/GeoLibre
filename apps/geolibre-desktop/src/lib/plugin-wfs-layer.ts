@@ -4,8 +4,6 @@ import { buildWfsGeoJsonLayer } from "../components/layout/add-data/apply-servic
 import { stripOgcOperationParams } from "../components/layout/add-data/helpers";
 import { fetchWfsGeoJson } from "./layer-refresh";
 
-import { validatePluginWfsUrl } from "./plugin-wfs-security";
-
 function validateBbox(
   value: unknown,
 ): asserts value is [number, number, number, number] | undefined {
@@ -49,8 +47,6 @@ export async function addPluginWfsLayer(
   if (!version) throw new Error("addWfsLayer: options.version must be a non-empty string.");
   validateBbox(options?.bbox);
 
-  validatePluginWfsUrl(parsedUrl);
-
   const projectGeneration = useAppStore.getState().projectGeneration;
   const endpoint = stripOgcOperationParams(url, "WFS");
   const result = await fetchWfsGeoJson(
@@ -63,7 +59,7 @@ export async function addPluginWfsLayer(
       maxFeatures: "1000",
       bbox: options?.bbox,
     },
-    { useWfsProxy: true, usePluginWfsSecurity: true },
+    { useWfsProxy: true },
   );
   if (useAppStore.getState().projectGeneration !== projectGeneration) {
     throw new Error("addWfsLayer: the project changed while the layer was loading.");

@@ -1,4 +1,5 @@
 import { normalizeCesiumBasemap } from "./cesium-imagery";
+import { redactUrlCredentials } from "./credentials";
 import { v4 as uuidv4 } from "uuid";
 import {
   DEFAULT_BASEMAP,
@@ -1869,6 +1870,39 @@ function hasRestorableSourceUrl(layer: GeoLibreLayer): boolean {
 function prepareLayerForSave(layer: GeoLibreLayer): GeoLibreLayer {
   const hasGeometryEdits = layer.metadata.geometryEdited === true;
   layer = portableLayer(layer);
+  // WFS feature URLs can contain inline authentication supplied by a plugin.
+  // Persist a sanitized reference, and keep the fetched collection embedded so
+  // the saved project remains renderable without storing those credentials.
+  let wfsCredentialsRedacted = false;
+  if (layer.metadata.sourceKind === "wfs-getfeature") {
+    const sourceUrl =
+      typeof layer.source.url === "string"
+        ? redactUrlCredentials(layer.source.url)
+        : layer.source.url;
+    const sourcePath =
+      typeof layer.sourcePath === "string"
+        ? redactUrlCredentials(layer.sourcePath)
+        : layer.sourcePath;
+    const originalUrl =
+      typeof layer.metadata.originalUrl === "string"
+        ? redactUrlCredentials(layer.metadata.originalUrl)
+        : layer.metadata.originalUrl;
+    wfsCredentialsRedacted =
+      sourceUrl !== layer.source.url ||
+      sourcePath !== layer.sourcePath ||
+      originalUrl !== layer.metadata.originalUrl;
+    if (wfsCredentialsRedacted) {
+      layer = {
+        ...layer,
+        source: sourceUrl === layer.source.url ? layer.source : { ...layer.source, url: sourceUrl },
+        sourcePath,
+        metadata:
+          originalUrl === layer.metadata.originalUrl
+            ? layer.metadata
+            : { ...layer.metadata, originalUrl },
+      };
+    }
+  }
   // This flag describes unsaved changes to the live source, not persisted
   // project state. A reference-only save reloads the original geometries;
   // carrying the flag into that project would warn about nonexistent edits.
@@ -1956,8 +1990,9 @@ function prepareLayerForSave(layer: GeoLibreLayer): GeoLibreLayer {
     if (hasGeometryEdits) {
       const { url: _url, ...source } = layer.source;
       layer = { ...layer, source };
-    } else {
+    } else if (!wfsCredentialsRedacted) {
       const { geojson: _geojson, ...rest } = layer;
+      // Credential-bearing references are deliberately kept with their data.
       layer = rest;
     }
   }

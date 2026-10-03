@@ -4,7 +4,6 @@ import { useAppStore } from "@geolibre/core";
 import type { Point } from "geojson";
 import { DOMParser } from "linkedom";
 import { addPluginWfsLayer } from "../apps/geolibre-desktop/src/lib/plugin-wfs-layer";
-import { fetchWfsGeoJson } from "../apps/geolibre-desktop/src/lib/layer-refresh";
 
 globalThis.DOMParser = DOMParser as unknown as typeof globalThis.DOMParser;
 const originalFetch = globalThis.fetch;
@@ -66,46 +65,12 @@ describe("addPluginWfsLayer", () => {
     assert.match(layer.source.url!, /outputFormat=application%2Fgml/);
   });
 
-  it("rejects hostname WFS destinations in the hosted browser before fetching", async () => {
-    let fetchCalled = false;
-    globalThis.fetch = (async () => {
-      fetchCalled = true;
-      return new Response(JSON.stringify(JSON_FEATURES));
-    }) as typeof fetch;
-
-    await assert.rejects(
-      addPluginWfsLayer("Hosted hostname", {
-        url: "https://services.example.org/wfs",
-        typeName: "roads",
-      }),
-      /public IP-literal URL/,
-    );
-    assert.equal(fetchCalled, false);
-    assert.equal(useAppStore.getState().layers.length, 0);
-    await assert.rejects(
-      fetchWfsGeoJson(
-        {
-          endpoint: "http://10.0.0.1/wfs",
-          typeName: "roads",
-          version: "2.0.0",
-          outputFormat: "application/json",
-          srsName: "EPSG:4326",
-        },
-        { usePluginWfsSecurity: true },
-      ),
-      /public destination/,
-      "refreshes of saved plugin WFS layers must revalidate literal addresses",
-    );
-    assert.equal(fetchCalled, false);
-  });
-
   it("rejects invalid inputs and empty results without adding a layer", async () => {
     for (const [options, message] of [
       [{ url: "", typeName: "x" }, /options.url must be a non-empty string/],
       [{ url: "file:///x", typeName: "x" }, /absolute HTTP\(S\) URL/],
       [{ url: "https://8.8.8.8", typeName: " " }, /options.typeName must be a non-empty string/],
       [{ url: "https://8.8.8.8", typeName: "x", bbox: [10, 40, 12, 91] }, /options.bbox/],
-      [{ url: "http://172.16.0.1/wfs", typeName: "x" }, /public destination/],
     ] as const) {
       await assert.rejects(addPluginWfsLayer("invalid", options as never), message);
     }
