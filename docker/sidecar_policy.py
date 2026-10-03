@@ -2,8 +2,8 @@
 
 import json
 import os
-from pathlib import Path
 import sys
+from pathlib import Path
 
 # Any one owning capability grants the entire route prefix. Conversion is also
 # polled by raster jobs and used when adding data, so both owners must work.
@@ -20,14 +20,22 @@ ROUTE_CAPABILITIES = {
 
 # Explicit exceptions checked against FastAPI's routes by the backend suite.
 # These retain their existing behavior whenever the sidecar is running.
-UNGUARDED_PREFIXES = frozenset({
-    "health", "algorithms", "shutdown", "run", "docs", "redoc", "openapi.json",
-})
+UNGUARDED_PREFIXES = frozenset(
+    {
+        "health",
+        "algorithms",
+        "shutdown",
+        "run",
+        "docs",
+        "redoc",
+        "openapi.json",
+    }
+)
 
 _DENY = (
-    '    default_type application/json;\n'
+    "    default_type application/json;\n"
     '    return 403 \'{"detail":"Sidecar disabled by deployment policy"}\';\n'
-    '    types {}\n'
+    "    types {}\n"
 )
 
 
@@ -37,11 +45,10 @@ def generate_snippets(policy, disabled=False):
     # Omitted means unrestricted; [] is an explicit empty grant.
     granted = (
         frozenset().union(*ROUTE_CAPABILITIES.values())
-        if capabilities is None else frozenset(capabilities)
+        if capabilities is None
+        else frozenset(capabilities)
     )
-    start = not disabled and any(
-        granted & required for required in ROUTE_CAPABILITIES.values()
-    )
+    start = not disabled and any(granted & required for required in ROUTE_CAPABILITIES.values())
     guards = "# Generated sidecar capability guards.\n"
     for prefix, required in ROUTE_CAPABILITIES.items():
         if not granted & required:

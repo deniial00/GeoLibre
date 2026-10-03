@@ -6,7 +6,9 @@ from pathlib import Path
 import pytest
 
 ROOT = Path(__file__).resolve().parents[2]
-_spec = importlib.util.spec_from_file_location("sidecar_policy", ROOT / "docker" / "sidecar_policy.py")
+_spec = importlib.util.spec_from_file_location(
+    "sidecar_policy", ROOT / "docker" / "sidecar_policy.py"
+)
 sp = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(sp)
 
@@ -51,11 +53,11 @@ def test_capability_matrix(capabilities, denied, start):
         assert f"location ^~ /sidecar/{prefix} {{" not in guards
 
 
-@pytest.mark.parametrize("policy", [{"version": 1}, {"version": 1, "capabilities": ["processing:run", "data:add"]}])
+@pytest.mark.parametrize(
+    "policy", [{"version": 1}, {"version": 1, "capabilities": ["processing:run", "data:add"]}]
+)
 def test_disable_override_turns_unrestricted_sidecar_off(policy):
     _, off, start = sp.generate_snippets(policy, disabled=True)
     assert start is False
     assert "return 403" in off
     assert "default_type application/json;" in off
-
-

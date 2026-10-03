@@ -6,9 +6,12 @@ from pathlib import Path
 from geolibre_server.app.main import app
 
 ROOT = Path(__file__).resolve().parents[3]
-_spec = importlib.util.spec_from_file_location("sidecar_policy", ROOT / "docker" / "sidecar_policy.py")
+_spec = importlib.util.spec_from_file_location(
+    "sidecar_policy", ROOT / "docker" / "sidecar_policy.py"
+)
 sp = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(sp)
+
 
 def route_paths(routes, prefix=""):
     for route in routes:
@@ -22,7 +25,6 @@ def route_paths(routes, prefix=""):
             )
 
 
-
 def test_every_sidecar_route_prefix_is_classified():
     prefixes = {path.lstrip("/").split("/", 1)[0] for path in route_paths(app.routes)}
     guarded = set(sp.ROUTE_CAPABILITIES)
@@ -32,5 +34,3 @@ def test_every_sidecar_route_prefix_is_classified():
         f"Unclassified backend prefixes: {prefixes - guarded - unguarded}; "
         f"policy prefixes without routes: {(guarded | unguarded) - prefixes}"
     )
-
-
