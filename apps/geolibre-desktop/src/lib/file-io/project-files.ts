@@ -24,7 +24,7 @@ import {
   type BrowserFilePickerType,
   type BrowserFilePickerWindow,
 } from "./file-dialogs";
-import { isHttpUrl } from "./paths";
+import { ensureGeoLibreProjectExtension, isHttpUrl } from "./paths";
 import { isAbortError } from "./shared";
 
 const GEOLIBRE_PROJECT_FILE_TYPES: BrowserFilePickerType[] = [
@@ -347,8 +347,9 @@ export async function saveProjectFile(
     defaultPath: defaultName ?? "project.geolibre",
   });
   if (!path) return null;
-  await writeTextFile(path, content);
-  return path;
+  const projectPath = ensureGeoLibreProjectExtension(path);
+  await writeTextFile(projectPath, content);
+  return projectPath;
 }
 
 /**

@@ -9,7 +9,15 @@ import {
   openRasterLayerPanel,
   subscribeGeometryEdit,
 } from "@geolibre/plugins";
-import { Suspense, useCallback, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import {
+  Suspense,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from "react";
 import { createPortal } from "react-dom";
 import { BROWSER_PANEL_ID, useRegisterBrowserPanel } from "../../hooks/useRegisterBrowserPanel";
 import { COMMENTS_PANEL_ID, useRegisterCommentsPanel } from "../../hooks/useRegisterCommentsPanel";
@@ -99,6 +107,7 @@ import { StoryMapPresenter } from "../storymap/StoryMapPresenter";
 import { DiagnosticsDialog } from "./DiagnosticsDialog";
 import { FileNamePromptDialog } from "./FileNamePromptDialog";
 import { ProjectPluginTrustDialog } from "./ProjectPluginTrustDialog";
+import { RegistryPluginTrustDialog } from "./RegistryPluginTrustDialog";
 import { ProjectHistoryDialog } from "./ProjectHistoryDialog";
 import { ProjectRecoveryDialog } from "./ProjectRecoveryDialog";
 import { StatusBar } from "./StatusBar";
@@ -141,6 +150,7 @@ import { useMapFullscreenAttribute } from "../../hooks/desktop-shell/useMapFulls
 import { useNativeProjectOpenListener } from "../../hooks/desktop-shell/useNativeProjectOpenListener";
 import { usePanelResize } from "../../hooks/desktop-shell/usePanelResize";
 import { usePluginStateRestore } from "../../hooks/desktop-shell/usePluginStateRestore";
+import { fetchPluginRegistry } from "../../lib/plugin-registry";
 import { usePluginDeepLink } from "../../hooks/desktop-shell/usePluginDeepLink";
 import { useRasterFileHandlers } from "../../hooks/desktop-shell/useRasterFileHandlers";
 import { useRasterSubsetLayer } from "../../hooks/desktop-shell/useRasterSubsetLayer";
@@ -348,6 +358,21 @@ export function DesktopShell({
     });
   useTileProtocols();
   useRasterFileHandlers(mapControllerRef, t);
+  // Fetching the registry also tells the credential redaction which external
+  // plugins declared their project state publishable, so a save made before the
+  // Manage Plugins dialog is ever opened still keeps that state. A failed fetch
+  // only leaves the conservative default of dropping external plugin state.
+  const canInstallPlugins = useAppStore((state) =>
+    state.deploymentCapabilities.has("plugins:install"),
+  );
+  useEffect(() => {
+    // Same gate as the marketplace: a deployment that disables plugin
+    // installation has no registry plugins, so there is nothing to declare.
+    if (!canInstallPlugins) return;
+    const controller = new AbortController();
+    fetchPluginRegistry(undefined, controller.signal).catch(() => {});
+    return () => controller.abort();
+  }, [canInstallPlugins]);
   usePluginStateRestore({
     mapControllerRef,
     enforceViewerPlugins,
@@ -357,7 +382,7 @@ export function DesktopShell({
   });
   // After the restore above, so a `?url=` project's plugin state cannot close
   // what the link opened.
-  usePluginDeepLink({
+  const registryPluginLink = usePluginDeepLink({
     mapControllerRef,
     enforceViewerPlugins,
     viewer: layoutOptions.viewer,
@@ -1082,6 +1107,9 @@ export function DesktopShell({
         {/* Trust prompt for plugin URLs carried by an opened project (#1062);
           inert unless the project references an untrusted plugin URL. */}
         <ProjectPluginTrustDialog trust={projectPluginTrust} />
+        {/* Trust prompt for a `?plugin=<registry id>` link to a plugin that is
+          not installed yet; inert otherwise. */}
+        <RegistryPluginTrustDialog link={registryPluginLink} />
         <MountWhenOpened isOpen={(ui) => ui.processingOpen}>
           <Suspense fallback={null}>
             <ProcessingDialog

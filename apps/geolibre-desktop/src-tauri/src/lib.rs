@@ -745,7 +745,7 @@ pub(crate) fn is_allowed_project_path(path: &str) -> bool {
 fn read_project_file(path: String) -> Result<String, String> {
     if !is_allowed_project_path(&path) {
         return Err(format!(
-            "Refusing to read \"{path}\": not an absolute local project file path"
+            "Refusing to read \"{path}\": a project file must be an absolute local path whose name ends in .geolibre or .geolibre.json"
         ));
     }
     // Resolve symlinks and re-check the extension, so a symlink named
