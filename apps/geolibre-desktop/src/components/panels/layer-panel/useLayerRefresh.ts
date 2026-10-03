@@ -290,13 +290,19 @@ export function useLayerRefresh({ layers, isCollapsed }: UseLayerRefreshOptions)
           scheduleStatusClear(layer.id);
           return;
         }
-        const { geojson, featureCount, metadata: refreshedMetadata } =
-          await refreshGeoJsonLayer(layer);
-        const latestBeforeWrite = useAppStore.getState().layers.find((candidate) => candidate.id === layer.id);
+        const {
+          geojson,
+          featureCount,
+          metadata: refreshedMetadata,
+        } = await refreshGeoJsonLayer(layer);
+        const latestBeforeWrite = useAppStore
+          .getState()
+          .layers.find((candidate) => candidate.id === layer.id);
         if (
           requestGeneration !== useAppStore.getState().projectGeneration ||
           latestBeforeWrite?.source.url !== requestSourceUrl
-        ) return;
+        )
+          return;
         const latest = useAppStore.getState().layers.find((candidate) => candidate.id === layer.id);
         if (!latest) return;
 
@@ -326,11 +332,14 @@ export function useLayerRefresh({ layers, isCollapsed }: UseLayerRefreshOptions)
         }));
         scheduleStatusClear(layer.id);
       } catch (error) {
-        const latestForError = useAppStore.getState().layers.find((candidate) => candidate.id === layer.id);
+        const latestForError = useAppStore
+          .getState()
+          .layers.find((candidate) => candidate.id === layer.id);
         if (
           requestGeneration !== useAppStore.getState().projectGeneration ||
           latestForError?.source.url !== requestSourceUrl
-        ) return;
+        )
+          return;
         const message = error instanceof Error ? error.message : t("layers.refreshError");
         const latest = useAppStore.getState().layers.find((candidate) => candidate.id === layer.id);
         if (latest) {
@@ -369,7 +378,6 @@ export function useLayerRefresh({ layers, isCollapsed }: UseLayerRefreshOptions)
     handleRefreshLayerRef.current = handleRefreshLayer;
   }, [handleRefreshLayer]);
 
-
   useEffect(() => {
     if (observedWfsGenerationRef.current !== projectGeneration) {
       observedWfsGenerationRef.current = projectGeneration;
@@ -388,7 +396,8 @@ export function useLayerRefresh({ layers, isCollapsed }: UseLayerRefreshOptions)
         layer.metadata.sourceKind !== "wfs-getfeature" ||
         layer.geojson ||
         typeof layer.source.url !== "string"
-      ) continue;
+      )
+        continue;
       let requestUrl: URL;
       try {
         requestUrl = new URL(layer.source.url);

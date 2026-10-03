@@ -394,10 +394,12 @@ describe("WFS bounding-box requests", () => {
       const urls: URL[] = [];
       globalThis.fetch = (async (input: RequestInfo | URL) => {
         urls.push(new URL(typeof input === "string" ? input : input.toString()));
-        return new Response(JSON.stringify({
-          type: "FeatureCollection",
-          features: [{ type: "Feature", properties: { revision: urls.length }, geometry: null }],
-        }));
+        return new Response(
+          JSON.stringify({
+            type: "FeatureCollection",
+            features: [{ type: "Feature", properties: { revision: urls.length }, geometry: null }],
+          }),
+        );
       }) as typeof fetch;
       const result = await fetchWfsGeoJson({
         ...params,
@@ -423,10 +425,12 @@ describe("WFS bounding-box requests", () => {
     let requested: URL | undefined;
     globalThis.fetch = (async (input: RequestInfo | URL) => {
       requested = new URL(typeof input === "string" ? input : input.toString());
-      return new Response(JSON.stringify({
-        type: "FeatureCollection",
-        features: [{ type: "Feature", properties: { revision: 2 }, geometry: null }],
-      }));
+      return new Response(
+        JSON.stringify({
+          type: "FeatureCollection",
+          features: [{ type: "Feature", properties: { revision: 2 }, geometry: null }],
+        }),
+      );
     }) as typeof fetch;
     const layer = makeLayer({
       source: {

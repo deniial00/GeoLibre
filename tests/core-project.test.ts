@@ -696,7 +696,13 @@ describe("project parsing", () => {
   it("saves host WFS layers by reference while retaining live and explicitly embedded data", () => {
     const featureCollection = {
       type: "FeatureCollection" as const,
-      features: [{ type: "Feature" as const, properties: { name: "Road" }, geometry: { type: "Point" as const, coordinates: [1, 2] as [number, number] } }],
+      features: [
+        {
+          type: "Feature" as const,
+          properties: { name: "Road" },
+          geometry: { type: "Point" as const, coordinates: [1, 2] as [number, number] },
+        },
+      ],
     };
     const layer = geojsonLayer({
       id: "wfs-reference",

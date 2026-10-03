@@ -4,8 +4,9 @@ import { buildWfsGeoJsonLayer } from "../components/layout/add-data/apply-servic
 import { stripOgcOperationParams } from "../components/layout/add-data/helpers";
 import { fetchWfsGeoJson } from "./layer-refresh";
 
-
-function validateBbox(value: unknown): asserts value is [number, number, number, number] | undefined {
+function validateBbox(
+  value: unknown,
+): asserts value is [number, number, number, number] | undefined {
   if (value === undefined) return;
   if (
     !Array.isArray(value) ||
@@ -37,8 +38,12 @@ export async function addPluginWfsLayer(
   }
   const typeName = typeof options?.typeName === "string" ? options.typeName.trim() : "";
   if (!typeName) throw new Error("addWfsLayer: options.typeName must be a non-empty string.");
-  const version = options?.version === undefined ? "2.0.0" :
-    typeof options.version === "string" ? options.version.trim() : "";
+  const version =
+    options?.version === undefined
+      ? "2.0.0"
+      : typeof options.version === "string"
+        ? options.version.trim()
+        : "";
   if (!version) throw new Error("addWfsLayer: options.version must be a non-empty string.");
   validateBbox(options?.bbox);
 
