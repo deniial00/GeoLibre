@@ -388,6 +388,12 @@ export function DesktopShell({
       restoredProjectGeneration === projectGeneration
         ? String(projectGeneration)
         : "";
+    // Clear both markers on unmount so an embed teardown or hot reload cannot
+    // leave a stale "ready" generation on the root element for external readers.
+    return () => {
+      delete root.dataset.geolibreProjectReadyGeneration;
+      delete root.dataset.geolibreProjectGeneration;
+    };
   }, [
     externalPluginsReady,
     projectGeneration,

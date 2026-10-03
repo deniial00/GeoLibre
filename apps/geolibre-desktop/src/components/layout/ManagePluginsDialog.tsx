@@ -48,7 +48,11 @@ import {
   uninstallPluginArchiveFromFile,
   upgradeExternalPlugin,
 } from "../../hooks/usePlugins";
-import { pluginManifestUrlsForIds, type InstalledWebPlugin } from "../../lib/external-plugins";
+import {
+  PluginPolicyError,
+  pluginManifestUrlsForIds,
+  type InstalledWebPlugin,
+} from "../../lib/external-plugins";
 import {
   fetchPluginRegistry,
   isNewerVersion,
@@ -73,6 +77,15 @@ import {
 type PolicyErrorState = { message: string; policyDenial?: PluginPolicyDenial };
 function renderPolicyError(error: PolicyErrorState, t: TFunction): string {
   return error.policyDenial ? pluginPolicyDenialMessage(error.policyDenial, t) : error.message;
+}
+
+/**
+ * Plugin policy denials only ever cross the thrown-error boundary as a
+ * `PluginPolicyError` (see enforcePluginPolicy), so narrow on the class rather
+ * than duck-typing a `policyDenial` property.
+ */
+function policyDenialForError(error: unknown): { policyDenial?: PluginPolicyDenial } {
+  return error instanceof PluginPolicyError ? { policyDenial: error.policyDenial } : {};
 }
 
 type ManageSection = "all" | "installed" | "not-installed" | "upgradeable" | "settings";
@@ -317,9 +330,7 @@ export function ManagePluginsDialog({
         setActionError({
           id: entry.id,
           message: error instanceof Error ? error.message : t("managePlugins.errorUpdate"),
-          ...(error && typeof error === "object" && "policyDenial" in error
-            ? { policyDenial: error.policyDenial as PluginPolicyDenial }
-            : {}),
+          ...policyDenialForError(error),
         });
       } finally {
         setBusyId(null);
@@ -407,9 +418,7 @@ export function ManagePluginsDialog({
     } catch (error) {
       setInstallError({
         message: error instanceof Error ? error.message : t("managePlugins.errorInstall"),
-        ...(error && typeof error === "object" && "policyDenial" in error
-          ? { policyDenial: error.policyDenial as PluginPolicyDenial }
-          : {}),
+        ...policyDenialForError(error),
       });
     } finally {
       setInstalling(false);
@@ -426,9 +435,7 @@ export function ManagePluginsDialog({
       } catch (error) {
         setInstallError({
           message: error instanceof Error ? error.message : t("managePlugins.errorUninstall"),
-          ...(error && typeof error === "object" && "policyDenial" in error
-            ? { policyDenial: error.policyDenial as PluginPolicyDenial }
-            : {}),
+          ...policyDenialForError(error),
         });
       }
     },

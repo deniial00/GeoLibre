@@ -129,12 +129,8 @@ import {
 } from "@geolibre/plugins";
 import { getDeploymentPolicy, readDeploymentEnvValue } from "../lib/deployment-env";
 import type { DeploymentPolicy } from "../lib/deployment-policy";
-import {
-  evaluatePlugin,
-  type PluginDenialDecision,
-  type PluginPolicyDenial,
-} from "../lib/plugin-policy";
-import { fetchPluginRegistry, fetchPluginRegistryShared } from "../lib/plugin-registry";
+import { evaluatePlugin, type PluginPolicyDenial } from "../lib/plugin-policy";
+import { fetchPluginRegistryShared } from "../lib/plugin-registry";
 import { bundleFromZipBytes } from "../lib/plugin-archive-unpack";
 import { CesiumEngine, getPrimaryCesiumControlHost, type MapEngine } from "@geolibre/map";
 import type {
