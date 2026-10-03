@@ -308,6 +308,7 @@ export function ManagePluginsDialog({
     async (entry: PluginRegistryEntry) => {
       if (!evaluatePlugin(entry.id, "registry", getDeploymentPolicy()).allowed) return;
       setActionError(null);
+      setBusyId(entry.id);
       try {
         // A held-back bundle is consented to at the version the card showed.
         const expectedVersion = isHeldBackUpdate(entry) ? entry.version : undefined;
@@ -732,10 +733,7 @@ export function ManagePluginsDialog({
                           {installed && loadIssue ? (
                             <p className="text-[11px] text-destructive">
                               {t("managePlugins.failedToLoad", {
-                                message:
-                                  typeof loadIssue === "string"
-                                    ? loadIssue
-                                    : renderPolicyError(loadIssue, t),
+                                message: renderPolicyError(loadIssue, t),
                               })}
                             </p>
                           ) : null}
@@ -803,11 +801,7 @@ export function ManagePluginsDialog({
                               ) : null}
                               {loadIssue ? (
                                 <span
-                                  title={
-                                    typeof loadIssue === "string"
-                                      ? loadIssue
-                                      : renderPolicyError(loadIssue, t)
-                                  }
+                                  title={renderPolicyError(loadIssue, t)}
                                   className="flex items-center gap-1 text-xs text-destructive"
                                 >
                                   <AlertTriangle className="h-3.5 w-3.5" />

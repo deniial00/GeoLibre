@@ -204,21 +204,16 @@ export async function loadExternalPlugins(
   const loadedPluginIds: string[] = [];
   const registeredPluginIds = new Set(manager.list().map((plugin) => plugin.id));
 
-  const bundles = [...filesystemResult.bundles, ...urlBundles, ...webBundles];
-  for (let index = 0; index < bundles.length; index++) {
-    const bundle = bundles[index];
+  // Tag each bundle with its policy source at construction, where the origin is
+  // unambiguous, instead of re-deriving it from the concatenation order.
+  const bundles: Array<{ bundle: ExternalPluginBundle; source: PluginSource }> = [
+    ...filesystemResult.bundles.map((bundle) => ({ bundle, source: "directory" as const })),
+    ...urlBundles.map((bundle) => ({ bundle, source: urlSource(bundle.sourceUrl ?? "") })),
+    ...webBundles.map((bundle) => ({ bundle, source: "zip" as const })),
+  ];
+  for (const { bundle, source } of bundles) {
     try {
-      enforcePluginPolicy(
-        bundle.manifest.id,
-        bundle.sourceUrl
-          ? urlSource(bundle.sourceUrl)
-          : index < filesystemResult.bundles.length
-            ? "directory"
-            : "zip",
-        policy,
-        bundle.archiveName,
-        bundle.sourceUrl,
-      );
+      enforcePluginPolicy(bundle.manifest.id, source, policy, bundle.archiveName, bundle.sourceUrl);
       const loadedFrom = externallyLoadedPluginSources.get(bundle.manifest.id);
       if (loadedFrom !== undefined) {
         // Already loaded by a previous scan; a settings change re-runs the

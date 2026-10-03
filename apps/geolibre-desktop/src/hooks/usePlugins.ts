@@ -961,6 +961,13 @@ async function ensureExternalPluginsLoadedWithSettings(
     bundledManifestUrls,
     desktopSettings.pluginManifestUrls,
   );
+  // The registry lookup below awaits a network response, so two non-forced scans
+  // started in the same tick could otherwise both read the stale load key and
+  // build concurrent chains. Wait for the in-flight scan first; the dedup checks
+  // below then re-read the settled state.
+  if (!options?.force && externalPluginsLoadPromise) {
+    await externalPluginsLoadPromise;
+  }
   const registryManifestUrls = await registryManifestUrlsForPolicy(
     policy,
     desktopSettings.pluginManifestUrls,

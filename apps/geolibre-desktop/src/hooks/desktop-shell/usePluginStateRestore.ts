@@ -203,7 +203,12 @@ export function usePluginStateRestore({
       // needs restoring (opengeos/GeoLibre#2261).
       if (engine.kind === "arcgis" || engine.kind === "cesium") restoreArcgisZarrLayers();
       void restoreLocalFileLayers();
-      return;
+      // Same cleanup as the native path: this branch also starts an async
+      // handleUrlParameters above, so an older completion must not publish its
+      // generation after a newer restore has started.
+      return () => {
+        current = false;
+      };
     }
     restoreThreeDTilesLayers(appAPI);
     restoreRasterLayers(appAPI);
