@@ -292,12 +292,7 @@ export function createS3Signer(
       : {}),
     covers: (bucket) => matchS3Connection(getConnections(), bucket) !== null,
     connections: () =>
-      getConnections().map(({ id, name, buckets, source }) => ({
-        id,
-        name,
-        buckets: [...buckets],
-        authenticated: source !== "anonymous",
-      })),
+      getConnections().map(({ id, name, buckets }) => ({ id, name, buckets: [...buckets] })),
     fetchText,
     async presign(request, signal) {
       const connection = request.connectionId

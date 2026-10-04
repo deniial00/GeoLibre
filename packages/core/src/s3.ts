@@ -356,8 +356,6 @@ export interface S3ConnectionSummary {
   name: string;
   /** Bucket patterns the connection covers; empty means every bucket. */
   buckets: string[];
-  /** False for an explicit anonymous connection; omitted for older signers. */
-  authenticated?: boolean;
 }
 
 /**

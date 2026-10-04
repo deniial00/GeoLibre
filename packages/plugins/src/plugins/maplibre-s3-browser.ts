@@ -479,17 +479,8 @@ function buildPanel(container: HTMLElement, app: GeoLibreAppAPI | null): () => v
     status.textContent = text;
   }
 
-  function describeAccess(bucket: string, connectionId?: string): void {
-    const explicit = connectionId
-      ? connections.find((connection) => connection.id === connectionId)
-      : undefined;
-    accessLine.textContent = explicit
-      ? explicit.authenticated === false
-        ? labels.anonymous
-        : labels.signed
-      : signer?.covers(bucket)
-        ? labels.signed
-        : labels.anonymous;
+  function describeAccess(bucket: string): void {
+    accessLine.textContent = signer?.covers(bucket) ? labels.signed : labels.anonymous;
   }
 
   function renderFolder(text: string, onOpen: () => void): HTMLButtonElement {
@@ -568,9 +559,7 @@ function buildPanel(container: HTMLElement, app: GeoLibreAppAPI | null): () => v
       if (signal.aborted) return;
       setStatus(buckets.length === 0 ? labels.empty : "");
       for (const bucket of buckets) {
-        list.append(
-          renderFolder(bucket, () => void open({ bucket, prefix: "", connectionId })),
-        );
+        list.append(renderFolder(bucket, () => void open({ bucket, prefix: "" })));
       }
     } catch (error) {
       if (!isAbort(error)) setError(error);
@@ -588,7 +577,7 @@ function buildPanel(container: HTMLElement, app: GeoLibreAppAPI | null): () => v
       addable.length = 0;
       input.value = formatS3BrowseLocation(location);
       writeLastLocation(input.value);
-      describeAccess(location.bucket, location.connectionId);
+      describeAccess(location.bucket);
       refreshDefaultButton();
     }
     more.style.display = "none";
@@ -599,9 +588,7 @@ function buildPanel(container: HTMLElement, app: GeoLibreAppAPI | null): () => v
       continuationToken = page.nextContinuationToken;
       for (const prefix of page.prefixes) {
         list.append(
-          renderFolder(prefixLabel(prefix), () =>
-            void open({ ...location, prefix }),
-          ),
+          renderFolder(prefixLabel(prefix), () => void open({ bucket: location.bucket, prefix })),
         );
       }
       for (const object of describeObjects(location, page)) {
@@ -643,11 +630,7 @@ function buildPanel(container: HTMLElement, app: GeoLibreAppAPI | null): () => v
     if (event.key === "Enter") openTyped();
   });
   up.addEventListener("click", () => {
-    if (current)
-      void open({
-        ...current,
-        prefix: parentPrefix(current.prefix),
-      });
+    if (current) void open({ bucket: current.bucket, prefix: parentPrefix(current.prefix) });
   });
   more.addEventListener("click", () => {
     if (current && continuationToken) void open(current, true);

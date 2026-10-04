@@ -7,10 +7,9 @@ import json
 import pytest
 from conftest import OAUTH_CLIENTS, PUBLIC_URL, _make_app
 from fastapi.testclient import TestClient
-from helpers import approve, auth, exchange_code, redirect_params, start_authorize
 from geolibre_server_api.proxy_identity import client_ip
+from helpers import approve, auth, exchange_code, redirect_params, start_authorize
 from starlette.requests import Request
-
 
 PROXY_USER = {"Remote-User": "grace@example.org", "Remote-Email": "grace@example.org"}
 

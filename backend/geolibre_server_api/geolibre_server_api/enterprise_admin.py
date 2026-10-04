@@ -210,6 +210,17 @@ def _provider_for(session: Session, organization_id: str) -> OrganizationIdentit
     )
 
 
+def _require_no_linked_identities(session: Session, provider: OrganizationIdentityProvider) -> None:
+    """Refuse a new issuer or key set while accounts are linked by `sub` to this provider."""
+    linked = session.scalar(
+        select(FederatedIdentity.id).where(FederatedIdentity.provider_id == provider.id).limit(1)
+    )
+    if linked is not None:
+        raise HTTPException(
+            409, "issuer or JWKS endpoint cannot change while federated identities are linked"
+        )
+
+
 class ScimTokenBody(BaseModel):
     """A new SCIM token for an organization's identity provider."""
 
@@ -322,16 +333,7 @@ def build_enterprise_admin_router() -> APIRouter:
             provider.issuer != body.issuer
             or (body.jwks_uri is not None and provider.jwks_uri != body.jwks_uri)
         ):
-            linked_identity = session.scalar(
-                select(FederatedIdentity.id)
-                .where(FederatedIdentity.provider_id == provider.id)
-                .limit(1)
-            )
-            if linked_identity is not None:
-                raise HTTPException(
-                    409,
-                    "issuer or JWKS endpoint cannot change while federated identities are linked",
-                )
+            _require_no_linked_identities(session, provider)
         given = [
             value
             for value in (body.authorization_endpoint, body.token_endpoint, body.jwks_uri)
@@ -391,16 +393,8 @@ def build_enterprise_admin_router() -> APIRouter:
             )
             session.add(provider)
         elif provider.issuer != body.issuer or provider.jwks_uri != jwks_uri:
-            linked_identity = session.scalar(
-                select(FederatedIdentity.id)
-                .where(FederatedIdentity.provider_id == provider.id)
-                .limit(1)
-            )
-            if linked_identity is not None:
-                raise HTTPException(
-                    409,
-                    "issuer or JWKS endpoint cannot change while federated identities are linked",
-                )
+            # Discovery can name a different JWKS endpoint than the one stored.
+            _require_no_linked_identities(session, provider)
             # Keys cached from another issuer or key set must never verify tokens.
             provider.jwks_json = None
             provider.jwks_fetched_at = None

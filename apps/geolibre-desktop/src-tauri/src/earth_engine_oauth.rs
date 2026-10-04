@@ -227,20 +227,11 @@ fn handle_connection(mut stream: TcpStream, shared: &SharedState) {
                 return;
             }
             match serde_json::from_slice::<EarthEngineOAuthToken>(&request.body) {
+                // A result is either an error or a token, and either one ends
+                // the sign-in: the app stops polling at the first result.
                 Ok(token)
-                    if token.error.as_deref().is_some_and(|error| !error.is_empty())
-                        && is_pending_state(shared, &token.state) =>
-                {
-                    if let Ok(mut token_store) = shared.tokens.lock() {
-                        token_store.insert(token.state.clone(), token);
-                    }
-                    let _ = write_response(&mut stream, 204, "text/plain", "", &[]);
-                }
-                Ok(token)
-                    if token
-                        .access_token
-                        .as_deref()
-                        .is_some_and(|access_token| !access_token.is_empty())
+                    if (non_empty(token.error.as_deref())
+                        || non_empty(token.access_token.as_deref()))
                         && take_pending_state(shared, &token.state) =>
                 {
                     if let Ok(mut token_store) = shared.tokens.lock() {
@@ -357,6 +348,10 @@ fn is_valid_client_id(value: &str) -> bool {
         && value
             .bytes()
             .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'.' | b'_'))
+}
+
+fn non_empty(value: Option<&str>) -> bool {
+    value.is_some_and(|value| !value.is_empty())
 }
 
 fn is_valid_state(value: &str) -> bool {
@@ -553,8 +548,9 @@ fn auth_page(client_id: &str, state: &str, nonce: &str) -> String {
           try {{
             if (result.error) {{
               await sendResult({{ error: result.error_description || result.error }});
-              status.textContent = result.error_description || result.error;
-              button.disabled = false;
+              // GeoLibre stops waiting at the first result, so a retry here
+              // would have no taker; it must start again from the app.
+              status.textContent = `${{result.error_description || result.error}}. Start sign-in again from GeoLibre.`;
               return;
             }}
             await sendResult({{
@@ -742,17 +738,10 @@ mod tests {
         assert!(forged.starts_with("HTTP/1.1 400"));
         assert!(shared.tokens.lock().unwrap().is_empty());
 
-        let error_body = format!(r#"{{"state":"{state}","error":"access_denied"}}"#);
-        let error_result = post_token(&shared, OAUTH_ORIGIN, "application/json", &error_body);
-        assert!(error_result.starts_with("HTTP/1.1 204"));
+        let empty_token = format!(r#"{{"state":"{state}","accessToken":""}}"#);
+        let empty = post_token(&shared, OAUTH_ORIGIN, "application/json", &empty_token);
+        assert!(empty.starts_with("HTTP/1.1 400"));
         assert!(is_pending_state(&shared, &state));
-        let stored_error = shared
-            .tokens
-            .lock()
-            .ok()
-            .and_then(|mut tokens| tokens.remove(&state))
-            .and_then(|token| token.error);
-        assert_eq!(stored_error.as_deref(), Some("access_denied"));
 
         let accepted = post_token(
             &shared,
@@ -771,6 +760,27 @@ mod tests {
         // Each issued state accepts exactly one result.
         let replay = post_token(&shared, OAUTH_ORIGIN, "application/json", &body);
         assert!(replay.starts_with("HTTP/1.1 400"));
+    }
+
+    #[test]
+    fn an_error_result_ends_the_sign_in() {
+        let shared = SharedState::default();
+        let state = issued_state(&shared);
+        let error_body = format!(r#"{{"state":"{state}","error":"access_denied"}}"#);
+        let error_result = post_token(&shared, OAUTH_ORIGIN, "application/json", &error_body);
+        assert!(error_result.starts_with("HTTP/1.1 204"));
+        assert!(!is_pending_state(&shared, &state));
+        let stored_error = shared
+            .tokens
+            .lock()
+            .ok()
+            .and_then(|tokens| tokens.get(&state).and_then(|token| token.error.clone()));
+        assert_eq!(stored_error.as_deref(), Some("access_denied"));
+
+        // The app stops polling at the error, so a later token has no taker.
+        let late_token = format!(r#"{{"state":"{state}","accessToken":"tok"}}"#);
+        let late = post_token(&shared, OAUTH_ORIGIN, "application/json", &late_token);
+        assert!(late.starts_with("HTTP/1.1 400"));
     }
 
     #[test]

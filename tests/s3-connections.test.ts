@@ -21,7 +21,6 @@ import { normalizeDesktopSettings } from "../apps/geolibre-desktop/src/hooks/use
 import { resolveCloudUrls } from "../apps/geolibre-desktop/src/lib/sql-cloud-urls";
 import { createS3Signer } from "../apps/geolibre-desktop/src/lib/s3-signer";
 
-
 function connection(id: string, patch: Partial<S3Connection> = {}): S3Connection {
   return { ...createS3Connection(id, id), ...patch };
 }
@@ -124,7 +123,6 @@ describe("S3 signing region", () => {
     assert.equal(new URL(signed.href).hostname, "bucket.s3.us-west-2.amazonaws.com");
   });
 });
-
 
 describe("presign lifetime", () => {
   it("caps at the maximum, follows expiring credentials, and refuses expired ones", () => {

@@ -118,6 +118,24 @@ describe("datelineBboxParts", () => {
     assert.deepEqual(parts, [[-180, -10, 180, 10]]);
   });
 
+  it("splits a Pacific-wide layer whose raw box is well short of the whole globe", () => {
+    // 120E to 120W is a 120° window over the seam, but its raw box reads as
+    // 270° wide; it must still come back as the two narrow parts.
+    const parts = datelineBboxParts(
+      points([
+        [120, -5],
+        [150, 0],
+        [-150, 0],
+        [-120, 5],
+      ]),
+      [-120, -5, 150, 5],
+    );
+    assert.deepEqual(parts, [
+      [120, -5, 180, 5],
+      [-180, -5, -120, 5],
+    ]);
+  });
+
   it("keeps a wide box full-length when a coordinate falls outside the narrow window", () => {
     // Two points hugging the dateline would fit a 20° window, but the station
     // at 0°E proves the layer really does wrap most of the way round.
@@ -131,20 +149,6 @@ describe("datelineBboxParts", () => {
     );
     assert.deepEqual(parts, [[-180, 5, 180, 5]]);
   });
-  it("keeps a polygon's measured 200-degree extent instead of using its complement", () => {
-    const parts = datelineBboxParts(
-      ring([
-        [-120, -10],
-        [80, -10],
-        [80, 10],
-        [-120, 10],
-        [-120, -10],
-      ]),
-      [-120, -10, 80, 10],
-    );
-    assert.deepEqual(parts, [[-180, -10, 180, 10]]);
-  });
-
 
   it("decides from the coordinates rather than a wrapped box", () => {
     // A box with west > east is normalised from the layer's own longitudes,

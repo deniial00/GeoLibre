@@ -27,8 +27,6 @@ export const S3_LIST_PAGE_SIZE = 200;
 export interface S3BrowseLocation {
   bucket: string;
   prefix: string;
-  /** Explicit connection whose bucket list produced this location. */
-  connectionId?: string;
 }
 
 /** Fetches a URL as text, keeping the status of an error answer. */
@@ -127,20 +125,9 @@ export function createS3BrowserClient(
     query: Record<string, string>,
     signal?: AbortSignal,
   ): Promise<string> {
-    if (location.connectionId || signer?.covers(location.bucket)) {
-      const signed = await signer?.presign(
-        {
-          bucket: location.bucket,
-          key: "",
-          query,
-          ...(location.connectionId ? { connectionId: location.connectionId } : {}),
-        },
-        signal,
-      );
+    if (signer?.covers(location.bucket)) {
+      const signed = await signer.presign({ bucket: location.bucket, key: "", query }, signal);
       if (signed) return signed.href;
-      if (location.connectionId) {
-        throw new Error("The selected S3 connection is no longer available.");
-      }
     }
     const url = new URL(
       s3ObjectHttpsUrl(
@@ -171,7 +158,7 @@ export function createS3BrowserClient(
         ...(continuationToken ? { "continuation-token": continuationToken } : {}),
       };
       let response = await fetchText(await listUrl(location, query, signal), signal);
-      if (response.status !== 200 && !location.connectionId && !signer?.covers(location.bucket)) {
+      if (response.status !== 200 && !signer?.covers(location.bucket)) {
         // An anonymous request to the wrong regional endpoint is answered with
         // the right one; retry there once.
         const region = parseS3Error(response.body)?.region;
