@@ -917,7 +917,7 @@
       "trustServerCertificate": "Trust server certificate",
       "connect": "Connect",
       "passwordSavedPlaceholder": "Saved securely on this device",
-      "editableNotice": "Load a spatial table as an editable layer. Save changes back to SQL Server from the layer actions.",
+      "editableNotice": "Load a spatial table as an editable layer.",
       "statusSigningIn": "Signing in to Microsoft Entra…",
       "statusConnecting": "Connecting to SQL Server…",
       "statusTablesFound_one": "Found {{count}} spatial table.",

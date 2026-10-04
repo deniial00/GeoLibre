@@ -132,6 +132,17 @@ export function MssqlSource({ initialMssql }: MssqlSourceProps) {
     setSelectedSavedId("");
     invalidateConnection();
   };
+  const changeAuthMethod = (next: MssqlAuthMethod) => {
+    changeField(() => {
+      setAuthMethod(next);
+      setUsername("");
+      setTenantId("");
+      setClientId("");
+      setPassword("");
+      setClientSecret("");
+      setAccessToken("");
+    });
+  };
 
   const handleConnect = async () => {
     const requestToken = ++listRequestRef.current;
@@ -254,9 +265,9 @@ export function MssqlSource({ initialMssql }: MssqlSourceProps) {
           : t("addData.mssql.statusNoTables"),
       );
     } catch (error) {
-      if (listRequestRef.current !== requestToken && openedSessionId) {
-        releaseMssqlSession(id, openedSessionId);
-      }
+      // A failed table-list request still owns an open session; this attempt
+      // never reached the active-profile state, so release it on every failure.
+      if (openedSessionId) releaseMssqlSession(id, openedSessionId);
       if (listRequestRef.current === requestToken) {
         source.setError(errorMessage(error, t("addData.mssql.errorConnect")));
         setStatus(null);
@@ -389,9 +400,7 @@ export function MssqlSource({ initialMssql }: MssqlSourceProps) {
             <Select
               id="mssql-auth"
               value={authMethod}
-              onChange={(event) =>
-                changeField(() => setAuthMethod(event.target.value as MssqlAuthMethod))
-              }
+              onChange={(event) => changeAuthMethod(event.target.value as MssqlAuthMethod)}
             >
               {MSSQL_AUTH_METHODS.map((method) => (
                 <option key={method} value={method} disabled={method === "windows" && !windowsHost}>

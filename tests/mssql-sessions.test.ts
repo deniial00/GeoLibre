@@ -65,6 +65,25 @@ describe("MSSQL sessions", () => {
     assert.deepEqual(resolveMssqlSecret(profile.id, { password: "typed" }), { password: "typed" });
   });
 
+  it("omits stale usernames from non-password authentication requests", async () => {
+    resetMssqlSessions();
+    const requests: ConnectMssqlRequest[] = [];
+    const client = {
+      connect: async (request: ConnectMssqlRequest) => {
+        requests.push(request);
+        return { session_id: "session-windows" };
+      },
+      disconnect: async () => {},
+      startSidecar: async () => {},
+    } as unknown as MssqlSessionClient;
+    try {
+      await openMssqlSession({ ...profile, authMethod: "windows" }, {}, client);
+      assert.equal(requests[0].auth.username, undefined);
+    } finally {
+      resetMssqlSessions();
+    }
+  });
+
   it("restores a saved credential and retries an expired session exactly once", async () => {
     const env = installStorage();
     resetMssqlSessions();

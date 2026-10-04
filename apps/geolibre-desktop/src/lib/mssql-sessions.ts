@@ -68,7 +68,10 @@ function connectRequest(
     trust_server_certificate: profile.trustServerCertificate,
     auth: {
       method: profile.authMethod,
-      username: profile.username,
+      username:
+        profile.authMethod === "sql" || profile.authMethod === "entra_password"
+          ? profile.username
+          : undefined,
       tenant_id: profile.tenantId,
       client_id: profile.clientId,
       ...(secret.password ? { password: secret.password } : {}),
