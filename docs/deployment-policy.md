@@ -22,10 +22,9 @@ overrides field by field, and writes the generated public policy on every boot
 (see [Docker](#docker)). The client then resolves settings in this order:
 final policy, `window.__GEOLIBRE_DEPLOYMENT_ENV__`, then build environment.
 
-**Availability:** Parts 1–6 are supported on merged `main`. The latest release
-checked on 2026-10-01 is [v3.2.0](https://github.com/opengeos/GeoLibre/releases/tag/v3.2.0),
-which predates runtime policy delivery and Docker enforcement; use a locally
-built merged-main image until a release containing those changes is verified.
+**Availability:** Runtime policy delivery and Docker enforcement live on
+`main`. A published image or desktop release may predate them; if yours does
+not honour `deployment.json`, build the image from `main`.
 
 The previous `admin-profile.json` and `VITE_GEOLIBRE_CAPABILITIES` inputs are
 **legacy, still honoured**. They remain fallbacks where the primary policy does
