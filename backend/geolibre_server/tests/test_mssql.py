@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import datetime
 import os
 import struct
 import time
@@ -360,6 +361,24 @@ def test_connect_closes_connection_when_probe_fails(monkeypatch):
     assert conn.closed
 
 
+def test_bind_value_restores_column_types():
+    # json_safe stringifies these, but SQL Server cannot implicitly cast them back.
+    assert mssql._bind_value("00ff", "varbinary") == b"\x00\xff"
+    assert mssql._bind_value("2024-01-01 12:00:00.123456", "datetime2") == datetime.datetime(
+        2024, 1, 1, 12, 0, 0, 123456
+    )
+    assert mssql._bind_value("2024-01-01", "date") == datetime.date(2024, 1, 1)
+    assert mssql._bind_value("12:00:00.5", "time") == datetime.time(12, 0, 0, 500000)
+    assert mssql._bind_value({"a": 1}, "nvarchar") == '{"a": 1}'
+    assert mssql._bind_value(5, "int") == 5
+    assert mssql._bind_value(None, "int") is None
+    assert mssql._bind_value("plain", "nvarchar") == "plain"
+    with pytest.raises(HTTPException):
+        mssql._bind_value("zz", "varbinary")
+    with pytest.raises(HTTPException):
+        mssql._bind_value("not-a-date", "datetime2")
+
+
 def test_managed_identity_requires_explicit_opt_in(monkeypatch):
     monkeypatch.setattr(mssql, "azure_identity_import_error", lambda: None)
     monkeypatch.delenv("GEOLIBRE_MSSQL_DESKTOP_AUTH", raising=False)
@@ -411,15 +430,21 @@ def live_db(monkeypatch):
         "IF OBJECT_ID('dbo.geolibre_writeback_nopk','U') IS NOT NULL "
         "DROP TABLE dbo.geolibre_writeback_nopk"
     )
+    # `seen`/`blob` guard the write path against re-binding json_safe strings:
+    # SQL Server rejects a hex string into varbinary (257) and a six-digit
+    # microsecond string into datetime2 (241), so an unchanged save must fail
+    # without the type-aware binding.
     cur.execute(
         "CREATE TABLE dbo.geolibre_writeback_test (gid int IDENTITY PRIMARY KEY, "
-        "name nvarchar(100) NOT NULL, population int, geom geometry)"
+        "name nvarchar(100) NOT NULL, population int, "
+        "seen datetime2, blob varbinary(8), geom geometry)"
     )
     cur.execute(
-        "INSERT INTO dbo.geolibre_writeback_test(name,population,geom) VALUES "
-        "('Knoxville',190000,geometry::Point(-9342009.589714656,4295201.3456280865,3857)),"
-        "('Second',2,geometry::Point(-9000000,4000000,3857)),"
-        "('Third',3,geometry::Point(-8000000,3500000,3857))"
+        "INSERT INTO dbo.geolibre_writeback_test(name,population,seen,blob,geom) VALUES "
+        "('Knoxville',190000,CAST('2024-01-01T12:00:00.123456' AS datetime2),0x0102,"
+        "geometry::Point(-9342009.589714656,4295201.3456280865,3857)),"
+        "('Second',2,NULL,NULL,geometry::Point(-9000000,4000000,3857)),"
+        "('Third',3,NULL,NULL,geometry::Point(-8000000,3500000,3857))"
     )
     cur.execute(
         "CREATE TABLE dbo.geolibre_writeback_geog (id uniqueidentifier DEFAULT NEWID() "

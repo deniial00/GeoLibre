@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import datetime
 import json
 import logging
 import os
@@ -46,6 +47,16 @@ _MAX_SESSIONS = 32
 _TOKEN_SCOPE = "https://database.windows.net/.default"
 _SQL_COPT_SS_ACCESS_TOKEN = 1256
 _PREFERRED_DRIVERS = ("ODBC Driver 18 for SQL Server", "ODBC Driver 17 for SQL Server")
+# `json_safe` stringifies these, but SQL Server will not implicitly cast the
+# string back (nvarchar -> varbinary is error 257, and the six-digit microsecond
+# form is error 241), so the write path rebinds them as native Python values.
+_BINARY_COLUMN_TYPES = frozenset({"binary", "varbinary", "image"})
+_TEMPORAL_COLUMN_TYPES = frozenset(
+    {"datetime", "smalldatetime", "datetime2", "datetimeoffset", "date", "time"}
+)
+# pyproj Transformer objects are not documented as thread-safe, and FastAPI
+# runs these sync endpoints in a thread pool, so serialize their use.
+_TRANSFORM_LOCK = threading.Lock()
 
 
 def pyodbc_import_error() -> Optional[str]:
@@ -404,13 +415,8 @@ def mssql_connect(request: MssqlConnectRequest) -> dict[str, str]:
         if x
     )
     session = _Session(cs, credential, static_token, secret_values, time.monotonic())
-    if credential is not None:
-        try:
-            credential.get_token(_TOKEN_SCOPE)
-        except Exception as exc:
-            raise HTTPException(
-                400, f"Microsoft Entra sign-in failed: {scrub_secrets(str(exc), secret_values)}"
-            ) from exc
+    # The token is fetched once, inside the probe below: _open_connection signs
+    # in and surfaces any credential error with the same scrubbed message.
     with _connection(session) as conn:
         try:
             with conn.cursor() as cur:
@@ -437,6 +443,43 @@ def mssql_disconnect(request: MssqlSessionRequest) -> dict[str, bool]:
 
 def _q(name: str) -> str:
     return "[" + name.replace("]", "]]") + "]"
+
+
+def _bind_value(value: Any, sql_type: str) -> Any:
+    """Turn a client value back into a type SQL Server can bind.
+
+    Reads run every column through ``json_safe``, so binary columns arrive as
+    hex strings and temporal columns as ISO-ish strings. The unchanged values
+    are copied into the diff, so both paths must restore the native type or the
+    statement fails to bind (errors 257 and 241 respectively).
+    """
+    if isinstance(value, (dict, list)):
+        return json.dumps(value)
+    if value is None or not isinstance(value, str):
+        return value
+    if sql_type in _BINARY_COLUMN_TYPES:
+        try:
+            return bytes.fromhex(value)
+        except ValueError:
+            raise HTTPException(400, f"Value for {sql_type} column is not valid hex") from None
+    if sql_type == "date":
+        try:
+            return datetime.date.fromisoformat(value)
+        except ValueError:
+            raise HTTPException(400, "Value for date column is not a valid date") from None
+    if sql_type == "time":
+        try:
+            return datetime.time.fromisoformat(value)
+        except ValueError:
+            raise HTTPException(400, "Value for time column is not a valid time") from None
+    if sql_type in _TEMPORAL_COLUMN_TYPES:
+        try:
+            return datetime.datetime.fromisoformat(value)
+        except ValueError:
+            raise HTTPException(
+                400, f"Value for {sql_type} column is not a valid timestamp"
+            ) from None
+    return value
 
 
 def _table_info(
@@ -477,6 +520,8 @@ def _table_info(
         (r for r in spatial if r[0] == geometry_column), sorted(spatial, key=lambda r: r[0])[0]
     )
     geom, column_type = selected[0], selected[1]
+    # SQL Server does not constrain a spatial column to one SRID per table, so
+    # the first non-null row is taken as representative for the whole layer.
     cur.execute(
         "SELECT TOP (1) "
         + _q(geom)
@@ -524,6 +569,7 @@ def _table_info(
         "pk_is_identity": bool(pkrow and pkrow[2]),
         "columns": columns,
         "writable": writable,
+        "column_types": {r[0]: r[1] for r in rows},
     }
 
 
@@ -628,7 +674,9 @@ def _wkb_to_geojson(wkb: Optional[bytes], srid: int, column_type: str) -> Option
 
         geometry = shapely.from_wkb(bytes(wkb))
         if column_type == "geometry" and srid not in (0, 4326):
-            geometry = transform(_transformer(srid, 4326).transform, geometry)
+            transformer = _transformer(srid, 4326)
+            with _TRANSFORM_LOCK:
+                geometry = transform(transformer.transform, geometry)
         return json.loads(shapely.to_geojson(geometry))
     except HTTPException:
         raise
@@ -657,7 +705,9 @@ def _geojson_to_wkb(geometry: dict, srid: int, column_type: str) -> bytes:
 
         value = shape(geometry)
         if column_type == "geometry" and srid not in (0, 4326):
-            value = transform(_transformer(4326, srid).transform, value)
+            transformer = _transformer(4326, srid)
+            with _TRANSFORM_LOCK:
+                value = transform(transformer.transform, value)
         elif column_type == "geography":
             value = _orient_for_geography(value)
         return shapely.to_wkb(value, output_dimension=2)
@@ -739,95 +789,96 @@ def mssql_write(request: MssqlWriteRequest) -> dict[str, Any]:
 
     features = require_features(request.geojson)
     session = _get_session(request.session_id)
-    conn = _open_connection(session)
     inserted = updated = deleted = 0
-    try:
-        cur = conn.cursor()
-        info = _table_info(cur, request.schema_name, request.table, request.geometry_column)
-        pk = info["primary_key"]
-        if pk is None:
-            raise HTTPException(
-                400,
-                f"{request.schema_name}.{request.table} has no single-column "
-                "primary key; write-back requires one.",
+    with _connection(session) as conn:
+        try:
+            cur = conn.cursor()
+            info = _table_info(cur, request.schema_name, request.table, request.geometry_column)
+            pk = info["primary_key"]
+            if pk is None:
+                raise HTTPException(
+                    400,
+                    f"{request.schema_name}.{request.table} has no single-column "
+                    "primary key; write-back requires one.",
+                )
+            table_sql = f"{_q(request.schema_name)}.{_q(request.table)}"
+            cur.execute(f"SELECT COUNT_BIG(*) FROM {table_sql}")
+            if cur.fetchone()[0] > vector_ops.MAX_FEATURES:
+                raise _features_limit_error(True)
+            cols = info["columns"]
+            query = (
+                f"SELECT {_q(pk)}, {_q(info['geometry_column'])}.STAsBinary(), "
+                f"{', '.join(_q(column) for column in cols)} FROM {table_sql}"
             )
-        table_sql = f"{_q(request.schema_name)}.{_q(request.table)}"
-        cur.execute(f"SELECT COUNT_BIG(*) FROM {table_sql}")
-        if cur.fetchone()[0] > vector_ops.MAX_FEATURES:
-            raise _features_limit_error(True)
-        cols = info["columns"]
-        query = (
-            f"SELECT {_q(pk)}, {_q(info['geometry_column'])}.STAsBinary(), "
-            f"{', '.join(_q(column) for column in cols)} FROM {table_sql}"
-        )
-        cur.execute(query)
-        existing = {}
-        for row in cur.fetchall():
-            values = {c: json_safe(v) for c, v in zip(cols, row[2:], strict=True)}
-            existing[json_safe(row[0])] = (
-                _wkb_to_geojson(row[1], info["srid"], info["column_type"]),
-                values,
+            cur.execute(query)
+            existing = {}
+            for row in cur.fetchall():
+                values = {c: json_safe(v) for c, v in zip(cols, row[2:], strict=True)}
+                existing[json_safe(row[0])] = (
+                    _wkb_to_geojson(row[1], info["srid"], info["column_type"]),
+                    values,
+                )
+            diff = plan_feature_diff(
+                features,
+                primary_key=pk,
+                writable_columns=info["writable"],
+                existing_rows=existing,
+                pk_is_generated=info["pk_is_generated"],
+                insert_explicit_key=not info["pk_is_identity"],
+                baseline_keys=request.baseline_keys,
+                capabilities=request.capabilities,
+                table_label=f"{request.schema_name}.{request.table}",
             )
-        diff = plan_feature_diff(
-            features,
-            primary_key=pk,
-            writable_columns=info["writable"],
-            existing_rows=existing,
-            pk_is_generated=info["pk_is_generated"],
-            insert_explicit_key=not info["pk_is_identity"],
-            baseline_keys=request.baseline_keys,
-            capabilities=request.capabilities,
-            table_label=f"{request.schema_name}.{request.table}",
-        )
-        geom = _q(info["geometry_column"])
-        table = f"{_q(request.schema_name)}.{_q(request.table)}"
-        expr = f"{info['column_type']}::STGeomFromWKB(?, {int(info['srid'])})"
-        for change in diff.updates:
-            sets = [f"{geom} = " + (expr if change.geometry is not None else "NULL")]
-            params = []
-            if change.geometry is not None:
-                params.append(_geojson_to_wkb(change.geometry, info["srid"], info["column_type"]))
-            for c, v in change.values.items():
-                sets.append(f"{_q(c)} = ?")
-                params.append(json.dumps(v) if isinstance(v, (dict, list)) else v)
-            params.append(change.key)
-            cur.execute(f"UPDATE {table} SET {', '.join(sets)} WHERE {_q(pk)} = ?", params)
-            updated += 1
-        for change in diff.inserts:
-            insert_cols = list(change.values)
-            params = []
-            geom_expr = expr if change.geometry is not None else "NULL"
-            if change.geometry is not None:
-                params.append(_geojson_to_wkb(change.geometry, info["srid"], info["column_type"]))
-            params.extend(
-                json.dumps(v) if isinstance(v, (dict, list)) else v for v in change.values.values()
-            )
-            if change.key is not None:
-                insert_cols.append(pk)
+            geom = _q(info["geometry_column"])
+            table = f"{_q(request.schema_name)}.{_q(request.table)}"
+            expr = f"{info['column_type']}::STGeomFromWKB(?, {int(info['srid'])})"
+            types = info["column_types"]
+            for change in diff.updates:
+                sets = [f"{geom} = " + (expr if change.geometry is not None else "NULL")]
+                params = []
+                if change.geometry is not None:
+                    params.append(
+                        _geojson_to_wkb(change.geometry, info["srid"], info["column_type"])
+                    )
+                for c, v in change.values.items():
+                    sets.append(f"{_q(c)} = ?")
+                    params.append(_bind_value(v, types[c]))
                 params.append(change.key)
-            cols_sql = ", ".join([geom] + [_q(c) for c in insert_cols])
-            vals_sql = ", ".join(
-                [geom_expr] + ["?"] * (len(params) - (1 if change.geometry is not None else 0))
-            )
-            cur.execute(f"INSERT INTO {table} ({cols_sql}) VALUES ({vals_sql})", params)
-            inserted += 1
-        for start in range(0, len(diff.deletes), 1000):
-            keys = diff.deletes[start : start + 1000]
-            cur.execute(
-                f"DELETE FROM {table} WHERE {_q(pk)} IN ({','.join('?' for _ in keys)})", keys
-            )
-            deleted += max(cur.rowcount, 0)
-        conn.commit()
-    except HTTPException:
-        conn.rollback()
-        raise
-    except Exception as exc:
-        conn.rollback()
-        msg = scrub_secrets(str(exc), session.secrets)
-        logger.error("SQL Server write-back failed: %s", msg)
-        raise HTTPException(400, f"Write-back failed: {msg}") from exc
-    finally:
-        conn.close()
+                cur.execute(f"UPDATE {table} SET {', '.join(sets)} WHERE {_q(pk)} = ?", params)
+                updated += 1
+            for change in diff.inserts:
+                insert_cols = list(change.values)
+                params = []
+                geom_expr = expr if change.geometry is not None else "NULL"
+                if change.geometry is not None:
+                    params.append(
+                        _geojson_to_wkb(change.geometry, info["srid"], info["column_type"])
+                    )
+                params.extend(_bind_value(v, types[c]) for c, v in change.values.items())
+                if change.key is not None:
+                    insert_cols.append(pk)
+                    params.append(change.key)
+                cols_sql = ", ".join([geom] + [_q(c) for c in insert_cols])
+                vals_sql = ", ".join(
+                    [geom_expr] + ["?"] * (len(params) - (1 if change.geometry is not None else 0))
+                )
+                cur.execute(f"INSERT INTO {table} ({cols_sql}) VALUES ({vals_sql})", params)
+                inserted += 1
+            for start in range(0, len(diff.deletes), 1000):
+                keys = diff.deletes[start : start + 1000]
+                cur.execute(
+                    f"DELETE FROM {table} WHERE {_q(pk)} IN ({','.join('?' for _ in keys)})", keys
+                )
+                deleted += max(cur.rowcount, 0)
+            conn.commit()
+        except HTTPException:
+            conn.rollback()
+            raise
+        except Exception as exc:
+            conn.rollback()
+            msg = scrub_secrets(str(exc), session.secrets)
+            logger.error("SQL Server write-back failed: %s", msg)
+            raise HTTPException(400, f"Write-back failed: {msg}") from exc
     messages = [
         f"Saved {len(features)} feature(s) to {request.schema_name}.{request.table} "
         f"({inserted} inserted, {updated} updated, {deleted} deleted)"
