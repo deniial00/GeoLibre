@@ -100,7 +100,7 @@ these profile fields; the legacy file stores them at top level.
 | --- | --- | --- |
 | `enabled` | boolean | Whether filtering is active. Defaults to `true`. |
 | `level` | `"beginner" \| "intermediate" \| "advanced"` | Seeds the hidden lists from each item's tier. Optional. |
-| `lock` | boolean | When `true`, users cannot change the profile from Settings. Remove or clear `interface.lock` in the selected deployment policy (or the legacy profile) to release the lock on the next launch. |
+| `lock` | boolean | When `true`, users cannot change the profile from Settings. To release the lock on the next launch, remove or clear `interface.lock` in the selected deployment policy, or the top-level `lock` in the legacy profile. |
 | `hiddenDataSources` | string[] | Explicit data-source ids to hide. Overrides the preset when present. |
 | `hiddenPlugins` | string[] | Explicit plugin ids to hide. Overrides the preset when present. |
 | `hiddenMenus` | string[] | Top-level menu ids to hide (`project`, `edit`, `addData`, `processing`, `controls`, `plugins`, `help`). |
