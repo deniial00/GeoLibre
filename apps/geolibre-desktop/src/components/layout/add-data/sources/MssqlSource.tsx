@@ -327,30 +327,35 @@ export function MssqlSource({ initialMssql }: MssqlSourceProps) {
     const baselineKeys = postgisFeatureKeys(result.geojson);
     const savedProfile = readSavedMssqlConnections().find((item) => item.id === activeProfileId);
     if (!savedProfile) throw new Error(t("addData.mssql.errorReconnectRequired"));
-    const layer = createBaseLayer(
-      source.layerName.trim() || table.table,
-      "geojson",
-      {
-        type: "geojson",
-        service: "mssql",
-        schema: result.schema,
-        table: result.table,
-      },
-      {
-        featureCount: result.feature_count,
-        sourceKind: "mssql-table",
-        mssqlConnectionId: activeProfileId,
-        mssqlConnectionLabel: mssqlConnectionLabel(savedProfile),
-        mssqlSchema: result.schema,
-        mssqlTable: result.table,
-        mssqlPrimaryKey: result.primary_key,
-        mssqlGeometryColumn: result.geometry_column,
-        mssqlColumnType: result.column_type,
-        mssqlSrid: result.srid,
-        mssqlBaselineKeys: baselineKeys,
-      },
-      { geojson: result.geojson },
-    );
+    // `createBaseLayer` uses the features only to pick the initial style; the
+    // layer itself must carry them, as the PostGIS source does.
+    const layer = {
+      ...createBaseLayer(
+        source.layerName.trim() || table.table,
+        "geojson",
+        {
+          type: "geojson",
+          service: "mssql",
+          schema: result.schema,
+          table: result.table,
+        },
+        {
+          featureCount: result.feature_count,
+          sourceKind: "mssql-table",
+          mssqlConnectionId: activeProfileId,
+          mssqlConnectionLabel: mssqlConnectionLabel(savedProfile),
+          mssqlSchema: result.schema,
+          mssqlTable: result.table,
+          mssqlPrimaryKey: result.primary_key,
+          mssqlGeometryColumn: result.geometry_column,
+          mssqlColumnType: result.column_type,
+          mssqlSrid: result.srid,
+          mssqlBaselineKeys: baselineKeys,
+        },
+        { geojson: result.geojson },
+      ),
+      geojson: result.geojson,
+    };
     source.addAndClose(layer, { fit: true });
   });
 

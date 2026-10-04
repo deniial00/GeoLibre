@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { createElement, createRef, useState } from "react";
 import { setSidecarAuthToken } from "@geolibre/processing";
+import type { GeoLibreLayer } from "@geolibre/core";
 import { fireEvent, mockFetch, render, screen, waitFor } from "./helpers/dom";
 import { resetMssqlSessions } from "../apps/geolibre-desktop/src/lib/mssql-sessions";
 import {
@@ -53,7 +54,7 @@ function renderMssqlSource(initialMssql?: OpenAddDataMssql) {
 }
 
 /** Renders with a live `isSubmitting` flag, as the dialog does, and records added layers. */
-function renderSubmittingMssqlSource(added: unknown[]) {
+function renderSubmittingMssqlSource(added: GeoLibreLayer[]) {
   function Shell() {
     const [isSubmitting, setIsSubmitting] = useState(false);
     return createElement(
@@ -61,7 +62,7 @@ function renderSubmittingMssqlSource(added: unknown[]) {
       {
         value: {
           ...baseShell(),
-          addLayer: (layer: unknown) => added.push(layer),
+          addLayer: (layer: GeoLibreLayer) => added.push(layer),
           isSubmitting,
           setIsSubmitting,
         },
@@ -268,7 +269,11 @@ describe("MssqlSource", () => {
     }
   });
 
-  it("discards a table read whose connection changed while it was loading", async () => {
+  /**
+   * Connects through the form and submits the first table while its read is held
+   * open, optionally editing the server before the read returns.
+   */
+  async function importTable(changeServerMidRead: boolean) {
     const tauriWindow = window as Window & {
       __TAURI_INTERNALS__?: { invoke: (command: string) => Promise<unknown> };
     };
@@ -298,6 +303,12 @@ describe("MssqlSource", () => {
     const readGate = new Promise<void>((resolve) => {
       releaseRead = resolve;
     });
+    const feature = {
+      type: "Feature",
+      id: 1,
+      geometry: { type: "Point", coordinates: [0, 0] },
+      properties: { name: "One" },
+    };
     const requests: string[] = [];
     mockFetch(async (input, init) => {
       const url = new URL(String(input));
@@ -320,17 +331,7 @@ describe("MssqlSource", () => {
           JSON.stringify({
             ...table,
             feature_count: 1,
-            geojson: {
-              type: "FeatureCollection",
-              features: [
-                {
-                  type: "Feature",
-                  id: 1,
-                  geometry: { type: "Point", coordinates: [0, 0] },
-                  properties: {},
-                },
-              ],
-            },
+            geojson: { type: "FeatureCollection", features: [feature] },
           }),
           { status: 200 },
         );
@@ -341,7 +342,7 @@ describe("MssqlSource", () => {
       throw new Error(`Unexpected request: ${url.pathname}`);
     });
 
-    const added: unknown[] = [];
+    const added: GeoLibreLayer[] = [];
     try {
       const { container } = renderSubmittingMssqlSource(added);
       fireEvent.change(screen.getByLabelText("Server"), { target: { value: "db.example" } });
@@ -354,14 +355,22 @@ describe("MssqlSource", () => {
 
       fireEvent.submit(container.querySelector("form")!);
       await waitFor(() => assert.ok(requests.some((request) => request.endsWith("/mssql/read"))));
-      fireEvent.change(screen.getByLabelText("Server"), { target: { value: "other.example" } });
+      if (changeServerMidRead) {
+        fireEvent.change(screen.getByLabelText("Server"), { target: { value: "other.example" } });
+      }
       releaseRead();
-
-      await waitFor(() => {
-        assert.equal(requests.filter((request) => request.endsWith("/mssql/disconnect")).length, 1);
-      });
       await waitFor(() => assert.equal(submit()?.disabled, true));
-      assert.deepEqual(added, []);
+      if (changeServerMidRead) {
+        await waitFor(() => {
+          assert.equal(
+            requests.filter((request) => request.endsWith("/mssql/disconnect")).length,
+            1,
+          );
+        });
+      } else {
+        await waitFor(() => assert.equal(added.length, 1));
+      }
+      return { added, requests, feature };
     } finally {
       releaseRead();
       resetMssqlSessions();
@@ -377,5 +386,16 @@ describe("MssqlSource", () => {
         });
       }
     }
+  }
+
+  it("adds the read features to the layer with their keys as the save baseline", async () => {
+    const { added, feature } = await importTable(false);
+    assert.deepEqual(added[0].geojson?.features, [feature]);
+    assert.deepEqual(added[0].metadata.mssqlBaselineKeys, [1]);
+  });
+
+  it("discards a table read whose connection changed while it was loading", async () => {
+    const { added } = await importTable(true);
+    assert.deepEqual(added, []);
   });
 });
