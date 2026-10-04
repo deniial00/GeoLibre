@@ -505,6 +505,7 @@ jobs:
           GEOLIBRE_TEST_MSSQL_REQUIRED: "1"
           GEOLIBRE_MSSQL_HOSTS: 127.0.0.1:1433
         run: python -m pytest backend/geolibre_server/tests/test_mssql.py -rs
+
   projects-identity-oidc-interop:
     name: Identity OIDC interop
     runs-on: ubuntu-22.04

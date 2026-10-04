@@ -402,6 +402,32 @@ def test_open_connection_scrubs_fresh_token(monkeypatch):
         mssql._open_connection(session)
     assert "fresh-secret-token" not in exc.value.detail
     assert "****" in exc.value.detail
+    # The fetched token is retained so later handlers scrub it too.
+    assert session.live_token == "fresh-secret-token"
+    assert "fresh-secret-token" in session.sensitive()
+
+
+def test_read_scrubs_live_token(monkeypatch):
+    conn = FakeConnection()
+
+    def hook(sql, params):
+        raise FakePyodbcError("driver echoed fresh-secret-token")
+
+    conn.execute_hook = hook
+    request = _install_session(monkeypatch, conn)
+    with mssql._SESSIONS_LOCK:
+        mssql._SESSIONS[request.session_id].live_token = "fresh-secret-token"
+    with pytest.raises(HTTPException) as exc:
+        mssql.mssql_read(mssql.MssqlReadRequest(session_id=request.session_id, table="t"))
+    assert "fresh-secret-token" not in exc.value.detail
+    assert "****" in exc.value.detail
+
+
+def test_session_sensitive_includes_live_token():
+    session = mssql._Session("cs", None, None, ("pw",), 0.0)
+    assert session.sensitive() == ("pw",)
+    session.live_token = "token"
+    assert session.sensitive() == ("pw", "token")
 
 
 def test_bind_value_restores_column_types():
@@ -412,6 +438,9 @@ def test_bind_value_restores_column_types():
     )
     assert mssql._bind_value("2024-01-01", "date") == datetime.date(2024, 1, 1)
     assert mssql._bind_value("12:00:00.5", "time") == datetime.time(12, 0, 0, 500000)
+    assert mssql._bind_value("2024-01-15T10:30:00Z", "datetime2") == datetime.datetime(
+        2024, 1, 15, 10, 30, tzinfo=datetime.timezone.utc
+    )
     assert mssql._bind_value({"a": 1}, "nvarchar") == '{"a": 1}'
     assert mssql._bind_value(5, "int") == 5
     assert mssql._bind_value(None, "int") is None

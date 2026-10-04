@@ -260,6 +260,13 @@ class _Session:
     static_token: Optional[str]
     secrets: tuple[str, ...]
     last_used: float
+    # Most recent access token fetched for this session, so later error
+    # scrubbers cover it too (connect-time secrets alone would not).
+    live_token: Optional[str] = None
+
+    def sensitive(self) -> tuple[str, ...]:
+        """Session secrets plus the most recently fetched access token."""
+        return (*self.secrets, self.live_token) if self.live_token else self.secrets
 
 
 _SESSIONS: dict[str, _Session] = {}
@@ -269,18 +276,16 @@ _SESSIONS_LOCK = threading.Lock()
 def _open_connection(session: _Session) -> Any:
     pyodbc = _import_pyodbc()
     attrs = None
-    # A token fetched here is not in session.secrets, so add it to the values
-    # scrubbed from any driver error before that error reaches the caller.
-    secrets = session.secrets
     if session.static_token is not None or session.credential is not None:
         try:
             token = session.static_token or session.credential.get_token(_TOKEN_SCOPE).token
-            secrets = (*secrets, token)
+            session.live_token = token
             raw = token.encode("utf-16-le")
             attrs = {_SQL_COPT_SS_ACCESS_TOKEN: struct.pack(f"<I{len(raw)}s", len(raw), raw)}
         except Exception as exc:
             raise HTTPException(
-                400, f"Microsoft Entra sign-in failed: {scrub_secrets(str(exc), secrets)}"
+                400,
+                f"Microsoft Entra sign-in failed: {scrub_secrets(str(exc), session.sensitive())}",
             ) from exc
     try:
         conn = pyodbc.connect(
@@ -293,7 +298,7 @@ def _open_connection(session: _Session) -> Any:
         return conn
     except Exception as exc:
         raise HTTPException(
-            400, f"Could not connect to SQL Server: {scrub_secrets(str(exc), secrets)}"
+            400, f"Could not connect to SQL Server: {scrub_secrets(str(exc), session.sensitive())}"
         ) from exc
 
 
@@ -478,19 +483,23 @@ def _bind_value(value: Any, sql_type: str) -> Any:
             return bytes.fromhex(value)
         except ValueError:
             raise HTTPException(400, f"Value for {sql_type} column is not valid hex") from None
+    # Python 3.10's fromisoformat rejects a trailing "Z", which JavaScript's
+    # Date.toISOString() emits, so normalize it before parsing.
     if sql_type == "date":
         try:
-            return datetime.date.fromisoformat(value)
+            return datetime.date.fromisoformat(value.removesuffix("Z"))
         except ValueError:
             raise HTTPException(400, "Value for date column is not a valid date") from None
     if sql_type == "time":
         try:
-            return datetime.time.fromisoformat(value)
+            return datetime.time.fromisoformat(value.removesuffix("Z"))
         except ValueError:
             raise HTTPException(400, "Value for time column is not a valid time") from None
     if sql_type in _TEMPORAL_COLUMN_TYPES:
         try:
-            return datetime.datetime.fromisoformat(value)
+            return datetime.datetime.fromisoformat(
+                value[:-1] + "+00:00" if value.endswith("Z") else value
+            )
         except ValueError:
             raise HTTPException(
                 400, f"Value for {sql_type} column is not a valid timestamp"
@@ -648,7 +657,7 @@ def mssql_tables(request: MssqlSessionRequest) -> dict[str, Any]:
                         "SQL Server SRID probe of %s.%s failed: %s",
                         schema,
                         table,
-                        scrub_secrets(str(exc), session.secrets),
+                        scrub_secrets(str(exc), session.sensitive()),
                     )
                     probe = None
                 tables.append(
@@ -666,7 +675,7 @@ def mssql_tables(request: MssqlSessionRequest) -> dict[str, Any]:
     except HTTPException:
         raise
     except Exception as exc:
-        msg = scrub_secrets(str(exc), session.secrets)
+        msg = scrub_secrets(str(exc), session.sensitive())
         logger.error("SQL Server table listing failed: %s", msg)
         raise HTTPException(400, f"Could not list tables: {msg}") from exc
 
@@ -794,7 +803,7 @@ def mssql_read(request: MssqlReadRequest) -> dict[str, Any]:
     except HTTPException:
         raise
     except Exception as exc:
-        msg = scrub_secrets(str(exc), session.secrets)
+        msg = scrub_secrets(str(exc), session.sensitive())
         logger.error("SQL Server read failed: %s", msg)
         raise HTTPException(400, f"Could not read table: {msg}") from exc
 
@@ -888,11 +897,11 @@ def mssql_write(request: MssqlWriteRequest) -> dict[str, Any]:
                 deleted += max(cur.rowcount, 0)
             conn.commit()
         except HTTPException:
-            _safe_rollback(conn, session.secrets)
+            _safe_rollback(conn, session.sensitive())
             raise
         except Exception as exc:
-            _safe_rollback(conn, session.secrets)
-            msg = scrub_secrets(str(exc), session.secrets)
+            _safe_rollback(conn, session.sensitive())
+            msg = scrub_secrets(str(exc), session.sensitive())
             logger.error("SQL Server write-back failed: %s", msg)
             raise HTTPException(400, f"Write-back failed: {msg}") from exc
     messages = [
