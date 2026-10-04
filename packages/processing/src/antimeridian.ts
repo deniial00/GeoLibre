@@ -152,8 +152,15 @@ export function datelineBboxParts(
   box: [number, number, number, number],
 ): [number, number, number, number][] {
   const [west, south, east, north] = box;
-  // Most layers are nowhere near the seam, and their own box already says so.
-  if (west <= east && east - west <= 180) return [box];
+  const boxWidth = east - west;
+  // Intermediate-width ordinary boxes are ambiguous: sparse vertices cannot
+  // prove their complement is the real extent, so preserve coverage. A
+  // near-360° bbox is the conventional wrapped-bbox shape; use the coordinates
+  // to distinguish a seam-crossing layer from a genuinely global one.
+  if (west <= east && boxWidth > 180 && boxWidth < 300) {
+    return [[-180, south, 180, north]];
+  }
+  if (west <= east && boxWidth <= 180) return [box];
   const band = narrowestLonBand(longitudesOf(geojson));
   if (!band) return [[-180, south, 180, north]];
   const [from, to] = band;

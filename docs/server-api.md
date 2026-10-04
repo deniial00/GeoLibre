@@ -585,6 +585,13 @@ and `identity provider discovery failed`. Out-of-range values are a generic
   invalid JSON also fails discovery. The endpoints are stored; discovery runs
   again only on the next `PUT`. Signing keys are fetched from `jwksUri` on the
   first sign-in and cached; changing `issuer` or `jwksUri` clears the cache.
+  Once the provider has linked federated identities, `PUT` cannot change its
+  `issuer` or `jwksUri`; it returns `409 issuer or JWKS endpoint cannot change
+  while federated identities are linked`. This prevents a replacement authority
+  from reusing `sub` values to resolve existing accounts. Account migration or
+  re-linking is not automatic; do not delete and recreate the provider as a
+  workaround, since deletion removes the identity links.
+
 - **Internal addresses (SSRF protection):** any signed-in user can create an
   organization and choose its provider URLs, so the server connects to an
   identity provider only on public addresses. Each host is resolved once and

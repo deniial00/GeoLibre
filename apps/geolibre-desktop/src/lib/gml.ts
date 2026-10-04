@@ -550,7 +550,7 @@ export interface GmlEpsgName {
 export function parseEpsgSrsName(srsName: string): GmlEpsgName | null {
   const name = srsName.trim();
   const authority =
-    /^urn:(?:x-)?ogc:def:crs:EPSG:[^:]*:(\d+)$/i.exec(name) ??
+    /^urn:(?:x-)?ogc:def:crs:EPSG:(?:[^:]*:)?(\d+)$/i.exec(name) ??
     /^https?:\/\/www\.opengis\.net\/def\/crs\/EPSG\/[^/]+\/(\d+)$/i.exec(name);
   if (authority) return { code: Number(authority[1]), authorityAxisOrder: true };
   const legacy =

@@ -243,8 +243,8 @@ async function regionFor(
   request: S3PresignRequest,
   signal?: AbortSignal,
 ): Promise<string> {
-  if (connection.region) return connection.region;
   if (request.region) return request.region;
+  if (connection.region) return connection.region;
   // ListBuckets is answered by the global endpoint, signed for us-east-1.
   if (!request.bucket) return DEFAULT_REGION;
   const known = bucketRegions.get(regionKey(connection, request.bucket));
@@ -292,7 +292,12 @@ export function createS3Signer(
       : {}),
     covers: (bucket) => matchS3Connection(getConnections(), bucket) !== null,
     connections: () =>
-      getConnections().map(({ id, name, buckets }) => ({ id, name, buckets: [...buckets] })),
+      getConnections().map(({ id, name, buckets, source }) => ({
+        id,
+        name,
+        buckets: [...buckets],
+        authenticated: source !== "anonymous",
+      })),
     fetchText,
     async presign(request, signal) {
       const connection = request.connectionId
@@ -303,7 +308,7 @@ export function createS3Signer(
         const href = s3ObjectHttpsUrl(
           { bucket: request.bucket, key: request.key },
           {
-            region: connection.region || request.region,
+            region: request.region || connection.region,
             endpoint: connection.endpoint,
             pathStyle: connection.pathStyle,
           },

@@ -131,6 +131,20 @@ describe("datelineBboxParts", () => {
     );
     assert.deepEqual(parts, [[-180, 5, 180, 5]]);
   });
+  it("keeps a polygon's measured 200-degree extent instead of using its complement", () => {
+    const parts = datelineBboxParts(
+      ring([
+        [-120, -10],
+        [80, -10],
+        [80, 10],
+        [-120, 10],
+        [-120, -10],
+      ]),
+      [-120, -10, 80, 10],
+    );
+    assert.deepEqual(parts, [[-180, -10, 180, 10]]);
+  });
+
 
   it("decides from the coordinates rather than a wrapped box", () => {
     // A box with west > east is normalised from the layer's own longitudes,

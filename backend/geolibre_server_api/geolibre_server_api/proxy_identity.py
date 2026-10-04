@@ -74,8 +74,12 @@ def client_ip(request: Request) -> IPv4Address | IPv6Address | None:
     if not peer_trusted(request):
         return peer
     config: TrustedProxyConfig = request.app.state.trusted_proxy
-    forwarded = request.headers.get("x-forwarded-for", "")
-    for raw in reversed(forwarded.split(",") if forwarded else []):
+    forwarded = [
+        part
+        for value in request.headers.getlist("x-forwarded-for")
+        for part in value.split(",")
+    ]
+    for raw in reversed(forwarded):
         address = _parse_ip(raw)
         if address is None:
             return None

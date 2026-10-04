@@ -19,6 +19,8 @@ import {
 } from "../apps/geolibre-desktop/src/lib/desktop-settings-secrets";
 import { normalizeDesktopSettings } from "../apps/geolibre-desktop/src/hooks/useDesktopSettings";
 import { resolveCloudUrls } from "../apps/geolibre-desktop/src/lib/sql-cloud-urls";
+import { createS3Signer } from "../apps/geolibre-desktop/src/lib/s3-signer";
+
 
 function connection(id: string, patch: Partial<S3Connection> = {}): S3Connection {
   return { ...createS3Connection(id, id), ...patch };
@@ -94,6 +96,35 @@ describe("S3 connections", () => {
     assert.equal(normalizeS3DefaultLocation(42), "");
   });
 });
+describe("S3 signing region", () => {
+  it("prefers an AWS URL region over a connection default", async () => {
+    const regionalConnection = connection("regional", {
+      source: "keys",
+      region: "eu-west-1",
+      accessKeyId: "AKIAEXAMPLE",
+      secretAccessKey: "secret",
+    });
+    const signer = createS3Signer(() => [regionalConnection]);
+    const signed = await signer.presign({ bucket: "bucket", key: "key", region: "us-west-2" });
+    assert.ok(signed);
+    assert.match(
+      signed.href,
+      /X-Amz-Credential=AKIAEXAMPLE%2F[^&]*%2Fus-west-2%2Fs3%2Faws4_request/,
+    );
+  });
+
+  it("uses an AWS URL region ahead of the default for anonymous connections", async () => {
+    const anonymousConnection = connection("anonymous", {
+      source: "anonymous",
+      region: "eu-west-1",
+    });
+    const signer = createS3Signer(() => [anonymousConnection]);
+    const signed = await signer.presign({ bucket: "bucket", key: "key", region: "us-west-2" });
+    assert.ok(signed);
+    assert.equal(new URL(signed.href).hostname, "bucket.s3.us-west-2.amazonaws.com");
+  });
+});
+
 
 describe("presign lifetime", () => {
   it("caps at the maximum, follows expiring credentials, and refuses expired ones", () => {

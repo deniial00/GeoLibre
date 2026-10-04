@@ -291,6 +291,8 @@ describe("resolveGmlCrs", () => {
     });
     assert.equal(resolveGmlCrs("urn:ogc:def:crs:OGC:1.3:CRS84").swapAxes, false);
     assert.equal(resolveGmlCrs("urn:x-ogc:def:crs:EPSG:6.9:4326").swapAxes, true);
+    assert.equal(resolveGmlCrs("urn:ogc:def:crs:EPSG:4326").swapAxes, true);
+    assert.equal(resolveGmlCrs("urn:x-ogc:def:crs:EPSG:4326").swapAxes, true);
     assert.equal(resolveGmlCrs("EPSG:4326").swapAxes, false);
   });
 

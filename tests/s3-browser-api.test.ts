@@ -70,6 +70,24 @@ describe("S3 browser client", () => {
       ],
     );
   });
+  it("uses the selected connection when listing a bucket outside its match patterns", async () => {
+    let selectedConnectionId: string | undefined;
+    const signer: S3UrlSigner = {
+      covers: () => false,
+      connections: () => [],
+      presign: async (request) => {
+        selectedConnectionId = request.connectionId;
+        return { href: "https://private.s3.amazonaws.com/", expiresAt: Infinity };
+      },
+      fetchText: async () => ({ status: 200, body: LISTING }),
+    };
+    const client = createS3BrowserClient(signer, async () => {
+      throw new Error("fallback fetch must not be used");
+    });
+    await client.list({ bucket: "private", prefix: "", connectionId: "chosen" });
+    assert.equal(selectedConnectionId, "chosen");
+  });
+
 
   it("follows an anonymous listing to the bucket's region once", async () => {
     const requests: string[] = [];

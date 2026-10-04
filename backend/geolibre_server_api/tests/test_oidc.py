@@ -91,6 +91,41 @@ def test_discovery_stores_endpoints_and_secret_is_never_returned(oauth_client, f
     _signed_in(oauth_client, callback, verifier)
 
 
+def test_linked_identities_block_issuer_and_jwks_changes(oauth_client, fake_idp):
+    token, org_id = _org_with_idp(oauth_client)
+    callback, verifier = sso_sign_in(
+        oauth_client, fake_idp, "acme", fake_idp.base_claims("stable-subject")
+    )
+    _signed_in(oauth_client, callback, verifier)
+
+    changed_issuer = configure_idp(
+        oauth_client,
+        token,
+        org_id,
+        issuer="https://replacement-idp.example",
+        authorizationEndpoint="https://replacement-idp.example/authorize",
+        tokenEndpoint="https://replacement-idp.example/token",
+        jwksUri="https://replacement-idp.example/jwks",
+    )
+    assert changed_issuer.status_code == 409
+
+    changed_jwks = configure_idp(
+        oauth_client,
+        token,
+        org_id,
+        jwksUri=f"{FakeIdp.ISSUER}/replacement-jwks",
+    )
+    assert changed_jwks.status_code == 409
+
+    current = oauth_client.get(
+        f"/api/organizations/{org_id}/identity-provider",
+        headers=auth(token),
+    )
+    assert current.status_code == 200
+    assert current.json()["identityProvider"]["issuer"] == FakeIdp.ISSUER
+    assert current.json()["identityProvider"]["jwksUri"] == f"{FakeIdp.ISSUER}/jwks"
+
+
 def test_identity_provider_validation(oauth_client):
     token = admin_token(oauth_client)
     org_id = create_org(oauth_client, token)

@@ -8,6 +8,9 @@ import pytest
 from conftest import OAUTH_CLIENTS, PUBLIC_URL, _make_app
 from fastapi.testclient import TestClient
 from helpers import approve, auth, exchange_code, redirect_params, start_authorize
+from geolibre_server_api.proxy_identity import client_ip
+from starlette.requests import Request
+
 
 PROXY_USER = {"Remote-User": "grace@example.org", "Remote-Email": "grace@example.org"}
 
@@ -50,6 +53,21 @@ def test_trusted_proxy_user_signs_in_without_a_password(proxied_app):
         assert user["email"] == "grace@example.org"
         # The proxy identity links to the same account next time.
         assert _proxy_sign_in(proxy)["id"] == user["id"]
+
+
+def test_client_ip_uses_all_forwarded_header_lines(proxied_app):
+    request = Request(
+        {
+            "type": "http",
+            "headers": [
+                (b"x-forwarded-for", b"192.0.2.10"),
+                (b"x-forwarded-for", b"198.51.100.20"),
+            ],
+            "client": ("10.0.0.5", 5000),
+            "app": proxied_app,
+        }
+    )
+    assert str(client_ip(request)) == "198.51.100.20"
 
 
 def test_trusted_proxy_identity_cannot_start_single_sign_on(proxied_app):

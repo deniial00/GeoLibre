@@ -227,7 +227,22 @@ fn handle_connection(mut stream: TcpStream, shared: &SharedState) {
                 return;
             }
             match serde_json::from_slice::<EarthEngineOAuthToken>(&request.body) {
-                Ok(token) if take_pending_state(shared, &token.state) => {
+                Ok(token)
+                    if token.error.as_deref().is_some_and(|error| !error.is_empty())
+                        && is_pending_state(shared, &token.state) =>
+                {
+                    if let Ok(mut token_store) = shared.tokens.lock() {
+                        token_store.insert(token.state.clone(), token);
+                    }
+                    let _ = write_response(&mut stream, 204, "text/plain", "", &[]);
+                }
+                Ok(token)
+                    if token
+                        .access_token
+                        .as_deref()
+                        .is_some_and(|access_token| !access_token.is_empty())
+                        && take_pending_state(shared, &token.state) =>
+                {
                     if let Ok(mut token_store) = shared.tokens.lock() {
                         token_store.insert(token.state.clone(), token);
                     }
@@ -516,11 +531,12 @@ fn auth_page(client_id: &str, state: &str, nonce: &str) -> String {
     const status = document.getElementById("status");
 
     async function sendResult(payload) {{
-      await fetch("/__geolibre_ee_token", {{
+      const response = await fetch("/__geolibre_ee_token", {{
         method: "POST",
         headers: {{ "content-type": "application/json" }},
         body: JSON.stringify({{ state, ...payload }})
       }});
+      if (!response.ok) throw new Error("Could not return the access token.");
     }}
 
     button.addEventListener("click", () => {{
@@ -725,6 +741,18 @@ mod tests {
         let forged = post_token(&shared, OAUTH_ORIGIN, "application/json", &forged_state);
         assert!(forged.starts_with("HTTP/1.1 400"));
         assert!(shared.tokens.lock().unwrap().is_empty());
+
+        let error_body = format!(r#"{{"state":"{state}","error":"access_denied"}}"#);
+        let error_result = post_token(&shared, OAUTH_ORIGIN, "application/json", &error_body);
+        assert!(error_result.starts_with("HTTP/1.1 204"));
+        assert!(is_pending_state(&shared, &state));
+        let stored_error = shared
+            .tokens
+            .lock()
+            .ok()
+            .and_then(|mut tokens| tokens.remove(&state))
+            .and_then(|token| token.error);
+        assert_eq!(stored_error.as_deref(), Some("access_denied"));
 
         let accepted = post_token(
             &shared,

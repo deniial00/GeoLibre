@@ -27,6 +27,7 @@ from geolibre_server_api.auth import (
 )
 from geolibre_server_api.auth_models import Account
 from geolibre_server_api.enterprise_models import (
+    FederatedIdentity,
     OrganizationIdentityProvider,
     OrganizationSecurityPolicy,
     ScimToken,
@@ -316,6 +317,21 @@ def build_enterprise_admin_router() -> APIRouter:
         # The issuer is compared exactly with the ID token's iss; never normalize it.
         if not _is_https_url(body.issuer) or "?" in body.issuer or "#" in body.issuer:
             raise HTTPException(422, "issuer must be an https URL without query or fragment")
+        provider = _provider_for(session, organization_id)
+        if provider is not None and (
+            provider.issuer != body.issuer
+            or (body.jwks_uri is not None and provider.jwks_uri != body.jwks_uri)
+        ):
+            linked_identity = session.scalar(
+                select(FederatedIdentity.id)
+                .where(FederatedIdentity.provider_id == provider.id)
+                .limit(1)
+            )
+            if linked_identity is not None:
+                raise HTTPException(
+                    409,
+                    "issuer or JWKS endpoint cannot change while federated identities are linked",
+                )
         given = [
             value
             for value in (body.authorization_endpoint, body.token_endpoint, body.jwks_uri)
@@ -329,7 +345,6 @@ def build_enterprise_admin_router() -> APIRouter:
             SCOPE_TOKEN_RE.fullmatch(scope) for scope in body.scopes
         ):
             raise HTTPException(422, "scopes must include openid and use simple scope tokens")
-        provider = _provider_for(session, organization_id)
         if provider is None and body.client_secret is None:
             raise HTTPException(422, "clientSecret is required")
         group_ids = {mapping.group_id for mapping in body.group_mappings}
@@ -376,6 +391,16 @@ def build_enterprise_admin_router() -> APIRouter:
             )
             session.add(provider)
         elif provider.issuer != body.issuer or provider.jwks_uri != jwks_uri:
+            linked_identity = session.scalar(
+                select(FederatedIdentity.id)
+                .where(FederatedIdentity.provider_id == provider.id)
+                .limit(1)
+            )
+            if linked_identity is not None:
+                raise HTTPException(
+                    409,
+                    "issuer or JWKS endpoint cannot change while federated identities are linked",
+                )
             # Keys cached from another issuer or key set must never verify tokens.
             provider.jwks_json = None
             provider.jwks_fetched_at = None
