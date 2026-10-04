@@ -308,6 +308,7 @@ def test_live_write_roundtrip_and_unchanged_save(live_db):
     request = mssql.MssqlReadRequest(session_id=live_db, table="geolibre_writeback_test")
     read = mssql.mssql_read(request)
     original = read["geojson"]
+    baseline_keys = [feature["id"] for feature in original["features"]]
     result = mssql.mssql_write(
         mssql.MssqlWriteRequest(
             session_id=live_db, table="geolibre_writeback_test", geojson=original
@@ -329,7 +330,7 @@ def test_live_write_roundtrip_and_unchanged_save(live_db):
             session_id=live_db,
             table="geolibre_writeback_test",
             geojson=original,
-            baseline_keys=[f["id"] for f in read["geojson"]["features"]],
+            baseline_keys=baseline_keys,
         )
     )
     assert (result["updated"], result["inserted"], result["deleted"]) == (1, 1, 1)
