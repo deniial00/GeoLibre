@@ -33,7 +33,7 @@ independently. The difference is who decides:
 | | UI Profiles | Deployment capabilities |
 | --- | --- | --- |
 | Purpose | Reduce clutter for the audience | Pin what the deployment permits |
-| Set by | The user, or an `admin-profile.json` | The build/deployment configuration |
+| Set by | The user, primary policy `interface`, or legacy admin profile | Primary runtime policy; legacy runtime/build environment fallbacks |
 | Reversible in the app | Yes, from Settings → Interface (unless `lock` is set) | No — never surfaced in the UI |
 | Granularity | Individual items, data sources, plugins | Whole capabilities |
 
@@ -57,81 +57,77 @@ ordering, identify, the selection tools, and Help.
 
 ## Configuring it
 
-Set `VITE_GEOLIBRE_CAPABILITIES` to a comma-separated list of the capabilities
-you want to grant, at build time:
+### Runtime (recommended)
+
+Set `capabilities` in [`deployment.json`](deployment-policy.md), or use the
+Docker runtime override:
+
+```bash
+docker run --rm -p 8080:80 \
+  -e GEOLIBRE_CAPABILITIES=data:add,export:data \
+  geolibre-policy:local
+```
+
+Build `geolibre-policy:local` from merged `main` as described in
+[Deployment Policy](deployment-policy.md#docker). `none` grants nothing with
+the environment variable; JSON uses `"capabilities":[]` for the same empty
+grant. Omitted sources grant the default full set.
+
+#### Legacy input — `VITE_GEOLIBRE_CAPABILITIES` still honoured
+
+`VITE_GEOLIBRE_CAPABILITIES` is a legacy build-time fallback:
 
 ```bash
 VITE_GEOLIBRE_CAPABILITIES="data:add,processing:run,export:data" npm run build
 ```
 
-For the Docker image, pass it as a build argument:
-
-```bash
-docker build \
-  --build-arg VITE_GEOLIBRE_CAPABILITIES="data:add,processing:run,export:data" \
-  -t geolibre-classroom .
-```
-
-!!! note "Runtime configuration"
-    A [`deployment.json`](deployment-policy.md) with a `capabilities` array,
-    served next to the app, restricts a **prebuilt** deployment without a
-    rebuild and takes precedence over `VITE_GEOLIBRE_CAPABILITIES`. On the
-    container image, `-e GEOLIBRE_CAPABILITIES=data:add,export:data` (or `none`)
-    writes that file for you; see [Docker](deployment-policy.md#docker).
-
-!!! warning "A late or blocked `deployment.json` fails open"
-    The browser waits at most 3 seconds for `deployment.json`. If the request
-    is dropped, blocked or slower than that, the session starts **without** the
-    policy, and the capabilities then come from `VITE_GEOLIBRE_CAPABILITIES` or,
-    absent that, the full default grant. This is the same client-side gate as
-    everything on this page: it limits what the interface offers and is not
-    access control. Do not rely on it where someone can interfere with the
-    request; enforce restrictions on the server instead.
-
-### Defaults and parsing
-
-- **Unset (the default) grants everything.** An existing deployment that
-  configures nothing behaves exactly as it did before.
-- **Setting it at all is a restriction.** Only the capabilities you name are
-  granted; everything else is withheld.
-- **Unknown names are dropped, not granted.** A build that does not recognize a
-  capability treats it as ungranted rather than failing to start, so a config
-  written for a newer version does not quietly widen an older one.
-- **The parse fails closed.** A value that names nothing recognizable grants
-  nothing at all, rather than falling back to the full set.
-- **A blank value reads as unset**, and so grants everything. An empty string
-  is what `-e VAR=` produces, and unset has to keep meaning "full". To grant
-  nothing, write `none` (see below) rather than leaving the value empty.
-
-## Examples
-
-A kiosk or exhibit terminal — open the configured project, pan, zoom, toggle
-layers, identify, and nothing else. `none` is the reserved spelling for an
-empty grant:
+On a prebuilt client, runtime deployment policy takes precedence, followed by
+`window.__GEOLIBRE_DEPLOYMENT_ENV__`, then this build-time value. The legacy
+parser drops unknown tokens; an unrecognized-only nonblank value grants none,
+and blank means unset. These rules do not describe JSON policy parsing or
+Docker's strict source validation.
 
 ```bash
 VITE_GEOLIBRE_CAPABILITIES=none npm run build
-```
-
-The same kiosk, but visitors may save a picture of what they are looking at:
-
-```bash
 VITE_GEOLIBRE_CAPABILITIES="export:data" npm run build
+VITE_GEOLIBRE_CAPABILITIES="project:edit,data:add,processing:run,export:data" npm run build
 ```
 
-A classroom instance — the full map and processing tools, but no plugin
-installs and no settings:
+The examples above are legacy build-time configuration, still honoured; they
+do not configure Docker nginx route enforcement.
+
+!!! warning "Client policy loading can fall back"
+    Web loading waits at most 3 seconds. A missing or late policy uses the
+    runtime environment fallback, then the legacy build environment, then the
+    default full grant. Client gates and browser WASM are not access control;
+    use Docker nginx policy enforcement or protect APIs independently.
+
+### Runtime examples
+
+A kiosk or exhibit terminal, with no optional capabilities:
 
 ```bash
-VITE_GEOLIBRE_CAPABILITIES="project:edit,data:add,processing:run,export:data" \
-  npm run build
+docker run --rm -p 8080:80 -e GEOLIBRE_CAPABILITIES=none geolibre-policy:local
 ```
 
-An embedded map on a public site that should not become a general-purpose
-data-fetching proxy for the page framing it. With `none`, the embed API refuses
+Allow visitors to export an image:
+
+```bash
+docker run --rm -p 8080:80 -e GEOLIBRE_CAPABILITIES=export:data geolibre-policy:local
+```
+
+A classroom instance with project authoring, data and processing tools, and
+export, but no plugin installs or settings:
+
+```bash
+docker run --rm -p 8080:80 \
+  -e GEOLIBRE_CAPABILITIES=project:edit,data:add,processing:run,export:data \
+  geolibre-policy:local
+```
+
+An embedded map can use an empty grant to refuse commands such as
 `loadProject`, `addLayer`, `addData`, `openTool`, and `exportImage`, while
-`setView`, `highlight`, and the layer-visibility commands keep working — so the
-host page can still drive the map without being able to load anything into it.
+`setView`, `highlight`, and layer-visibility commands remain available.
 
 ## Embed API behavior
 
@@ -150,7 +146,8 @@ independent: the allowlist decides *who* may send commands, capabilities decide
 
 ## Related pages
 
-- [Self-Hosting](self-hosting.md) — the server-side protections this does not replace
+- [Deployment Policy](deployment-policy.md) — primary policy and Docker enforcement
+- [Self-Hosting](self-hosting.md#container-policy-enforcement) — exact Docker server-side route guards
 - [UI Profiles](ui-profiles.md) — non-destructive interface filtering
-- [Embedding & Sharing](user-guide/embedding.md) — the embed API and its origin allowlist
-- [Getting Started](getting-started.md#run-with-docker) — the full container configuration list
+- [Embedding & Sharing](user-guide/embedding.md) — embed API and origin allowlist
+- [Getting Started](getting-started.md#run-with-docker) — container configuration

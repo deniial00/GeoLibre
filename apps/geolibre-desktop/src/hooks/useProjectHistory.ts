@@ -9,7 +9,12 @@ import {
 import type { MapEngine } from "@geolibre/map";
 import { useCallback, useEffect, useRef, useState, type RefObject } from "react";
 import { useTranslation } from "react-i18next";
-import { createAutosaveStatusTracker, type AutosaveOutcome } from "../lib/autosave-status";
+import i18next from "i18next";
+import {
+  createAutosaveFailureNotice,
+  createAutosaveStatusTracker,
+  type AutosaveOutcome,
+} from "../lib/autosave-status";
 import { buildProjectSnapshot } from "../lib/build-project-snapshot";
 import { isEmbedded } from "./embedHost";
 import { isTauri } from "../lib/is-tauri";
@@ -18,6 +23,7 @@ import {
   addProjectSnapshot,
   deleteProjectSnapshot,
   listProjectSnapshots,
+  probeProjectHistoryStorage,
   type ProjectHistorySnapshot,
 } from "../lib/project-history-store";
 import {
@@ -30,6 +36,7 @@ import {
   shouldOfferProjectRecovery,
 } from "../lib/project-history-session";
 import { restoreLayerFromSnapshot } from "../lib/snapshot-layer-restore";
+import { notify } from "../lib/notify";
 const AUTOSAVE_DELAY_MS = 3_000;
 
 function currentProjectKey(): string {
@@ -46,6 +53,19 @@ export function useProjectHistory(mapControllerRef: RefObject<MapEngine | null>)
   // to keep, so the UI can say so instead of crash recovery going silently
   // stale (GeoLibre#2858).
   const [autosavePaused, setAutosavePaused] = useState(false);
+  // True when the browser refuses IndexedDB (some private windows, blocked site
+  // data), so autosave can never keep a snapshot. Distinct from the size pause:
+  // nothing the user does to the project will bring it back (GeoLibre#2860).
+  const [autosaveUnavailable, setAutosaveUnavailable] = useState(false);
+  useEffect(() => {
+    let cancelled = false;
+    void probeProjectHistoryStorage().then((ok) => {
+      if (!cancelled) setAutosaveUnavailable(!ok);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
   const timerRef = useRef<number | null>(null);
   // Each layer's serialized text, reused while the store keeps the same layer
   // record. Without it a camera move re-stringified every embedded GeoJSON
@@ -56,6 +76,9 @@ export function useProjectHistory(mapControllerRef: RefObject<MapEngine | null>)
       setSnapshots(await listProjectSnapshots(currentProjectKey()));
     } catch (error) {
       console.error("Could not load project history.", error);
+      notify.warning(i18next.t("notifications.projectHistoryLoadFailed"), {
+        dedupeKey: "project-history-load",
+      });
     }
   }, []);
 
@@ -89,6 +112,16 @@ export function useProjectHistory(mapControllerRef: RefObject<MapEngine | null>)
         }
       } catch (error) {
         console.error("Could not initialize project recovery.", error);
+        // The history list failed to load either way; in the browser that
+        // also means a crashed session will not be offered back.
+        notify.warning(
+          i18next.t(
+            crashRecoveryEnabled
+              ? "notifications.projectRecoveryUnavailable"
+              : "notifications.projectHistoryLoadFailed",
+          ),
+          { dedupeKey: "project-history-load" },
+        );
       } finally {
         if (crashRecoveryEnabled) markProjectSession("open");
       }
@@ -103,6 +136,9 @@ export function useProjectHistory(mapControllerRef: RefObject<MapEngine | null>)
       heartbeat = window.setInterval(() => markProjectSession("open"), SESSION_HEARTBEAT_MS);
     }
     const autosaveStatus = createAutosaveStatusTracker(setAutosavePaused);
+    const noticeAutosaveOutcome = createAutosaveFailureNotice(() =>
+      notify.warning(i18next.t("notifications.autosaveFailed"), { dedupeKey: "autosave-failed" }),
+    );
     const unsubscribe = useAppStore.subscribe((state, previous) => {
       // A save (or opening/creating a project) leaves nothing unsaved to lose,
       // so the warning has nothing left to warn about. The next edit re-checks.
@@ -120,8 +156,12 @@ export function useProjectHistory(mapControllerRef: RefObject<MapEngine | null>)
         // Dirtiness is read when the attempt ends: a tick scheduled before a
         // save still runs after it, and must not flag a project that now has
         // nothing unsaved.
-        const settle = (outcome: AutosaveOutcome) =>
+        const settle = (outcome: AutosaveOutcome) => {
+          // A superseded attempt's late outcome says nothing about the
+          // project now, the same rule the paused indicator follows.
+          if (autosaveStatus.isCurrent(attempt)) noticeAutosaveOutcome(outcome);
           autosaveStatus.settle(attempt, outcome, useAppStore.getState().isDirty);
+        };
         // Serialization runs synchronously, so its failure cannot be caught
         // by the promise chain below. A project embedding a large vector layer
         // serializes to more than V8's 536,870,888-byte string cap and throws
@@ -252,6 +292,7 @@ export function useProjectHistory(mapControllerRef: RefObject<MapEngine | null>)
 
   return {
     autosavePaused,
+    autosaveUnavailable,
     snapshots,
     recoverySnapshot,
     restoreError,

@@ -8,22 +8,36 @@ library, sharing endpoints, and branding.
 ## Loading
 
 The web and Jupyter builds fetch `deployment.json` from the app's base URL
-(`<base>/deployment.json`) before the first render, so nothing paints with a
-setting the policy then changes. Desktop first reads the app config directory
-(see [Desktop](#desktop)), falling back to that web URL only when the config-dir
-file is absent or cannot be read. No policy applies when the selected file is
-absent (404 or an HTML fallback page), not JSON, or of an unknown `version`.
-An unreachable web file or a fetch that takes more than 3 seconds also yields
-no policy. In those cases the app behaves exactly as it does without the file.
-The container image writes the file on every boot (see [Docker](#docker)).
+(`<base>/deployment.json`) before the first render. Desktop reads its config-dir
+file first (see [Desktop](#desktop)); only an absent file or a failed read falls
+back to that web URL. The selected policy is resolved before the first render.
+No policy applies when the selected file is absent (404 or an HTML fallback
+page), not JSON, or of an unknown `version`. An unreachable web file or a fetch
+that takes more than 3 seconds also yields no policy. In those cases the app
+uses the next client configuration source.
+
+The recommended deployment input is a versioned `deployment.json`. On Docker,
+the entrypoint validates the mounted source, applies nonblank environment
+overrides field by field, and writes the generated public policy on every boot
+(see [Docker](#docker)). The client then resolves settings in this order:
+final policy, `window.__GEOLIBRE_DEPLOYMENT_ENV__`, then build environment.
+
+**Availability:** Runtime policy delivery and Docker enforcement live on
+`main`. Published Docker images and desktop releases may predate them. If a
+Docker image does not honour `deployment.json`, build the image from `main`.
+For desktop, use a build that includes this support.
+
+The previous `admin-profile.json` and `VITE_GEOLIBRE_CAPABILITIES` inputs are
+**legacy, still honoured**. They remain fallbacks where the primary policy does
+not specify a usable section; this documentation does not remove them.
 
 What each section does today:
 
 - `capabilities` restricts the app; `[]` grants none, and omitting it leaves
-  `VITE_GEOLIBRE_CAPABILITIES` (or the default full grant) in force.
-- `interface` replaces `admin-profile.json` whole; fields are not merged. An
-  empty `interface` (`{}`) configures nothing and counts as absent, so
-  `admin-profile.json` still applies.
+  the legacy `VITE_GEOLIBRE_CAPABILITIES` (or the default full grant) in force.
+- A non-empty `interface` object replaces the legacy `admin-profile.json`
+  whole; fields are not merged. An omitted, empty (`{}`), or invalid interface
+  leaves the legacy profile eligible.
 - `plugins.registryUrl` sets the plugin registry. `allowed`, `blocked` and
   `sideload` gate external plugin loads and installs; `defaultActive` seeds
   activation in fresh projects.
@@ -35,11 +49,19 @@ What each section does today:
   `false` removes any operator-configured AI proxy (a provider a user enters in
   Settings is unaffected). `ai.model` picks the proxy's model.
 
-Because the wait is bounded, `capabilities` fails open like every other
-section: a `deployment.json` that is blocked or arrives late means that session
-runs with the env-derived capabilities or the default full grant. See
-[Deployment capabilities](deployment-capabilities.md) before using it as a
-restriction.
+The client parser is lenient and section-based. Invalid sections, including
+capabilities with unknown names, are dropped with a warning; other valid
+sections survive. Capabilities then fall back to runtime or build environment,
+or the default full grant. Docker source validation is strict and fails boot
+before overrides can repair an invalid input file.
+
+```json
+{"version":1,"capabilities":["data:add","export:data"],"interface":{"enabled":true,"level":"intermediate","lock":true}}
+```
+
+For capability details and Docker route enforcement, see
+[Deployment Capabilities](deployment-capabilities.md) and
+[Self-Hosting: container policy enforcement](self-hosting.md#container-policy-enforcement).
 
 ## Example
 
@@ -169,9 +191,8 @@ mean opposite things. Omitted means "no restriction from this file"; `[]` means
 "nothing is granted/allowed".
 
 ## Plugin precedence
-
-An id in `blocked` is never loaded, even if it is also in `allowed`; when
-`allowed` is present, any id not in it is not loaded.
+An id in `blocked` is never loaded, even if it is also in `allowed`. When
+`allowed` is present, any non-bundled external id not in it is not loaded.
 
 The evaluator checks sideload permission first, then `blocked`, then `allowed`.
 Bundled drop-ins under `public/plugins/` are exempt from `allowed` and
@@ -210,12 +231,12 @@ a modified client can bypass it. It does not provide signing or sandboxing.
 
 The order, highest first, is:
 
-1. `deployment.json`
+1. final `deployment.json` policy (including container environment overrides)
 2. runtime environment (`window.__GEOLIBRE_DEPLOYMENT_ENV__`)
 3. build-time environment
 
-`admin-profile.json` is still honoured for the interface when `deployment.json`
-has no `interface` section.
+The legacy `admin-profile.json` is still honoured for the interface only when
+the selected policy has no non-empty, valid `interface` section.
 
 ## Versioning
 
@@ -240,9 +261,9 @@ beyond the safe-integer range, none of which JSON Schema alone can all express.
 
 ## Desktop
 
-Place `deployment.json` in Tauri's `<app_config_dir>`, next to any
-`admin-profile.json`. For the standard `org.geolibre.desktop` application
-identifier, the paths are:
+Place `deployment.json` in Tauri's `<app_config_dir>` (see
+[UI Profiles](ui-profiles.md) for the legacy profile locations). For the
+standard `org.geolibre.desktop` application identifier, the paths are:
 
 | OS | Policy path |
 | --- | --- |
@@ -258,37 +279,49 @@ instead.
 The `read_deployment_policy` command returns raw UTF-8 text, or `null` when
 the file is absent. A leading UTF-8 BOM is accepted by the parser. The selected
 policy is applied before the first render, including capability restrictions,
-without rebuilding the app. Restart GeoLibre after changing the file; there is
-no runtime file watching.
+without rebuilding the app. Restart GeoLibre after changing the file; changes
+are not watched.
 
 An existing config-dir file is authoritative, even if empty, malformed or of
 an unsupported version: it yields no policy rather than falling back to a
-bundled file. Config-dir and bundled policies are never merged. When the file
+bundled or web file. Config-dir and web policies are never merged. When the file
 is absent, GeoLibre fetches `<base>/deployment.json` instead. Other read errors
 (including permission failures) produce a console warning in every build and
 fall back to that same web file. Unsupported versions also warn in every build.
 With no file in either location, existing behavior is unchanged.
 
-A non-empty policy `interface` replaces `admin-profile.json` whole, just as
-on the web; an absent or empty `interface` leaves the admin profile in force.
-The config directory is user-writable: this is desktop provisioning, not a
-security boundary or server-side enforcement.
+A non-empty, valid policy `interface` replaces the legacy profile whole; an
+absent, empty, or dropped invalid `interface` leaves the legacy profile
+eligible. The config directory is user-writable: this is desktop provisioning,
+not a security boundary or server-side enforcement.
 
 ## Docker
 
-The image writes a validated `/usr/share/nginx/html/deployment.json` on every
-boot, served `Cache-Control: no-store`. The source is the file mounted at
-`GEOLIBRE_DEPLOYMENT_FILE`, or an empty `{"version": 1}` when none is mounted.
-Environment variables then override it field by field; a blank variable counts
-as unset.
+The image writes the generated public file to
+`/usr/share/nginx/html/deployment.json` on every boot, served at
+`/deployment.json` with `Cache-Control: no-store`, `Content-Type:
+application/json` and `X-Content-Type-Options: nosniff`. The source file is
+selected by `GEOLIBRE_DEPLOYMENT_FILE` (for example
+`/etc/geolibre/deployment.json`); mount it read-only there, never over the
+generated output. With no source or overrides, the image writes
+`{"version":1}`, which adds no capability restriction.
+
+The source file is strictly validated before any environment overrides are
+applied. Nonblank `GEOLIBRE_*` values then override their corresponding fields;
+blank values count as unset. Invalid input stops boot and cannot be repaired by
+an override.
 
 ```bash
-docker run -p 8080:80 \
-  -v ./deployment.json:/etc/geolibre/deployment.json:ro \
+docker build -t geolibre-policy:local .
+docker run --rm -p 8080:80 \
+  -v "$PWD/deployment.json:/etc/geolibre/deployment.json:ro" \
   -e GEOLIBRE_DEPLOYMENT_FILE=/etc/geolibre/deployment.json \
   -e GEOLIBRE_CAPABILITIES=data:add,export:data \
-  ghcr.io/opengeos/geolibre
+  geolibre-policy:local
 ```
+
+Build the image from merged `main` to obtain runtime policy support until a
+containing release is verified; configuration changes do not require rebuilding.
 
 | Variable | Policy field |
 | --- | --- |
@@ -312,8 +345,9 @@ so nginx never starts with a weaker policy than you asked for. A file with
 `ai.enabled: true` also needs `GEOLIBRE_AI_URL`, `GEOLIBRE_AI_PROXY_URL` and
 `GEOLIBRE_AI_PROXY_TOKEN`, otherwise the boot fails.
 
-`GEOLIBRE_CAPABILITIES` is also published into the runtime config, so the grant
-holds even if `deployment.json` is blocked or arrives late.
+`GEOLIBRE_CAPABILITIES` overrides the final policy's client grants at container
+generation time. The generated policy is what nginx enforces; build-time client
+grants alone do not configure nginx.
 
 !!! warning "Public file, no secrets"
     `deployment.json` is served to every browser. Never put secrets in it. The
@@ -322,6 +356,8 @@ holds even if `deployment.json` is blocked or arrives late.
 
 !!! warning "Client hiding is not enforcement"
     Hiding or removing an interface element does not stop someone with browser
-    devtools, and it does not restrict the server. See
-    [Deployment Capabilities](deployment-capabilities.md) for what the client
-    gate does and does not cover.
+    devtools. Nginx enforcement applies only to the bundled Docker routes; it
+    does not restrict desktop processing, browser WASM, separately exposed
+    sidecars, or plugin execution. See
+    [Deployment Capabilities](deployment-capabilities.md) and
+    [Self-Hosting](self-hosting.md#container-policy-enforcement).

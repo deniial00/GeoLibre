@@ -84,7 +84,7 @@ GeoLibre registers 66 built-in plugins.
 | **GeoAgent** | Plugins | `geoagent` | An in-map AI agent panel. |
 | **Elevation Profile** | Plugins | `elevation-profile` | A terrain profile along a drawn line, or along the selected line features of a layer. |
 | **Layer Swipe** | Plugins | `swipe` | A swipe bar comparing two layers. |
-| **Gridlines** | Controls → Gridlines | `graticule` | A coordinate grid with edge labels, including a UTM easting/northing mode. |
+| **Gridlines** | Controls → Gridlines | `graticule` | A coordinate grid with edge labels, including UTM easting/northing and MGRS/USNG modes. |
 | **Clouds** | Controls → Weather | `clouds` | Near-realtime NASA cloud imagery, animated day by day. |
 | **Precipitation** | Controls → Weather | `precipitation` | RainViewer precipitation radar, animated over roughly the last two hours. |
 | **Atmospheric Effects** | Controls → Atmospheric Effects | `atmosphere-effects` | A deep-space backdrop, starfield, comets, and an atmospheric halo at low zoom. |
@@ -146,10 +146,14 @@ Directions and Reverse Geocode are "menu only": they send what you click to a
 public server, so they only open from the menu, after their one-time notice.
 A plugin from the [plugin registry](#manage-plugins) opens from a link by its
 full registry id, for example `?plugin=openrndt-geolibre`. If it is already
-installed it activates like a built-in one. If not, GeoLibre first asks whether
-to install it, showing the name, author, description, and homepage the registry
-lists, and installs and activates it only after **Trust and load**. The prompt is
-skipped in the read-only `layout=viewer`, which never installs plugins.
+installed it activates like a built-in one. If not, GeoLibre may prompt to
+trust a compatible registry entry, then installs and activates it only when
+the current deployment plugin policy permits loading. Trust confirmation does
+not bypass policy; a denied plugin will not load or activate. In read-only
+`layout=viewer`, the registry-ID prompt is skipped and registry plugins are
+never installed. This is distinct from project manifest URL trust, which is
+suppressed by `sideload: false`. Permitted registry entries remain eligible
+with sideload disabled. See [Plugin policy](../deployment-policy.md#plugin-precedence).
 
 ## Manage Plugins
 
@@ -165,7 +169,7 @@ Open **Settings → Manage Plugins** to browse the marketplace. The dialog is mo
 Compatibility is checked against each entry's `minGeoLibreVersion`, so incompatible plugins are flagged rather than installed.
 
 !!! note "Trust model"
-    The registry is a curated allowlist, manifests require HTTPS (or HTTP on localhost, 127.0.0.1, or `[::1]` for development), and every install requires explicit consent, because plugins run as trusted code. The curated registry and the install confirmation are the primary safeguards.
+    The registry is a curated source, manifests require HTTPS (or HTTP on localhost, 127.0.0.1, or `[::1]` for development), and installs require explicit consent. Deployment plugin policy also governs whether external plugins load; trust confirmation does not bypass it. This client policy is bypassable and provides neither signing nor sandboxing.
 
 ## Where plugins come from
 

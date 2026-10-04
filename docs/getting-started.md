@@ -171,10 +171,13 @@ docker run --rm -p 8080:80 ghcr.io/opengeos/geolibre:latest
 
 #### Bundled conversion sidecar
 
-The image also bundles the Python sidecar (uvicorn) and reverse-proxies it at
-`/sidecar`, so the browser reaches it same-origin with no CORS or separate
-process to manage. `/conversion/status` is reachable at
-`http://localhost:8080/sidecar/conversion/status`.
+The image bundles the Python sidecar (uvicorn) and reverse-proxies it at
+`/sidecar` when the final deployment policy grants `processing:run` or
+`data:add` and `GEOLIBRE_DISABLE_SIDECAR` is not `1`. Otherwise uvicorn does
+not start and sidecar routes are denied. When available, the browser reaches it
+same-origin with no CORS:
+`http://localhost:8080/sidecar/conversion/status`. See the exact route grants
+in [Self-Hosting](self-hosting.md#container-policy-enforcement).
 
 The browser build does **not** need the sidecar for the **Conversion** tools or
 the **Whitebox** toolbox — both run client-side on DuckDB-WASM and
@@ -460,20 +463,23 @@ Individual links can also opt out at runtime with `?welcome=0`. See
 
 #### Limiting what the deployment can do
 
-For a kiosk, an exhibit terminal, or a classroom instance, name the
-capabilities the interface may offer. Unset (the default) grants everything, so
-existing deployments are unchanged:
+For a kiosk, exhibit terminal, or classroom, configure the runtime policy
+capabilities rather than rebuilding the client:
 
 ```bash
-docker build \
-  --build-arg VITE_GEOLIBRE_CAPABILITIES="project:edit,data:add,processing:run,export:data" \
-  -t geolibre-classroom .
+docker run --rm -p 8080:80 \
+  -e GEOLIBRE_CAPABILITIES=project:edit,data:add,processing:run,export:data \
+  geolibre-policy:local
 ```
 
-That example drops plugin installs and Settings. `none` grants nothing at all.
-This removes the affordances — menus, command palette entries, shortcuts,
-drag-and-drop, embed commands — but does **not** restrict the server, so keep
-the protections above in place too. See
+Build the local image from merged `main` as described in
+[Deployment Policy](deployment-policy.md#docker). The legacy
+`VITE_GEOLIBRE_CAPABILITIES` build input is still honoured as a client fallback.
+`none` grants no capabilities. Client gates remove menus, command palette
+entries, shortcuts, drag-and-drop, and embed commands; Docker nginx enforces
+selected sidecar and AI routes only. It does not restrict desktop processing,
+browser WASM, separately exposed services, or plugin execution. Keep the
+server-side protections above in place. See
 [Deployment Capabilities](deployment-capabilities.md).
 
 #### Custom app name

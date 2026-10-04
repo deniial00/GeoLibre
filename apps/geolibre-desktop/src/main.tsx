@@ -62,6 +62,7 @@ import "./lib/auth-return-url-boot";
 import i18n, { AVAILABLE_LANGUAGES, i18nReady, setActiveLanguage } from "./i18n";
 import { startAnalytics } from "./lib/analytics";
 import { installDiagnosticsCapture } from "./lib/diagnostics";
+import { notify } from "./lib/notify";
 import { isDesktopRuntime, isWindows } from "./lib/is-mobile";
 import { isTauri } from "./lib/is-tauri";
 import { installStaleChunkReload } from "./lib/stale-chunk-reload";
@@ -113,11 +114,11 @@ const deploymentPolicyReady = loadDeploymentPolicy().then((policy) => {
 
   // What this deployment is allowed to do (issue #1673). Applied before the
   // app renders, so no surface ever paints with the full grant and then
-  // retracts it. Comes from deployment.json or the deployment/build env only —
-  // never from a URL parameter or a project file — because a capability a
-  // visitor can hand themselves is not a restriction. `capabilities: []` grants
-  // none; an omitted value falls through to the env, then to the default full
-  // grant, so existing deployments are unchanged.
+  // retracts it. Primary source: deployment.json. The legacy
+  // VITE_GEOLIBRE_CAPABILITIES input is still honoured as a fallback:
+  // policy > window.__GEOLIBRE_DEPLOYMENT_ENV__ > build environment.
+  // `capabilities: []` grants none; an omitted value uses the legacy env
+  // fallback when set, then the default full grant only if that is unset.
   if (policy?.capabilities !== undefined) {
     useAppStore.getState().setDeploymentCapabilities(policy.capabilities);
     return;
@@ -304,6 +305,13 @@ const sharedSettingsReady = sharedSettingsUrl
         // with the visitor's local settings, but make a bad URL visible in the
         // diagnostics capture and developer console.
         console.error("[GeoLibre] Failed to load shared desktop settings", error);
+        // The link promised a configured app; say why it looks like the
+        // visitor's own instead. Worded once translations are up.
+        void i18nReady.then(() =>
+          notify.warning(i18n.t("notifications.sharedSettingsFailed"), {
+            dedupeKey: "shared-settings",
+          }),
+        );
         return null;
       })
   : Promise.resolve(null);
@@ -335,6 +343,9 @@ const startupLanguageReady = Promise.all([i18nReady, sharedSettingsReady]).then(
       // Shared language is optional presentation configuration. If its lazy
       // catalog cannot load, retain the language i18next already initialized.
       console.error("[GeoLibre] Failed to apply shared settings language", error);
+      notify.warning(i18n.t("notifications.sharedLanguageFailed"), {
+        dedupeKey: "shared-settings-language",
+      });
     }
   },
 );

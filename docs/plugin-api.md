@@ -1299,7 +1299,11 @@ Use a right panel for a primary, persistent workspace and a floating panel for a
 
 Use the [GeoLibre plugin template](https://github.com/opengeos/geolibre-plugin-template) as the recommended starting point for external plugin development. The template includes a MapLibre control wrapper, a `plugin.json` manifest, a GeoLibre plugin entry point, and a `package:geolibre` script that builds the zip layout GeoLibre Desktop expects.
 
-GeoLibre Desktop loads external plugins from the app data `plugins/` directory at startup. External plugins are trusted code and can be installed as:
+GeoLibre Desktop loads external plugins from the app data `plugins/` directory
+at startup. External plugins are trusted code; whether they load is also
+controlled by the client-side [deployment plugin policy](deployment-policy.md#plugin-precedence).
+The policy is bypassable and provides neither signing nor sandboxing. External
+plugins can be installed as:
 
 - A `.zip` file with a root `plugin.json`.
 - An unpacked directory with a root `plugin.json`.
@@ -1327,11 +1331,22 @@ apps/geolibre-desktop/public/plugins/example-plugin/
 
 This is the **same content a manifest URL would serve**. A drop-in is all that is required — no source edits per plugin. The `bundledPlugins()` Vite plugin (`apps/geolibre-desktop/vite-plugins/bundled-plugins.ts`) scans `public/plugins/` at build and dev-server start, exposes the discovered manifest paths through the `virtual:bundled-plugins` module, and `usePlugins.ts` loads them through the normal external-plugin path (fetch → blob import → register). Discovery happens at build time, so restart the dev server or rebuild after adding, updating, or removing a plugin folder.
 
-The same folder serves **both** the web and desktop builds: the desktop app bundles the identical frontend (`frontendDist` in `tauri.conf.json`) and serves it from `tauri://localhost`, which is same-origin and allowed by the desktop CSP (`connect-src 'self'`, `script-src ... blob:`). Bundled manifest URLs are injected at load time rather than stored in Settings, so a baked-in plugin always loads and cannot be removed by a user; they are deduplicated by plugin id against any user/project plugin of the same id.
+The same folder serves **both** the web and desktop builds: the desktop app
+bundles the identical frontend (`frontendDist` in `tauri.conf.json`) and serves
+it from `tauri://localhost`, which is same-origin and allowed by the desktop
+CSP (`connect-src 'self'`, `script-src ... blob:`). Bundled manifest URLs are
+injected at load time rather than stored in Settings. Bundled plugins are
+eligible to load without being listed in `allowed` or permitting sideload, but
+an id in `blocked` still prevents loading. They are deduplicated by plugin id
+against any user/project plugin of the same id.
 
 Private plugins should be git-ignored under `public/plugins/` (see that folder's `.gitignore`) and copied in at build/deploy time (for example in CI before `npm run build`, or by a plugin repo's own install script) so their code stays out of GeoLibre's history. The discovery code is generic and committed; only the plugin payload is excluded.
 
-A bundled drop-in's `plugin.json` may additionally set `"activeByDefault": true` to activate the plugin on startup, so its control appears without a trip to the Plugins menu. Saved plugin state still wins: a loaded project (or the user's persisted plugin state) that carries `activePluginIds` overrides the default. The flag is honored **only** for bundled drop-ins, since a deployer who bakes a plugin into the build is trusted like a built-in author; it is silently ignored on manifests installed at runtime from URLs or zips.
+A bundled drop-in's `plugin.json` may additionally set `"activeByDefault": true`
+to activate the plugin on startup. Saved plugin state still wins: a loaded
+project or persisted state carrying `activePluginIds` overrides the default.
+The flag is honored **only** for bundled drop-ins; it does not bypass a blocked
+plugin policy.
 
 If instead you want a plugin compiled into the main JS bundle (no `plugin.json`, no fetch), register it as a built-in plugin (see "Add a plugin" in the repository README).
 
@@ -1373,7 +1388,12 @@ When using the template, update `geolibre-plugin/plugin.json` and `src/geolibre.
 
 The Settings menu's **Manage Plugins** entry opens a standalone dialog (modeled on QGIS's plugin manager) with **All**, **Installed**, **Not installed**, **Upgradeable**, and **Settings** sections. The first four list curated registry plugins so users can install, update, and uninstall them without hand-entering manifest URLs; the Settings section installs a plugin from a local `.zip` and manages additional local plugin directories and manual manifest URLs. Actions apply immediately (install/uninstall/update are live; uninstall asks for confirmation). It is a thin layer over the manifest-URL loader above: installing an entry records its manifest URL in the plugin manifest URL list, and the existing loader fetches and registers it. It introduces no new trust path.
 
-The registry is JSON, fetched from `VITE_GEOLIBRE_PLUGIN_REGISTRY_URL` or, by default, the hosted registry at `https://plugins.geolibre.app/plugin-registry.json` (the [opengeos/geolibre-plugins](https://github.com/opengeos/geolibre-plugins) repo, published to GitHub Pages with CORS enabled). It is an array, or an object with a `plugins` array, of entries:
+The registry is JSON, fetched from the primary policy's `plugins.registryUrl`,
+then the legacy `VITE_GEOLIBRE_PLUGIN_REGISTRY_URL` setting, or by default the
+hosted registry at `https://plugins.geolibre.app/plugin-registry.json` (the
+[opengeos/geolibre-plugins](https://github.com/opengeos/geolibre-plugins) repo,
+published to GitHub Pages with CORS enabled). It is an array, or an object with
+a `plugins` array, of entries:
 
 ```json
 {
