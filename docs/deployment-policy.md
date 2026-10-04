@@ -23,8 +23,9 @@ overrides field by field, and writes the generated public policy on every boot
 final policy, `window.__GEOLIBRE_DEPLOYMENT_ENV__`, then build environment.
 
 **Availability:** Runtime policy delivery and Docker enforcement live on
-`main`. A published image or desktop release may predate them; if yours does
-not honour `deployment.json`, build the image from `main`.
+`main`. Published Docker images and desktop releases may predate them. If a
+Docker image does not honour `deployment.json`, build the image from `main`.
+For desktop, use a build that includes this support.
 
 The previous `admin-profile.json` and `VITE_GEOLIBRE_CAPABILITIES` inputs are
 **legacy, still honoured**. They remain fallbacks where the primary policy does

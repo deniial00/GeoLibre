@@ -86,6 +86,7 @@ On a prebuilt client, runtime deployment policy takes precedence, followed by
 parser drops unknown tokens; an unrecognized-only nonblank value grants none,
 and blank means unset. These rules do not describe JSON policy parsing or
 Docker's strict source validation.
+
 ```bash
 VITE_GEOLIBRE_CAPABILITIES=none npm run build
 VITE_GEOLIBRE_CAPABILITIES="export:data" npm run build
