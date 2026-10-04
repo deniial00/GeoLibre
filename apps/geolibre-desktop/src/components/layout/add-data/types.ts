@@ -25,6 +25,7 @@ export type AddDataKind =
   | "polyline"
   | "arcgis"
   | "postgres"
+  | "mssql"
   | "iceberg"
   | "deckgl-viz"
   | "video"

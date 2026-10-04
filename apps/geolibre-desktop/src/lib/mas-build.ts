@@ -9,9 +9,10 @@
 import { IS_MAS_BUILD } from "./build-flags";
 
 // Add Data sources that are 100% sidecar/martin-backed: PostgreSQL layers are
-// served through the martin helper binary, and File Geodatabase reading runs
-// on the sidecar's GeoPandas/GDAL stack. Neither has a client-side engine.
-export const MAS_HIDDEN_DATA_SOURCES: ReadonlySet<string> = new Set(["postgres", "gdb"]);
+// served through the martin helper binary, SQL Server uses the sidecar, and
+// File Geodatabase reading runs on the sidecar's GeoPandas/GDAL stack. None has
+// a client-side engine.
+export const MAS_HIDDEN_DATA_SOURCES: ReadonlySet<string> = new Set(["postgres", "mssql", "gdb"]);
 
 // Menu items whose feature is sidecar-only with no fallback: AI Segmentation
 // (samgeo runs on the sidecar; the client-side detection tools are separate

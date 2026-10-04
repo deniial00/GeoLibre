@@ -31,6 +31,7 @@ export type KindI18nKey =
   | "polyline"
   | "arcgis"
   | "postgres"
+  | "mssql"
   | "iceberg"
   | "deckglViz"
   | "video"
@@ -66,6 +67,7 @@ export const KIND_I18N_KEY: Record<
   polyline: "polyline",
   arcgis: "arcgis",
   postgres: "postgres",
+  mssql: "mssql",
   iceberg: "iceberg",
   "deckgl-viz": "deckglViz",
   video: "video",

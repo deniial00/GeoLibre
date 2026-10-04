@@ -34,6 +34,13 @@ import {
   type KeychainPostgresConnection,
 } from "./saved-postgres-connections";
 import {
+  mssqlConnectionAccount,
+  readSavedMssqlConnections,
+  setKeychainMssqlSecrets,
+  setMssqlKeychainWritable,
+  type MssqlStoredSecret,
+} from "./saved-mssql-connections";
+import {
   setPreservedLegacyCredentialSecrets,
   setSettingsKeychainWritable,
   shouldPersistDesktopSettings,
@@ -50,6 +57,7 @@ import { hydratePluginCredentials, readPluginCredentialIndex } from "./plugin-cr
 export async function hydrateDesktopCredentials(): Promise<void> {
   if (credentialStorageLocation() !== "keychain") return;
   let postgresIds: string[] | null;
+  const mssqlIds = readSavedMssqlConnections().map((profile) => profile.id);
   try {
     postgresIds = readKeychainPostgresIds();
   } catch (error) {
@@ -80,6 +88,7 @@ export async function hydrateDesktopCredentials(): Promise<void> {
     : [];
   const accounts = [
     ...(postgresIds ?? []).map(postgresConnectionAccount),
+    ...mssqlIds.map(mssqlConnectionAccount),
     ...settingsAccounts,
     ...desktopShareSessionAccounts(),
     ...(projectAccounts ?? []),
@@ -98,6 +107,7 @@ export async function hydrateDesktopCredentials(): Promise<void> {
   }
   try {
     await hydratePostgresConnections(postgresIds, stored);
+    hydrateMssqlSecrets(mssqlIds, stored);
     await hydrateSettingsSecrets(stored);
     hydrateProjectCredentials(projectAccounts, stored);
     await hydratePluginCredentials(pluginAccounts, stored);
@@ -105,6 +115,8 @@ export async function hydrateDesktopCredentials(): Promise<void> {
     // Unforeseen failure: fall back to a session-only state that never writes
     // plaintext and never drops the legacy values.
     reportCredentialStorageError(error);
+    setMssqlKeychainWritable(false);
+    setKeychainMssqlSecrets({});
     setPostgresKeychainWritable(false);
     setSettingsKeychainWritable(false);
     setProjectCredentialsWritable(false);
@@ -117,6 +129,32 @@ export async function hydrateDesktopCredentials(): Promise<void> {
   }
   // Never rejects; a failure starts signed out with the credential warning.
   await hydrateDesktopShareSession(stored);
+}
+function hydrateMssqlSecrets(ids: string[], stored: Readonly<Record<string, string>> | null): void {
+  if (stored === null) {
+    setMssqlKeychainWritable(false);
+    setKeychainMssqlSecrets({});
+    return;
+  }
+  const secrets: Record<string, MssqlStoredSecret> = {};
+  for (const id of ids) {
+    const value = stored[mssqlConnectionAccount(id)];
+    if (!value) continue;
+    try {
+      const parsed: unknown = JSON.parse(value);
+      if (parsed && typeof parsed === "object") {
+        const item = parsed as Record<string, unknown>;
+        secrets[id] = {
+          ...(typeof item.password === "string" ? { password: item.password } : {}),
+          ...(typeof item.clientSecret === "string" ? { clientSecret: item.clientSecret } : {}),
+        };
+      }
+    } catch {
+      // Skip malformed credentials; reconnect can collect them again.
+    }
+  }
+  setKeychainMssqlSecrets(secrets);
+  setMssqlKeychainWritable(true);
 }
 
 function withNewIds(connections: string[]): KeychainPostgresConnection[] {
