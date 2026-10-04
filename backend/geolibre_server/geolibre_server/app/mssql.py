@@ -46,14 +46,13 @@ _SESSION_IDLE_S = 8 * 3600
 _MAX_SESSIONS = 32
 _TOKEN_SCOPE = "https://database.windows.net/.default"
 _SQL_COPT_SS_ACCESS_TOKEN = 1256
+_SQL_SS_TIMESTAMPOFFSET = -155
 _PREFERRED_DRIVERS = ("ODBC Driver 18 for SQL Server", "ODBC Driver 17 for SQL Server")
 # `json_safe` stringifies these, but SQL Server will not implicitly cast the
 # string back (nvarchar -> varbinary is error 257, and the six-digit microsecond
 # form is error 241), so the write path rebinds them as native Python values.
 _BINARY_COLUMN_TYPES = frozenset({"binary", "varbinary", "image"})
-_TEMPORAL_COLUMN_TYPES = frozenset(
-    {"datetime", "smalldatetime", "datetime2", "datetimeoffset", "date", "time"}
-)
+_TEMPORAL_COLUMN_TYPES = frozenset({"datetime", "smalldatetime", "datetime2", "date", "time"})
 # pyproj Transformer objects are not documented as thread-safe, and FastAPI
 # runs these sync endpoints in a thread pool, so serialize their use.
 _TRANSFORM_LOCK = threading.Lock()
@@ -273,6 +272,16 @@ _SESSIONS: dict[str, _Session] = {}
 _SESSIONS_LOCK = threading.Lock()
 
 
+def _datetimeoffset_to_str(raw: bytes) -> str:
+    """Decode SQL_SS_TIMESTAMPOFFSET_STRUCT, which pyodbc cannot read natively."""
+    year, month, day, hour, minute, second, nanos, tz_h, tz_m = struct.unpack("<6hI2h", raw)
+    sign = "-" if tz_h < 0 or tz_m < 0 else "+"
+    return (
+        f"{year:04d}-{month:02d}-{day:02d} {hour:02d}:{minute:02d}:{second:02d}."
+        f"{nanos:09d} {sign}{abs(tz_h):02d}:{abs(tz_m):02d}"
+    )
+
+
 def _open_connection(session: _Session) -> Any:
     pyodbc = _import_pyodbc()
     attrs = None
@@ -295,6 +304,7 @@ def _open_connection(session: _Session) -> Any:
             **({"attrs_before": attrs} if attrs is not None else {}),
         )
         conn.timeout = _QUERY_TIMEOUT_S
+        conn.add_output_converter(_SQL_SS_TIMESTAMPOFFSET, _datetimeoffset_to_str)
         return conn
     except Exception as exc:
         raise HTTPException(
@@ -444,7 +454,8 @@ def mssql_connect(request: MssqlConnectRequest) -> dict[str, str]:
                 cur.execute("SELECT 1")
         except Exception as exc:
             raise HTTPException(
-                400, f"Could not connect to SQL Server: {scrub_secrets(str(exc), secret_values)}"
+                400,
+                f"Could not connect to SQL Server: {scrub_secrets(str(exc), session.sensitive())}",
             ) from exc
     sid = secrets.token_urlsafe(32)
     with _SESSIONS_LOCK:
@@ -492,9 +503,15 @@ def _bind_value(value: Any, sql_type: str) -> Any:
             raise HTTPException(400, "Value for date column is not a valid date") from None
     if sql_type == "time":
         try:
-            return datetime.time.fromisoformat(value.removesuffix("Z"))
+            # Validate only: pyodbc sends datetime.time as TIME_STRUCT, which
+            # drops fractional seconds, so bind the string instead.
+            datetime.time.fromisoformat(value.removesuffix("Z"))
+            return value.removesuffix("Z")
         except ValueError:
             raise HTTPException(400, "Value for time column is not a valid time") from None
+    if sql_type == "datetimeoffset":
+        # Read back by _datetimeoffset_to_str in a form SQL Server parses.
+        return value
     if sql_type in _TEMPORAL_COLUMN_TYPES:
         try:
             return datetime.datetime.fromisoformat(

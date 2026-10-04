@@ -104,6 +104,9 @@ def test_token_refreshed_each_connection(monkeypatch):
     calls = []
 
     class Conn:
+        def add_output_converter(self, sql_type, handler):
+            pass
+
         def __setattr__(self, key, value):
             object.__setattr__(self, key, value)
 
@@ -170,6 +173,9 @@ def test_connect_success_returns_only_session_id(monkeypatch):
 
     class Connection:
         timeout = None
+
+        def add_output_converter(self, sql_type, handler):
+            pass
 
         def cursor(self):
             return Cursor()
@@ -252,6 +258,9 @@ class FakeCursor:
 
 
 class FakeConnection:
+    def add_output_converter(self, sql_type, handler):
+        pass
+
     def __init__(self):
         self.closed = False
         self.rolled_back = False
@@ -437,9 +446,12 @@ def test_bind_value_restores_column_types():
         2024, 1, 1, 12, 0, 0, 123456
     )
     assert mssql._bind_value("2024-01-01", "date") == datetime.date(2024, 1, 1)
-    assert mssql._bind_value("12:00:00.5", "time") == datetime.time(12, 0, 0, 500000)
+    assert mssql._bind_value("12:00:00.5", "time") == "12:00:00.5"
     assert mssql._bind_value("2024-01-15T10:30:00Z", "datetime2") == datetime.datetime(
         2024, 1, 15, 10, 30, tzinfo=datetime.timezone.utc
+    )
+    assert mssql._bind_value("2024-01-01 10:00:00.5 +01:00", "datetimeoffset") == (
+        "2024-01-01 10:00:00.5 +01:00"
     )
     assert mssql._bind_value({"a": 1}, "nvarchar") == '{"a": 1}'
     assert mssql._bind_value(5, "int") == 5
@@ -509,14 +521,14 @@ def live_db(monkeypatch):
     cur.execute(
         "CREATE TABLE dbo.geolibre_writeback_test (gid int IDENTITY PRIMARY KEY, "
         "name nvarchar(100) NOT NULL, population int, "
-        "seen datetime2, blob varbinary(8), geom geometry)"
+        "seen datetime2, seen_tz datetimeoffset, at_time time(7), blob varbinary(8), geom geometry)"
     )
     cur.execute(
-        "INSERT INTO dbo.geolibre_writeback_test(name,population,seen,blob,geom) VALUES "
-        "('Knoxville',190000,CAST('2024-01-01T12:00:00.123456' AS datetime2),0x0102,"
+        "INSERT INTO dbo.geolibre_writeback_test(name,population,seen,seen_tz,at_time,blob,geom) VALUES "
+        "('Knoxville',190000,CAST('2024-01-01T12:00:00.123456' AS datetime2),'2024-01-01 12:00:00.5 +01:00','12:00:00.5',0x0102,"
         "geometry::Point(-9342009.589714656,4295201.3456280865,3857)),"
-        "('Second',2,NULL,NULL,geometry::Point(-9000000,4000000,3857)),"
-        "('Third',3,NULL,NULL,geometry::Point(-8000000,3500000,3857))"
+        "('Second',2,NULL,NULL,NULL,NULL,geometry::Point(-9000000,4000000,3857)),"
+        "('Third',3,NULL,NULL,NULL,NULL,geometry::Point(-8000000,3500000,3857))"
     )
     cur.execute(
         "CREATE TABLE dbo.geolibre_writeback_geog (id uniqueidentifier DEFAULT NEWID() "
@@ -690,3 +702,8 @@ def test_geography_with_non_wgs84_srid_is_reprojected():
     assert abs(shapely.from_wkb(wkb).x) > 1000
     back = mssql._wkb_to_geojson(wkb, 3857, "geography")
     assert back["coordinates"] == pytest.approx([-83.9, 35.9], abs=1e-6)
+
+
+def test_datetimeoffset_output_converter_decodes_struct():
+    raw = struct.pack("<6hI2h", 2024, 1, 2, 3, 4, 5, 123456700, -5, -30)
+    assert mssql._datetimeoffset_to_str(raw) == "2024-01-02 03:04:05.123456700 -05:30"

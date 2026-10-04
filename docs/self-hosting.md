@@ -494,7 +494,7 @@ against a private, authenticated, same-origin host:
 - **The sidecar.** If you enable the bundled Python sidecar, keep
   `GEOLIBRE_CONVERSION_ROOTS` pointed at exactly the directory you mounted, and
   leave `GEOLIBRE_POSTGIS_HOSTS` unset unless you need those endpoints.
-  `GEOLIBRE_MSSQL_HOSTS` unset unless SQL Server access is intentionally enabled
+  leave `GEOLIBRE_MSSQL_HOSTS` unset unless SQL Server access is intentionally enabled
   in a derived image with pyodbc and ODBC Driver 18 installed.
 
 ## Reducing outbound requests
