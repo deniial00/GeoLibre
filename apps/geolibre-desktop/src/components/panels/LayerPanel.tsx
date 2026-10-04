@@ -138,7 +138,7 @@ export function LayerPanel({
   );
   const uiProfile = useDesktopSettingsStore((s) => s.desktopSettings.uiProfile);
   // Same visibility rules the Add Data menu applies (profile, Mac App Store,
-  // and the mobile-only postgres rule); the user agent is stable for the
+  // and the mobile-only database rule); the user agent is stable for the
   // session, so evaluate it once.
   const mobile = useMemo(() => isMobile(), []);
   // PMTiles, raster and Zarr are added through their own panels where those
@@ -152,7 +152,7 @@ export function LayerPanel({
         (entry) =>
           isDataSourceVisible(uiProfile, entry.id) &&
           (!["pmtiles", "raster", "zarr"].includes(entry.id) || !controlLayerPanels) &&
-          !(entry.id === "postgres" && mobile) &&
+          !((entry.id === "postgres" || entry.id === "mssql") && mobile) &&
           !masHidesDataSource(entry.id),
       ),
     [uiProfile, mobile, controlLayerPanels],

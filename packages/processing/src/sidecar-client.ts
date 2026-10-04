@@ -1032,6 +1032,175 @@ export async function writePostgisTable(
   }
   return (await res.json()) as WritePostgisTableResult;
 }
+export type MssqlAuthMethod =
+  | "sql"
+  | "windows"
+  | "entra_password"
+  | "entra_sp"
+  | "entra_interactive"
+  | "msi"
+  | "token";
+
+export interface MssqlStatus {
+  available: boolean;
+  message: string;
+  driver: string | null;
+  auth_methods: MssqlAuthMethod[];
+}
+
+export interface MssqlAuth {
+  method: MssqlAuthMethod;
+  username?: string;
+  password?: string;
+  tenant_id?: string;
+  client_id?: string;
+  client_secret?: string;
+  access_token?: string;
+}
+
+export interface ConnectMssqlRequest {
+  server: string;
+  port?: number;
+  database: string;
+  encrypt?: boolean;
+  trust_server_certificate?: boolean;
+  auth: MssqlAuth;
+}
+
+export interface MssqlTableInfo {
+  schema: string;
+  table: string;
+  geometry_column: string;
+  column_type: "geometry" | "geography";
+  srid: number;
+  geometry_type: string;
+  primary_key: string | null;
+}
+
+export interface ReadMssqlTableRequest {
+  session_id: string;
+  schema_name?: string;
+  table: string;
+  geometry_column?: string;
+  excluded_fields?: string[];
+}
+
+export interface ReadMssqlTableResult {
+  geojson: FeatureCollection;
+  schema: string;
+  table: string;
+  geometry_column: string;
+  column_type: "geometry" | "geography";
+  srid: number;
+  primary_key: string | null;
+  feature_count: number;
+}
+
+export interface WriteMssqlTableRequest {
+  session_id: string;
+  schema_name?: string;
+  table: string;
+  geometry_column?: string;
+  geojson: FeatureCollection;
+  baseline_keys?: Array<string | number>;
+  capabilities?: LayerCapabilities;
+}
+
+export type WriteMssqlTableResult = WritePostgisTableResult;
+
+export class MssqlSessionExpiredError extends Error {
+  override readonly name = "MssqlSessionExpiredError";
+}
+
+export async function fetchMssqlStatus(baseUrl = DEFAULT_SIDECAR_URL): Promise<MssqlStatus> {
+  let res: Response;
+  try {
+    res = await sidecarFetch(`${baseUrl}/mssql/status`);
+  } catch (error) {
+    throw sidecarConnectionError(baseUrl, error);
+  }
+  if (!res.ok) {
+    throw new Error(await responseErrorMessage(res, "Could not check SQL Server runtime"));
+  }
+  return (await res.json()) as MssqlStatus;
+}
+
+async function postMssql(
+  baseUrl: string,
+  path: string,
+  body: unknown,
+  fallback: string,
+): Promise<Response> {
+  let res: Response;
+  try {
+    res = await sidecarFetch(`${baseUrl}/mssql/${path}`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body),
+    });
+  } catch (error) {
+    throw sidecarConnectionError(baseUrl, error);
+  }
+  if (res.status === 410) {
+    throw new MssqlSessionExpiredError(
+      await responseErrorMessage(res, "SQL Server session expired"),
+    );
+  }
+  if (!res.ok) {
+    throw new Error(await responseErrorMessage(res, fallback));
+  }
+  return res;
+}
+
+export async function connectMssql(
+  request: ConnectMssqlRequest,
+  baseUrl = DEFAULT_SIDECAR_URL,
+): Promise<{ session_id: string }> {
+  const res = await postMssql(baseUrl, "connect", request, "Could not connect to SQL Server");
+  return (await res.json()) as { session_id: string };
+}
+
+export async function disconnectMssql(
+  sessionId: string,
+  baseUrl = DEFAULT_SIDECAR_URL,
+): Promise<void> {
+  await postMssql(
+    baseUrl,
+    "disconnect",
+    { session_id: sessionId },
+    "Could not disconnect from SQL Server",
+  );
+}
+
+export async function listMssqlTables(
+  sessionId: string,
+  baseUrl = DEFAULT_SIDECAR_URL,
+): Promise<MssqlTableInfo[]> {
+  const res = await postMssql(
+    baseUrl,
+    "tables",
+    { session_id: sessionId },
+    "Could not list SQL Server tables",
+  );
+  const data = (await res.json()) as { tables: MssqlTableInfo[] };
+  return data.tables;
+}
+
+export async function readMssqlTable(
+  request: ReadMssqlTableRequest,
+  baseUrl = DEFAULT_SIDECAR_URL,
+): Promise<ReadMssqlTableResult> {
+  const res = await postMssql(baseUrl, "read", request, "Could not read SQL Server table");
+  return (await res.json()) as ReadMssqlTableResult;
+}
+
+export async function writeMssqlTable(
+  request: WriteMssqlTableRequest,
+  baseUrl = DEFAULT_SIDECAR_URL,
+): Promise<WriteMssqlTableResult> {
+  const res = await postMssql(baseUrl, "write", request, "Could not save edits to SQL Server");
+  return (await res.json()) as WriteMssqlTableResult;
+}
 
 // --- AI segmentation (SamGeo / SAM3) ---------------------------------------
 

@@ -27,6 +27,7 @@ import { OgcVectorTilesSource } from "./add-data/sources/OgcVectorTilesSource";
 import { PhotosSource } from "./add-data/sources/PhotosSource";
 import { PolylineSource } from "./add-data/sources/PolylineSource";
 import { PostgresSource } from "./add-data/sources/PostgresSource";
+import { MssqlSource } from "./add-data/sources/MssqlSource";
 import { VideoSource } from "./add-data/sources/VideoSource";
 import { WfsSource } from "./add-data/sources/WfsSource";
 import { WcsSource } from "./add-data/sources/WcsSource";
@@ -36,6 +37,7 @@ import { WmtsSource } from "./add-data/sources/WmtsSource";
 import { XyzSource } from "./add-data/sources/XyzSource";
 import type { AddDataKind } from "./add-data/types";
 import type { OpenAddDataPostgres } from "./add-data/open-add-data";
+import type { OpenAddDataMssql } from "./add-data/open-add-data";
 import { useMartinConnection } from "./add-data/useMartinConnection";
 
 export type { AddDataKind } from "./add-data/types";
@@ -55,6 +57,8 @@ interface AddDataDialogProps {
    * clicked PostGIS table.
    */
   initialPostgres?: OpenAddDataPostgres;
+  /** Saved SQL Server connection and table to pre-select when opening from Browser. */
+  initialMssql?: OpenAddDataMssql;
   /** Service URL supplied by a browser-extension deep link. */
   initialUrl?: string;
   /**
@@ -81,6 +85,7 @@ function renderSource(
   kind: AddDataKind,
   initialDeckVizKind: string | undefined,
   initialPostgres: OpenAddDataPostgres | undefined,
+  initialMssql: OpenAddDataMssql | undefined,
   initialUrl: string | undefined,
   initialLayer: string | undefined,
   initialStyleUrl: string | undefined,
@@ -143,6 +148,8 @@ function renderSource(
       return <ArcGISSource initialUrl={initialUrl} />;
     case "postgres":
       return <PostgresSource initialPostgres={initialPostgres} />;
+    case "mssql":
+      return <MssqlSource initialMssql={initialMssql} />;
     case "iceberg":
       return <IcebergSource />;
     case "video":
@@ -165,6 +172,7 @@ export function AddDataDialog({
   onOpenChange,
   initialDeckVizKind,
   initialPostgres,
+  initialMssql,
   initialUrl,
   initialLayer,
   initialStyleUrl,
@@ -246,6 +254,7 @@ export function AddDataDialog({
               kind,
               initialDeckVizKind,
               initialPostgres,
+              initialMssql,
               initialUrl,
               initialLayer,
               initialStyleUrl,
