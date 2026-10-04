@@ -132,3 +132,37 @@ test("?plugin= installs nothing when the registry prompt is dismissed", async ({
   await expect(dialog).toBeHidden();
   await expect(page.locator("body[data-e2e-registry-plugin]")).toHaveCount(0);
 });
+
+const REGISTRY_MANIFEST_URL = `${REGISTRY_ORIGIN}/plugins/${REGISTRY_PLUGIN_ID}/plugin.json`;
+
+test("?plugin= activates an installed registry plugin in layout=viewer", async ({ page }) => {
+  await mockRegistryPlugin(page);
+  // An installed plugin is just a recorded manifest URL, as Manage Plugins leaves it.
+  await page.addInitScript((url) => {
+    localStorage.setItem(
+      "geolibre.desktopSettings",
+      JSON.stringify({ uiProfile: { onboarded: true }, pluginManifestUrls: [url] }),
+    );
+  }, REGISTRY_MANIFEST_URL);
+
+  await waitForMap(page, `/?plugin=${REGISTRY_PLUGIN_ID}&layout=viewer`);
+  await expect(page.locator("body[data-e2e-registry-plugin='active']")).toHaveCount(1, {
+    timeout: 60_000,
+  });
+  await expect(page.getByRole("dialog")).toHaveCount(0);
+});
+
+test("?plugin= neither prompts nor installs a registry plugin in layout=viewer", async ({
+  page,
+}) => {
+  await mockRegistryPlugin(page);
+  const warning = page.waitForEvent("console", {
+    predicate: (message) => message.text().includes("layout=viewer never installs plugins"),
+    timeout: 60_000,
+  });
+
+  await waitForMap(page, `/?plugin=${REGISTRY_PLUGIN_ID}&layout=viewer`);
+  await expect(page.getByRole("dialog")).toHaveCount(0);
+  await expect(page.locator("body[data-e2e-registry-plugin]")).toHaveCount(0);
+  await warning;
+});

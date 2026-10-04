@@ -147,9 +147,11 @@ public server, so they only open from the menu, after their one-time notice.
 A plugin from the [plugin registry](#manage-plugins) opens from a link by its
 full registry id, for example `?plugin=openrndt-geolibre`. If it is already
 installed it activates like a built-in one. If not, GeoLibre first asks whether
-to install it, showing the name, author, description, and homepage the registry
-lists, and installs and activates it only after **Trust and load**. The prompt is
-skipped in the read-only `layout=viewer`, which never installs plugins.
+to install it, showing the name, version, author, description, and homepage the
+registry lists, and installs and activates it only after **Trust and load**. In
+the read-only `layout=viewer`, an installed registry plugin still opens, but one
+that is not installed is skipped without a prompt, because the viewer never
+installs plugins.
 
 ## Manage Plugins
 

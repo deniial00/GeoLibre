@@ -110,8 +110,9 @@ function reportActivationFailure(id: string, error: unknown): void {
  * by id. A registry plugin that is already installed is activated like a
  * built-in one; one that is not is never loaded silently: it is returned in
  * `pending` for a trust prompt, and only "Trust and load" installs and
- * activates it. Registry plugins are skipped in the read-only viewer, which
- * has no place to prompt.
+ * activates it. In the read-only viewer an installed registry plugin still
+ * activates, but one that is not installed is skipped with a warning: the
+ * viewer has no place to prompt and never installs plugins.
  *
  * @param options - The map engine, the viewer guard, and the readiness signals.
  * @returns The registry plugins awaiting the user's decision.
@@ -181,14 +182,6 @@ export function usePluginDeepLink({
     async function resolveRegistryNames(names: string[]): Promise<void> {
       if (names.length === 0) return;
       let unknown = names;
-      if (viewer) {
-        // Registry plugins are never installed here, so a name that might be one
-        // is not reported as unknown.
-        console.warn(
-          `[GeoLibre] Ignoring ${names.join(", ")} in the ?plugin= link: only built-in plugins open in layout=viewer.`,
-        );
-        return;
-      }
       try {
         const registry = await fetchPluginRegistry();
         const matches = matchRegistryDeepLinkNames(names, registry.entries);
@@ -222,6 +215,11 @@ export function usePluginDeepLink({
             // The id belongs to a plugin this entry would not replace.
             console.warn(
               `[GeoLibre] Ignoring "${entry.id}" in the ?plugin= link: a plugin with that id is already loaded.`,
+            );
+          } else if (viewer) {
+            // The read-only viewer has nowhere to ask, so it never installs plugins.
+            console.warn(
+              `[GeoLibre] Ignoring "${entry.id}" in the ?plugin= link: it is not installed, and layout=viewer never installs plugins.`,
             );
           } else if (!satisfiesMinVersion(__GEOLIBRE_VERSION__, entry.minGeoLibreVersion)) {
             console.warn(

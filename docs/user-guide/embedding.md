@@ -115,7 +115,9 @@ https://web.geolibre.app/?url=https://share.geolibre.app/giswqs/3d-tiles.geolibr
 
 A plugin from the official plugin registry works too, by its registry id
 (`?plugin=openrndt-geolibre`). One that is not installed yet is never loaded
-silently: the app asks first and installs it only after **Trust and load**.
+silently: the app asks first and installs it only after **Trust and load**. In
+`layout=viewer` only an already installed registry plugin opens; the viewer
+never prompts or installs.
 
 Unknown names are ignored. A plugin that does not support the current renderer
 does not activate. Directions and reverse geocoding send what you click to a
