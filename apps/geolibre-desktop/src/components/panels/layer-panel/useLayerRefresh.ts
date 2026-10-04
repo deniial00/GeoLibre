@@ -30,12 +30,8 @@ import {
   type LayerRefreshTimer,
 } from "./layer-panel-utils";
 import { readMssqlTable } from "@geolibre/processing";
-import { withMssqlSession } from "../../../lib/mssql-sessions";
-import {
-  clearMssqlWritebackRefresh,
-  reconcileMssqlWritebackMetadata,
-  requireMssqlWritebackRefresh,
-} from "../../../lib/mssql-writeback";
+import { MssqlReconnectRequiredError, withMssqlSession } from "../../../lib/mssql-sessions";
+import { reconcileMssqlWritebackMetadata } from "../../../lib/mssql-writeback";
 
 interface UseLayerRefreshOptions {
   /** The project's layers, in store order. */
@@ -59,28 +55,12 @@ export function useLayerRefresh({ layers, isCollapsed }: UseLayerRefreshOptions)
   const projectGeneration = useAppStore((s) => s.projectGeneration);
   const updateLayer = useAppStore((s) => s.updateLayer);
   const [refreshStatuses, setRefreshStatuses] = useState<Record<string, LayerRefreshStatus>>({});
-  const [mssqlRefreshRequiredLayerIds, setMssqlRefreshRequiredLayerIds] = useState<
-    ReadonlySet<string>
-  >(() => new Set());
-  const markMssqlRefreshRequired = useCallback((layerId: string) => {
-    setMssqlRefreshRequiredLayerIds((current) => requireMssqlWritebackRefresh(current, layerId));
-  }, []);
-  const clearMssqlRefreshRequired = useCallback((layerId: string) => {
-    setMssqlRefreshRequiredLayerIds((current) => clearMssqlWritebackRefresh(current, layerId));
-  }, []);
-  const mssqlRecoveryGenerationRef = useRef(projectGeneration);
-  useEffect(() => {
-    const generationChanged = mssqlRecoveryGenerationRef.current !== projectGeneration;
-    mssqlRecoveryGenerationRef.current = projectGeneration;
-    const currentLayerIds = new Set(layers.map((layer) => layer.id));
-    setMssqlRefreshRequiredLayerIds((current) => {
-      const next = generationChanged
-        ? new Set<string>()
-        : new Set([...current].filter((id) => currentLayerIds.has(id)));
-      if (next.size === current.size && [...current].every((id) => next.has(id))) return current;
-      return next;
-    });
-  }, [layers, projectGeneration]);
+  const markMssqlRefreshRequired = useCallback(
+    (layerId: string) => {
+      updateLayer(layerId, { mssqlWritebackPending: true });
+    },
+    [updateLayer],
+  );
   // "Last synced <relative time>" is derived from the clock, not from store
   // state, so without a tick the label would keep reading "a few seconds ago"
   // until an unrelated re-render happened to recompute it. Tick once a minute
@@ -137,7 +117,7 @@ export function useLayerRefresh({ layers, isCollapsed }: UseLayerRefreshOptions)
     async (layer: GeoLibreLayer, automatic = false) => {
       const requestGeneration = projectGeneration;
       const requestSourceUrl = layer.source.url;
-      const mssqlRecoveryRefresh = mssqlRefreshRequiredLayerIds.has(layer.id);
+      const mssqlRecoveryRefresh = layer.mssqlWritebackPending === true;
       const getCurrentRequestLayer = (): GeoLibreLayer | undefined => {
         const state = useAppStore.getState();
         if (state.projectGeneration !== requestGeneration) return undefined;
@@ -198,9 +178,13 @@ export function useLayerRefresh({ layers, isCollapsed }: UseLayerRefreshOptions)
           if (!latest) return;
           updateLayer(layer.id, {
             geojson: refreshed.geojson,
+            mssqlWritebackPending: undefined,
+            ...setLayerConnectionResult(latest, {
+              syncedAt: new Date().toISOString(),
+              error: null,
+            }),
             metadata: reconcileMssqlWritebackMetadata(latest.metadata, refreshed),
           });
-          clearMssqlRefreshRequired(layer.id);
           setRefreshStatuses((current) => ({
             ...current,
             [layer.id]: {
@@ -412,7 +396,12 @@ export function useLayerRefresh({ layers, isCollapsed }: UseLayerRefreshOptions)
       } catch (error) {
         const latest = getCurrentRequestLayer();
         if (!latest) return;
-        const message = error instanceof Error ? error.message : t("layers.refreshError");
+        const message =
+          error instanceof MssqlReconnectRequiredError
+            ? t("layers.saveEditsMssqlNoConnection")
+            : error instanceof Error
+              ? error.message
+              : t("layers.refreshError");
         updateLayer(
           layer.id,
           getRefreshFailureLayerPatch(
@@ -434,15 +423,7 @@ export function useLayerRefresh({ layers, isCollapsed }: UseLayerRefreshOptions)
         refreshingLayerIdsRef.current.delete(requestKey);
       }
     },
-    [
-      clearMssqlRefreshRequired,
-      clearRefreshStatusTimer,
-      mssqlRefreshRequiredLayerIds,
-      projectGeneration,
-      scheduleStatusClear,
-      t,
-      updateLayer,
-    ],
+    [clearRefreshStatusTimer, projectGeneration, scheduleStatusClear, t, updateLayer],
   );
 
   // Read through a ref inside interval callbacks so long-lived timers never
@@ -740,9 +721,7 @@ export function useLayerRefresh({ layers, isCollapsed }: UseLayerRefreshOptions)
     setRefreshInterval,
     setRefreshFailurePolicy,
     toggleWatchLayer,
-    mssqlRefreshRequiredLayerIds,
     markMssqlRefreshRequired,
-    clearMssqlRefreshRequired,
   };
 }
 

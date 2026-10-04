@@ -169,6 +169,10 @@ kepler.gl, see the [Comparison](comparison.md).
     - Add results to the map or export them
     - An in-browser PostGIS SQL engine via PGlite and an Apache Sedona spatial SQL engine
 - Multiple DuckDB SQL query-result layers with identify, selection, and attribute table support
+- **SQL Server write-back** in GeoLibre Desktop: save attribute and geometry edits, inserts, and deletions to the loaded table, scoped by its read baseline. Deleting every loaded feature preserves rows added outside that baseline.
+    - Saves for one layer cannot overlap. A committed write with a failed reread, or a write whose result cannot be confirmed, blocks another save until manual Refresh restores database-assigned keys and the baseline. This recovery requirement survives project save and reopen.
+    - Failed recovery reads retain local features, including when the saved refresh-failure policy says to clear them. A layer without a read baseline must be loaded again before saving.
+    - Saved project metadata is not authenticated write authority: review the connection, table, and edits before saving a shared or hand-edited project; database permissions remain the authorization boundary.
 - **Apache Iceberg** vector layers, read in-browser through DuckDB's `iceberg` and `spatial` extensions
     - Point at a table's metadata location, or attach an Iceberg REST catalog and pick a table from it — a source exposing a single table selects it automatically
     - Selecting a table reports its true row count (from the manifest metadata, without scanning) before anything is read, and the load is capped by a row limit so a table far larger than the browser can hold still opens as a usable subset

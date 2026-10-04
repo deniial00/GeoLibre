@@ -337,6 +337,14 @@ synchronization and `lastError` the most recent failure (cleared on the next
 success). `onFailure` decides whether a failed synchronization retains the last
 good data (`"keep-last"`, the default) or discards it (`"clear"`).
 
+SQL Server layers may also carry top-level `mssqlWritebackPending: true` when
+a write committed but its reread failed, or the write outcome could not be
+confirmed. This flag survives project save/load and blocks another Save Edits
+until a successful manual Refresh restores generated keys and the read baseline.
+Recovery failure preserves the layer's features even with `onFailure: "clear"`.
+Successful recovery removes the flag; the prior baseline metadata remains
+unchanged until that read succeeds.
+
 For local-file vector layers on the desktop app, `metadata.watch` can persist a
 "watch this file for changes" toggle. When enabled, the desktop app registers a
 filesystem watcher that reloads the layer's features from `sourcePath` whenever

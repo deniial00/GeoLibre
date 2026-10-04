@@ -1268,6 +1268,8 @@ export interface GeoLibreLayer {
   metadata: Record<string, unknown>;
   beforeId?: string;
   geojson?: FeatureCollection;
+  /** A SQL Server write needs a successful table reread before it may be submitted again. */
+  mssqlWritebackPending?: boolean;
   /**
    * Explicit capability set for the layer (query, create, update, delete, export).
    * Unset capabilities default to the inferred behavior for the layer's source kind.

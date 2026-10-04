@@ -102,7 +102,6 @@ import {
   isMssqlEditableLayer,
   isPostgisEditableLayer,
 } from "./layer-panel-utils";
-import { canSaveMssqlWriteback } from "../../../lib/mssql-writeback";
 import type { LayerActions } from "./useLayerActions";
 import type { LayerRefresh } from "./useLayerRefresh";
 import type { TimeSliderBinding } from "./useTimeSliderBinding";
@@ -138,7 +137,6 @@ export interface LayerActionsMenuShared {
   onOpenRasterStylePanel: () => void;
   onOpenStylePanel?: () => void;
   onOpenRasterSubset: (layer: GeoLibreLayer) => void;
-  mssqlRefreshRequiredLayerIds: ReadonlySet<string>;
 }
 
 interface LayerActionsMenuItemsProps {
@@ -201,7 +199,6 @@ export function LayerActionsMenuItems({
     onOpenRasterStylePanel,
     onOpenStylePanel,
     onOpenRasterSubset,
-    mssqlRefreshRequiredLayerIds,
   } = shared;
   const {
     quickBufferPresets,
@@ -339,12 +336,11 @@ export function LayerActionsMenuItems({
   // styled there; offer a shortcut to reopen that panel since it is
   // dismissed (and its on-map icon removed) when closed.
   const canEditRasterStyle = layer.metadata.sourceKind === RASTER_SOURCE_KIND;
-  const canRefresh = isRefreshableLayer(layer, mssqlRefreshRequiredLayerIds.has(layer.id));
+  const canRefresh = isRefreshableLayer(layer);
   // Iceberg layers refresh only on demand: scanning a table that
   // large on a timer is never what the user meant, so the interval
   // settings are unavailable even though Refresh is not.
-  const canAutoRefresh =
-    canRefresh && supportsAutoRefresh(layer, mssqlRefreshRequiredLayerIds.has(layer.id));
+  const canAutoRefresh = canRefresh && supportsAutoRefresh(layer);
   // Emptying Quick Filter answers narrows a view; discarding the
   // authored expression changes the project. A read-only
   // collaborator may do the first but not the second, so the row's
@@ -1012,12 +1008,10 @@ export function LayerActionsMenuItems({
           disabled={
             geometryEditActive ||
             !layerEditable ||
-            (isMssqlEditableLayer(layer) &&
-              !canSaveMssqlWriteback(layer.id, mssqlRefreshRequiredLayerIds))
+            (isMssqlEditableLayer(layer) && layer.mssqlWritebackPending === true)
           }
           title={
-            isMssqlEditableLayer(layer) &&
-            !canSaveMssqlWriteback(layer.id, mssqlRefreshRequiredLayerIds)
+            isMssqlEditableLayer(layer) && layer.mssqlWritebackPending === true
               ? t("layers.saveEditsMssqlRefreshRequired")
               : undefined
           }

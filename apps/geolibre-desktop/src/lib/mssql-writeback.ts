@@ -7,37 +7,11 @@ export interface RefreshedMssqlTable {
 
 export type MssqlWritebackOutcome<TWrite> =
   | { kind: "blocked" }
+  | { kind: "stale" }
+  | { kind: "missing-baseline" }
+  | { kind: "write-failed"; error: unknown }
   | { kind: "refresh-failed"; writeResult: TWrite }
   | { kind: "reconciled"; writeResult: TWrite; refreshed: RefreshedMssqlTable };
-
-/** Whether a SQL Server layer may save without replaying a committed insert. */
-export function canSaveMssqlWriteback(
-  layerId: string,
-  refreshRequiredLayerIds: ReadonlySet<string>,
-): boolean {
-  return !refreshRequiredLayerIds.has(layerId);
-}
-
-/** Track a committed write whose follow-up table read failed, without changing layer metadata. */
-export function requireMssqlWritebackRefresh(
-  current: ReadonlySet<string>,
-  layerId: string,
-): ReadonlySet<string> {
-  const next = new Set(current);
-  next.add(layerId);
-  return next;
-}
-
-/** Release the save guard only after a successful table reread. */
-export function clearMssqlWritebackRefresh(
-  current: ReadonlySet<string>,
-  layerId: string,
-): ReadonlySet<string> {
-  if (!current.has(layerId)) return current;
-  const next = new Set(current);
-  next.delete(layerId);
-  return next;
-}
 
 /** Reconcile a successful table read into the layer's current metadata. */
 export function reconcileMssqlWritebackMetadata(
@@ -53,18 +27,43 @@ export function reconcileMssqlWritebackMetadata(
   };
 }
 
-/** Write once, then reconcile generated database keys before another save is allowed. */
+/** Write once per layer, then reconcile database keys only for the originating project. */
 export async function writeMssqlAndRefresh<TWrite>(
-  refreshRequired: boolean,
+  request: {
+    layerId: string;
+    inFlightLayerIds: Set<string>;
+    refreshRequired: boolean;
+    baselineKeys: ReadonlyArray<string | number> | undefined;
+    isCurrent: () => boolean;
+  },
   write: () => Promise<TWrite>,
   refresh: () => Promise<RefreshedMssqlTable>,
 ): Promise<MssqlWritebackOutcome<TWrite>> {
-  if (refreshRequired) return { kind: "blocked" };
+  if (request.refreshRequired || request.inFlightLayerIds.has(request.layerId)) {
+    return { kind: "blocked" };
+  }
+  if (!request.isCurrent()) return { kind: "stale" };
+  if (request.baselineKeys === undefined) return { kind: "missing-baseline" };
 
-  const writeResult = await write();
+  request.inFlightLayerIds.add(request.layerId);
   try {
-    return { kind: "reconciled", writeResult, refreshed: await refresh() };
-  } catch {
-    return { kind: "refresh-failed", writeResult };
+    let writeResult: TWrite;
+    try {
+      writeResult = await write();
+    } catch (error) {
+      if (!request.isCurrent()) return { kind: "stale" };
+      return { kind: "write-failed", error };
+    }
+    if (!request.isCurrent()) return { kind: "stale" };
+    try {
+      const refreshed = await refresh();
+      if (!request.isCurrent()) return { kind: "stale" };
+      return { kind: "reconciled", writeResult, refreshed };
+    } catch {
+      if (!request.isCurrent()) return { kind: "stale" };
+      return { kind: "refresh-failed", writeResult };
+    }
+  } finally {
+    request.inFlightLayerIds.delete(request.layerId);
   }
 }

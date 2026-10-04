@@ -84,7 +84,6 @@ import {
   withMssqlSession,
 } from "../../../lib/mssql-sessions";
 import {
-  canSaveMssqlWriteback,
   reconcileMssqlWritebackMetadata,
   writeMssqlAndRefresh,
 } from "../../../lib/mssql-writeback";
@@ -104,7 +103,6 @@ interface UseLayerActionsOptions {
   setRefreshStatuses: Dispatch<SetStateAction<Record<string, LayerRefreshStatus>>>;
   clearRefreshStatusTimer: (layerId: string) => void;
   scheduleStatusClear: (layerId: string) => void;
-  mssqlRefreshRequiredLayerIds: ReadonlySet<string>;
   markMssqlRefreshRequired: (layerId: string) => void;
   isPluginActive: PluginRegistry["isActive"];
   togglePlugin: PluginRegistry["toggle"];
@@ -125,7 +123,6 @@ export function useLayerActions({
   setRefreshStatuses,
   clearRefreshStatusTimer,
   scheduleStatusClear,
-  mssqlRefreshRequiredLayerIds,
   markMssqlRefreshRequired,
   isPluginActive,
   togglePlugin,
@@ -141,6 +138,7 @@ export function useLayerActions({
   // Layer ids with a Save to My Data in flight, so a repeat click during the
   // vector-control materialize cannot create a duplicate library entry.
   const savingToLibraryIdsRef = useRef(new Set<string>());
+  const savingMssqlEditsIdsRef = useRef(new Set<string>());
 
   // Quick analysis (#1523): run an existing vector tool over a whole layer from
   // its actions menu, with defaults filled in. No new algorithms — each entry
@@ -772,11 +770,12 @@ export function useLayerActions({
   const handleSaveEditsToSource = useCallback(
     async (clickedLayer: GeoLibreLayer) => {
       if (!canEditLayer(clickedLayer.id)) return;
+      const requestProjectGeneration = useAppStore.getState().projectGeneration;
       const currentLayer = useAppStore.getState().layers.find((l) => l.id === clickedLayer.id);
       if (
         currentLayer &&
         isMssqlEditableLayer(currentLayer) &&
-        !canSaveMssqlWriteback(clickedLayer.id, mssqlRefreshRequiredLayerIds)
+        currentLayer.mssqlWritebackPending === true
       ) {
         return;
       }
@@ -787,6 +786,19 @@ export function useLayerActions({
       // Captured once, from the click-time layer, before any await: retries and
       // store updates during the round trip must not change which rows may be deleted.
       const mssqlBaseline = isMssql ? mssqlBaselineKeys(layer) : undefined;
+      const isCurrentMssqlRequest = () => {
+        const state = useAppStore.getState();
+        const current = state.layers.find((candidate) => candidate.id === layer.id);
+        return (
+          state.projectGeneration === requestProjectGeneration &&
+          current !== undefined &&
+          current.metadata.sourceKind === layer.metadata.sourceKind &&
+          current.metadata.mssqlConnectionId === layer.metadata.mssqlConnectionId &&
+          current.metadata.mssqlSchema === layer.metadata.mssqlSchema &&
+          current.metadata.mssqlTable === layer.metadata.mssqlTable &&
+          current.metadata.mssqlGeometryColumn === layer.metadata.mssqlGeometryColumn
+        );
+      };
       const isPostgis = isPostgisEditableLayer(layer);
       const path = typeof layer.sourcePath === "string" ? layer.sourcePath.trim() : "";
       if (!isMssql && !isPostgis && !isArcGISWritableLayer(layer) && !path) return;
@@ -834,7 +846,15 @@ export function useLayerActions({
               ? layer.metadata.mssqlGeometryColumn
               : undefined;
           const outcome = await writeMssqlAndRefresh(
-            mssqlRefreshRequiredLayerIds.has(layer.id),
+            {
+              layerId: layer.id,
+              inFlightLayerIds: savingMssqlEditsIdsRef.current,
+              refreshRequired:
+                useAppStore.getState().layers.find((current) => current.id === layer.id)
+                  ?.mssqlWritebackPending === true,
+              baselineKeys: mssqlBaseline,
+              isCurrent: isCurrentMssqlRequest,
+            },
             () =>
               withMssqlSession(connectionId, (sessionId) =>
                 writeMssqlTable({
@@ -862,7 +882,38 @@ export function useLayerActions({
                 }),
               ),
           );
-          if (outcome.kind === "blocked") return;
+          if (!isCurrentMssqlRequest()) return;
+          if (outcome.kind === "blocked" || outcome.kind === "stale") return;
+          if (outcome.kind === "missing-baseline") {
+            setRefreshStatuses((current) => ({
+              ...current,
+              [layer.id]: {
+                type: "error",
+                message: t("layers.saveEditsMssqlMissingBaseline"),
+              },
+            }));
+            scheduleStatusClear(layer.id);
+            return;
+          }
+          if (outcome.kind === "write-failed") {
+            if (outcome.error instanceof MssqlReconnectRequiredError) throw outcome.error;
+            // A rejected response can follow a committed transaction. Reread before retrying.
+            markMssqlRefreshRequired(layer.id);
+            setRefreshStatuses((current) => ({
+              ...current,
+              [layer.id]: {
+                type: "error",
+                message: t("layers.saveEditsMssqlWriteUncertain", {
+                  error:
+                    outcome.error instanceof Error
+                      ? outcome.error.message
+                      : t("layers.saveEditsError"),
+                }),
+              },
+            }));
+            scheduleStatusClear(layer.id);
+            return;
+          }
           if (outcome.kind === "refresh-failed") {
             markMssqlRefreshRequired(layer.id);
             setRefreshStatuses((current) => ({
@@ -1013,6 +1064,7 @@ export function useLayerActions({
         }));
         scheduleStatusClear(layer.id);
       } catch (error) {
+        if (isMssql && !isCurrentMssqlRequest()) return;
         const message =
           error instanceof MssqlReconnectRequiredError
             ? t("layers.saveEditsMssqlNoConnection")
@@ -1032,7 +1084,6 @@ export function useLayerActions({
       commitTableDrafts,
       mapControllerRef,
       markMssqlRefreshRequired,
-      mssqlRefreshRequiredLayerIds,
       scheduleStatusClear,
       setRefreshStatuses,
       t,

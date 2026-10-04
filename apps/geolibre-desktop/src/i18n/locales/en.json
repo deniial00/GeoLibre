@@ -8107,6 +8107,8 @@
     "saveEditsMssqlRefreshWarning": "Edits were saved to the table, but refreshing the layer failed. Use Refresh before saving again, or new features may be inserted twice.",
     "saveEditsMssqlNoConnection": "No SQL Server connection is available for this layer. Reconnect in Add Data > SQL Server, then try again.",
     "saveEditsMssqlRefreshRequired": "Refresh the layer successfully before saving edits again.",
+    "saveEditsMssqlMissingBaseline": "This layer has no table-read baseline. Load the table again from Add Data > SQL Server before saving edits.",
+    "saveEditsMssqlWriteUncertain": "The save outcome could not be confirmed. Use Refresh before saving again. {{error}}",
     "typeBasemap": "basemap",
     "searchPlaces": "Search places",
     "searchPlacesPlaceholder": "Search layers, places, lat, lon, or H3 cell...",
