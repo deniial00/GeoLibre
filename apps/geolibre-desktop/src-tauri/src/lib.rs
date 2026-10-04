@@ -1216,11 +1216,12 @@ fn read_admin_profile_file(path: &Path) -> Result<Option<String>, String> {
         .map_err(|error| format!("Could not read admin profile: {error}"))
 }
 
-/// Read the optional admin UI-profile file (`<app_config_dir>/admin-profile.json`).
+/// Read the optional legacy admin UI-profile file
+/// (`<app_config_dir>/admin-profile.json`), still honoured when the primary
+/// `deployment.json` policy has no non-empty `interface` section.
 ///
-/// Returns `Ok(None)` when the file is absent so a missing file is not an error;
-/// administrators drop one in to pre-configure and optionally lock the UI profile
-/// for a deployment. See `docs/ui-profiles.md`.
+/// Returns `Ok(None)` when the file is absent so a missing file is not an error.
+/// See `docs/ui-profiles.md`.
 #[tauri::command]
 fn read_admin_profile(app: tauri::AppHandle) -> Result<Option<String>, String> {
     let config_dir = app

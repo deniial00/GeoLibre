@@ -344,9 +344,9 @@ kepler.gl, see the [Comparison](comparison.md).
 - DGGS plugins under Plugins → DGGS for three more discrete global grid systems — **A5**, **DGGRID**, and **DGGAL** — each rendering its grid over the current view at a chosen or automatic resolution with a cell-count guard, identifying a cell to read its id, parents, children, neighbors, and center, and adding the grid or the selection to the map as a layer or exporting it as GeoJSON
 - Atmosphere Effects plugin that renders a deep-space backdrop, parallax starfield, comets, and an atmospheric halo around the globe at low zoom (technique adapted from [Leonel Dias](https://leoneljdias.github.io/posts/globe-atmosphere-halo-comets/)), with a Spinning Globe panel and customizable atmosphere halo and deep-space colors
 - Directions plugin for interactive routing via [maplibre-gl-directions](https://github.com/maplibre/maplibre-gl-directions): click the map to add waypoints, drag to reposition, and click a waypoint to remove it (uses the public OSRM demo server, driving only)
-- Install external plugins from an uploaded zip on both desktop and web, plus external plugin zip loading from the app data plugins directory and local development plugin directories, with the Manage Plugins list sorted alphabetically
-- Bundled drop-in plugins under `public/plugins/<id>/` that bake into both the web and desktop builds and load automatically with no manifest URL
-
+- Install external plugins from uploaded zips and local development directories,
+  subject to the client deployment plugin policy. Bundled drop-ins load
+  automatically unless their ids are blocked by that policy.
 See the [Plugin API](plugin-api.md) to build your own.
 
 ## Deployment and platform builds
@@ -365,7 +365,16 @@ See the [Plugin API](plugin-api.md) to build your own.
     - An activity log: a project owner can read who opened and edited a shared project, and a session host can download the session log, bounded in both entry count and stored bytes and read through a bearer token rather than a URL query
     - `GEOLIBRE_SHARE_URL` and `GEOLIBRE_COLLAB_URL` repoint a published web image at those servers at container runtime instead of requiring a rebuilt fork; `off` removes Share and the Project Gallery from the UI entirely, and a malformed value stops the container at boot rather than falling back to the public hosted service
 - Optional Clerk access gate for a hosted deployment that needs individual sign-in, with an optional waitlist screen, loaded on demand and kept out of the default PWA precache. The gate is decided by the build target rather than by a client-controlled query parameter, so public, native, and embedded builds stay unchanged. See [Getting started](getting-started.md)
-- `VITE_GEOLIBRE_CAPABILITIES` build for a kiosk, exhibit terminal, or classroom instance: naming a subset of `project:edit`, `data:add`, `processing:run`, `export:data`, `plugins:install`, and `settings:manage` (or `none`) withholds the rest from every interface surface at once — the toolbar menus, the command palette and cheat sheet, keyboard shortcuts including undo/redo, drag-and-drop, and the embed API — rather than one menu item at a time. Unset grants everything, so existing deployments are unchanged, and the parse fails closed so an unrecognized value grants nothing. It removes affordances rather than restricting the server, so it complements the server-side protections instead of replacing them. See [Deployment capabilities](deployment-capabilities.md)
+- Runtime deployment policy is the recommended way to restrict the six
+  capabilities (`project:edit`, `data:add`, `processing:run`, `export:data`,
+  `plugins:install`, `settings:manage`). The legacy
+  `VITE_GEOLIBRE_CAPABILITIES` build input remains honoured as a client fallback.
+  These gates limit interface and embed commands; only the bundled Docker
+  nginx deployment enforces selected sidecar routes. Browser WASM, desktop
+  processing, separate sidecars, and plugin execution are not protected.
+  See [Deployment Policy](deployment-policy.md),
+  [Deployment Capabilities](deployment-capabilities.md), and
+  [container route enforcement](self-hosting.md#container-policy-enforcement).
 - `GEOLIBRE_NO_EXTERNAL_CDN=1` build for deployments that cannot load from untrusted third-party hosts: it strips the GeoLibre-controlled CDN references, vendors the PGlite and CereusDB engines into the build rather than dropping them, and makes the few features that genuinely need a remote host (GDAL export, ONNX object detection and Segment Everything, story map HTML export, Pyodide without a configured mirror) report that up front instead of failing at the end of a run. See [Self-hosting](self-hosting.md)
 - Versioned `postMessage` API for a host page that frames the app. See [Talking to the map at runtime](user-guide/embedding.md#talking-to-the-map-at-runtime)
     - **Commands**: load a project, move the camera, highlight features, open a processing tool, toggle and list layers, apply filters, read the viewport, add a layer, and export the map as a PNG at runtime

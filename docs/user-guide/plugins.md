@@ -148,10 +148,13 @@ Directions and reverse geocoding are not listed: they send what you click to a
 public server, so they only open from the menu, after their one-time notice.
 A plugin from the [plugin registry](#manage-plugins) opens from a link by its
 full registry id, for example `?plugin=openrndt-geolibre`. If it is already
-installed it activates like a built-in one. If not, GeoLibre first asks whether
-to install it, showing the name, author, description, and homepage the registry
-lists, and installs and activates it only after **Trust and load**. The prompt is
-skipped in the read-only `layout=viewer`, which never installs plugins.
+installed it activates like a built-in one. If not, GeoLibre may prompt to
+trust a compatible registry entry, then installs and activates it only when
+the current deployment plugin policy permits loading. Trust confirmation does
+not bypass policy; a denied plugin will not load or activate. This registry-ID
+prompt is distinct from project manifest URL trust, which is suppressed by
+`sideload: false`. Permitted registry entries remain eligible with sideload
+disabled. See [Plugin policy](../deployment-policy.md#plugin-precedence).
 
 ## Manage Plugins
 
@@ -167,7 +170,7 @@ Open **Settings → Manage Plugins** to browse the marketplace. The dialog is mo
 Compatibility is checked against each entry's `minGeoLibreVersion`, so incompatible plugins are flagged rather than installed.
 
 !!! note "Trust model"
-    The registry is a curated allowlist, manifests require HTTPS (or HTTP on localhost, 127.0.0.1, or `[::1]` for development), and every install requires explicit consent, because plugins run as trusted code. The curated registry and the install confirmation are the primary safeguards.
+    The registry is a curated source, manifests require HTTPS (or HTTP on localhost, 127.0.0.1, or `[::1]` for development), and installs require explicit consent. Deployment plugin policy also governs whether external plugins load; trust confirmation does not bypass it. This client policy is bypassable and provides neither signing nor sandboxing.
 
 ## Where plugins come from
 
