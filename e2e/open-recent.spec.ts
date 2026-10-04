@@ -4,7 +4,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { dropGeoJson, layerRow, readFixture, waitForMap } from "./helpers";
 
-test("reopens a project saved on the web from Open Recent via the file picker", async ({ page }) => {
+test("reopens a project saved on the web from Open Recent via the file picker", async ({
+  page,
+}) => {
   await page.addInitScript(() => {
     delete (window as unknown as Record<string, unknown>).showSaveFilePicker;
     delete (window as unknown as Record<string, unknown>).showOpenFilePicker;
