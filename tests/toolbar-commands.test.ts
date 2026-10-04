@@ -78,6 +78,7 @@ const FULL_REGISTRY_IDS = [
   "add.video",
   "add.deckgl-viz",
   "add.postgres",
+  "add.mssql",
   "add.iceberg",
   "add.stac",
   "add.geoparquet",

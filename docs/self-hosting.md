@@ -149,6 +149,7 @@ Settings that matter for a private deployment:
 | `GEOLIBRE_AUTH0_DOMAIN` / `GEOLIBRE_AUTH0_CLIENT_ID` | unset, or both, if you use Auth0 instead of Clerk | The same sign-in gate backed by Auth0 Universal Login. Both are required together, and the container refuses to start if Clerk is configured as well — pick one provider. |
 | `GEOLIBRE_CONVERSION_ROOTS` | `/data` (the image default) | Confines every sidecar read and write to the mounted directory. |
 | `GEOLIBRE_POSTGIS_HOSTS` | unset unless needed | The sidecar's PostGIS endpoints refuse every destination until this names the allowed databases, so a caller cannot aim them at hosts only the container can reach. |
+| `GEOLIBRE_MSSQL_HOSTS` | unset unless needed | Enables SQL Server endpoints only for the listed hosts/IPs and optional ports. Requires a derived image with the `mssql` extra and separately installed ODBC Driver 18; named instances require a host-only entry. |
 | `GEOLIBRE_DISABLE_SIDECAR` | `1` if you do not need it | Skips uvicorn regardless of capabilities; every `/sidecar/` request returns HTTP 403 with an `application/json` detail response. |
 | `GEOLIBRE_EMBED_ORIGINS` | unset, or the exact host page origin | Off by default, so a framed deployment cannot be driven by whoever frames it. |
 | `GEOLIBRE_NO_EXTERNAL_CDN` (build arg) | `1` for restricted deployments | Strips GeoLibre's own references to external CDNs (`unpkg.com`, `cdn.jsdelivr.net`) from the build output. Features whose assets are only available from a CDN are disabled or degraded: storymap HTML export, built-in object detection models, ONNX WASM, 3D Tiles Draco/KTX2 decoders, and gdal3.js export. Pyodide is not hard-disabled — the flag drops only its default index URL, so setting `VITE_PYODIDE_INDEX_URL` to an approved mirror keeps it working. Also forces `GEOLIBRE_PGLITE_CDN=0`, `GEOLIBRE_CEREUS_CDN=0`, `GEOLIBRE_GDAL_CDN=0`, and `GEOLIBRE_DUCKDB_WASM_CDN=0` — so PGlite/PostGIS, CereusDB, and DuckDB-WASM stay **available**, vendored into the build under `/assets/` (at a larger build size) rather than fetched. Note that some third-party packages (DuckDB-WASM, loaders.gl, maplibre-gl-3d-tiles) carry their own internal CDN URLs that this flag cannot remove; see [architecture.md](architecture.md) for the details. Intended for deployments that cannot reference untrusted external CDNs (e.g. enterprise environments with strict CSP requirements). |
@@ -482,6 +483,8 @@ against a private, authenticated, same-origin host:
 - **The sidecar.** If you enable the bundled Python sidecar, keep
   `GEOLIBRE_CONVERSION_ROOTS` pointed at exactly the directory you mounted, and
   leave `GEOLIBRE_POSTGIS_HOSTS` unset unless you need those endpoints.
+  `GEOLIBRE_MSSQL_HOSTS` unset unless SQL Server access is intentionally enabled
+  in a derived image with pyodbc and ODBC Driver 18 installed.
 
 ## Reducing outbound requests
 
@@ -509,8 +512,8 @@ the public internet:
 - [ ] One TLS-terminating reverse proxy with your SSO layer in front of both.
 - [ ] `GEOLIBRE_SHARE_URL=off` (or your own server) so nothing can be published
       externally by accident.
-- [ ] `GEOLIBRE_CONVERSION_ROOTS` confined, `GEOLIBRE_POSTGIS_HOSTS` unset unless
-      required, sidecar disabled if unused.
+- [ ] `GEOLIBRE_CONVERSION_ROOTS` confined, `GEOLIBRE_POSTGIS_HOSTS` and
+      `GEOLIBRE_MSSQL_HOSTS` unset unless required, sidecar disabled if unused.
 - [ ] Loopback `connect-src` allowances removed from the CSP.
 - [ ] Basemap, geocoding, and Pyodide sources pointed at internal hosts if the
       deployment must not reach the public internet.

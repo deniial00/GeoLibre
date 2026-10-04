@@ -113,6 +113,7 @@ export const ADD_DATA_KIND_COMMANDS: Array<{
   { kind: "video", titleKey: "toolbar.layerType.video" },
   { kind: "deckgl-viz", titleKey: "toolbar.layerType.deckglViz" },
   { kind: "postgres", titleKey: "toolbar.layerType.postgres" },
+  { kind: "mssql", titleKey: "toolbar.layerType.mssql" },
   { kind: "iceberg", titleKey: "toolbar.layerType.iceberg" },
 ];
 

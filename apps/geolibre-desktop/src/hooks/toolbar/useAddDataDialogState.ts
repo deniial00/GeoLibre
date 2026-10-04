@@ -4,6 +4,7 @@ import type { AddDataKind } from "../../components/layout/AddDataDialog";
 import {
   OPEN_ADD_DATA_EVENT,
   type OpenAddDataDetail,
+  type OpenAddDataMssql,
   type OpenAddDataPostgres,
 } from "../../components/layout/add-data/open-add-data";
 import { serviceUrlParameter, type ServiceUrlParameter } from "../../lib/data-url";
@@ -14,6 +15,7 @@ export interface AddDataDialogStateProps {
   kind: AddDataKind | null;
   initialDeckVizKind: string | undefined;
   initialPostgres: OpenAddDataPostgres | undefined;
+  initialMssql: OpenAddDataMssql | undefined;
   initialUrl: string | undefined;
   initialLayer: string | undefined;
   initialStyleUrl: string | undefined;
@@ -70,6 +72,7 @@ export function useAddDataDialogState(viewer: boolean): AddDataDialogState {
   const [addDataPostgres, setAddDataPostgres] = useState<OpenAddDataPostgres | undefined>(
     undefined,
   );
+  const [addDataMssql, setAddDataMssql] = useState<OpenAddDataMssql | undefined>(undefined);
   // Drop the prefill whenever the dialog isn't on the PostgreSQL source, so a
   // stale prefill can't leak into a later postgres open reached via a path that
   // sets addDataKind directly (command palette / menus) rather than through the
@@ -77,6 +80,9 @@ export function useAddDataDialogState(viewer: boolean): AddDataDialogState {
   // kind together, so this never clears a freshly-set prefill.
   useEffect(() => {
     if (addDataKind !== "postgres") setAddDataPostgres(undefined);
+  }, [addDataKind]);
+  useEffect(() => {
+    if (addDataKind !== "mssql") setAddDataMssql(undefined);
   }, [addDataKind]);
   // Let any panel (e.g. the Browser panel's "New connection" action) open the
   // Add Data dialog at a given kind without prop-drilling, mirroring
@@ -103,6 +109,7 @@ export function useAddDataDialogState(viewer: boolean): AddDataDialogState {
             : null,
         );
         setAddDataPostgres(detail.postgres);
+        setAddDataMssql(detail.mssql);
         setAddDataTargetGroupId(detail.groupId ?? null);
         addDataInitialLayerIdsRef.current = new Set(
           useAppStore.getState().layers.map((layer) => layer.id),
@@ -122,6 +129,7 @@ export function useAddDataDialogState(viewer: boolean): AddDataDialogState {
     kind: addDataKind,
     initialDeckVizKind: addDataDeckVizKind,
     initialPostgres: addDataPostgres,
+    initialMssql: addDataMssql,
     initialUrl: prefill ? prefill.url : undefined,
     initialLayer: prefill ? (prefill.layer ?? undefined) : undefined,
     initialStyleUrl: prefill ? (prefill.styleUrl ?? undefined) : undefined,
@@ -143,6 +151,7 @@ export function useAddDataDialogState(viewer: boolean): AddDataDialogState {
         setAddDataTargetGroupId(null);
         setAddDataDeckVizKind(undefined);
         setAddDataPostgres(undefined);
+        setAddDataMssql(undefined);
       }
     },
   };

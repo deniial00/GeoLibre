@@ -16,6 +16,11 @@ import {
   savedPostgresConnectionLabel,
 } from "../lib/saved-postgres-connections";
 import {
+  MSSQL_CONNECTIONS_CHANGED_EVENT,
+  mssqlConnectionLabel,
+  readSavedMssqlConnections,
+} from "../lib/saved-mssql-connections";
+import {
   folderLabel,
   PINNED_FOLDERS_CHANGED_EVENT,
   readPinnedFolders,
@@ -64,37 +69,44 @@ export function useBrowserTree(): BrowserTreeState {
   const favoritesLabel = t("browser.favorites");
   const myDataLabel = t("browser.myData");
 
+  const mssqlLabel = t("browser.sqlServer");
   // Saved connections are not a reactive store (localStorage on the web, an
   // in-memory cache over the OS credential store on desktop), so re-read them
   // when one is added/removed — otherwise a connection saved from the Add Data
   // dialog wouldn't appear until the (still-mounted) panel is reopened. The
   // pinned folders are the same story (see the Files section below).
   const [connectionsRevision, setConnectionsRevision] = useState(0);
+  const [mssqlRevision, setMssqlRevision] = useState(0);
   const [foldersRevision, setFoldersRevision] = useState(0);
   const [favoritesRevision, setFavoritesRevision] = useState(0);
   useEffect(() => {
     const bumpConnections = () => setConnectionsRevision((n) => n + 1);
     const bumpFolders = () => setFoldersRevision((n) => n + 1);
     const bumpFavorites = () => setFavoritesRevision((n) => n + 1);
+    const bumpMssql = () => setMssqlRevision((n) => n + 1);
     window.addEventListener(POSTGRES_CONNECTIONS_CHANGED_EVENT, bumpConnections);
     window.addEventListener(PINNED_FOLDERS_CHANGED_EVENT, bumpFolders);
+    window.addEventListener(MSSQL_CONNECTIONS_CHANGED_EVENT, bumpMssql);
     window.addEventListener(FAVORITES_CHANGED_EVENT, bumpFavorites);
     return () => {
       window.removeEventListener(POSTGRES_CONNECTIONS_CHANGED_EVENT, bumpConnections);
       window.removeEventListener(PINNED_FOLDERS_CHANGED_EVENT, bumpFolders);
       window.removeEventListener(FAVORITES_CHANGED_EVENT, bumpFavorites);
+      window.removeEventListener(MSSQL_CONNECTIONS_CHANGED_EVENT, bumpMssql);
     };
   }, []);
 
   return useMemo(() => {
     const services = listAllServices(readUserServices());
     const byId = new Map(services.map((entry) => [entry.id, entry]));
-    // Shown on every platform for discovery; the PostgreSQL add flow itself
-    // reports when it needs GeoLibre Desktop (Martin has no mobile build).
-    // Kept in the saved list's order (most-recently-used first), deliberately
-    // unlike the alphabetized Services list — this mirrors the Recent section.
-    // The Mac App Store build cannot run the sidecar/martin at all, so the
-    // whole Databases section is omitted there (undefined hides it).
+    // MSSQL uses the same desktop sidecar, so the Mac App Store build omits
+    // its section just like the PostGIS Databases section.
+    const mssqlConnections = IS_MAS_BUILD
+      ? undefined
+      : readSavedMssqlConnections().map((profile) => ({
+          id: profile.id,
+          label: mssqlConnectionLabel(profile),
+        }));
     const databaseConnections = IS_MAS_BUILD
       ? undefined
       : readSavedPostgresConnections().map((connectionString) => ({
@@ -121,6 +133,7 @@ export function useBrowserTree(): BrowserTreeState {
         recentProjects,
         databaseConnections,
         files,
+        mssqlConnections,
         favorites,
         libraryLayers: layerLibrary.map((entry) => ({
           id: entry.id,
@@ -133,6 +146,7 @@ export function useBrowserTree(): BrowserTreeState {
           databases: databasesLabel,
           files: filesLabel,
           favorites: favoritesLabel,
+          sqlServer: mssqlLabel,
           myData: myDataLabel,
         },
       }),
@@ -150,6 +164,8 @@ export function useBrowserTree(): BrowserTreeState {
     favoritesLabel,
     myDataLabel,
     connectionsRevision,
+    mssqlLabel,
+    mssqlRevision,
     foldersRevision,
     favoritesRevision,
   ]);

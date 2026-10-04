@@ -97,7 +97,7 @@ import { canExportRasterLayer } from "../../../lib/raster-export";
 import { canExtractRasterSubset } from "../../../lib/raster-subset-export";
 import { layerSupportsPolylineExport } from "../../../lib/vector-export";
 import { isTauri } from "../../../lib/is-tauri";
-import { canWriteEditsToSource, isPostgisEditableLayer } from "./layer-panel-utils";
+import { canWriteEditsToSource, isMssqlEditableLayer, isPostgisEditableLayer } from "./layer-panel-utils";
 import type { LayerActions } from "./useLayerActions";
 import type { LayerRefresh } from "./useLayerRefresh";
 import type { TimeSliderBinding } from "./useTimeSliderBinding";
@@ -1009,9 +1009,11 @@ export function LayerActionsMenuItems({
           <Save className="me-2 h-3.5 w-3.5" />
           {isArcGISWritableLayer(layer)
             ? t("layers.saveEditsToArcgis")
-            : isPostgisEditableLayer(layer)
-              ? t("layers.saveEditsToPostgis")
-              : t("layers.saveEditsToSource")}
+            : isMssqlEditableLayer(layer)
+              ? t("layers.saveEditsToMssql")
+              : isPostgisEditableLayer(layer)
+                ? t("layers.saveEditsToPostgis")
+                : t("layers.saveEditsToSource")}
         </DropdownMenuItem>
       )}
       {canEditRasterStyle && (

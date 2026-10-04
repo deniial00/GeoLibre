@@ -9,13 +9,14 @@ import {
 } from "@geolibre/core";
 import type { MapEngine } from "@geolibre/map";
 import { fetchArcGISMapServiceSublayers } from "@geolibre/plugins";
-import { fetchPostgisStatus, listPostgisTables } from "@geolibre/processing";
+import { fetchMssqlStatus, fetchPostgisStatus, listMssqlTables, listPostgisTables } from "@geolibre/processing";
 import { Input, ScrollArea } from "@geolibre/ui";
 import { Search } from "lucide-react";
 import { useCallback, useMemo, useRef, useState, type KeyboardEvent, type RefObject } from "react";
 import { useTranslation } from "react-i18next";
 import { isDesktopRuntime } from "../../lib/is-mobile";
 import { startGeoLibreSidecar } from "../../lib/sidecar";
+import { MssqlReconnectRequiredError, withMssqlSession } from "../../lib/mssql-sessions";
 import {
   isLoadableFilePath,
   listDirectory,
@@ -49,6 +50,7 @@ import { BrowserTreeNode } from "./BrowserTreeNode";
 
 /** The `connection:` / `folder:` id prefixes (id = prefix + connString/path). */
 const CONNECTION_ID_PREFIX = "connection:";
+const MSSQL_CONNECTION_ID_PREFIX = "mssql-connection:";
 const FOLDER_ID_PREFIX = "folder:";
 /** The `service:` id prefix (id = prefix + saved-service id). */
 const SERVICE_ID_PREFIX = "service:";
@@ -76,9 +78,9 @@ const DEFAULT_EXPANDED = new Set([
   "section:services",
   "section:recent",
   "section:databases",
+  "section:sql-server",
   "section:files",
 ]);
-
 /**
  * Whether a layer records `path` as the file it was read from. The vector import
  * puts the absolute path in `sourcePath`; the raster control puts it in
@@ -159,6 +161,65 @@ export function BrowserPanel({
   // the connection retries (there is no separate refresh affordance).
   const connFetchedRef = useRef<Set<string>>(new Set());
 
+  const [mssqlLoads, setMssqlLoads] = useState<Record<string, ConnectionLoad>>({});
+  const mssqlFetchedRef = useRef<Set<string>>(new Set());
+
+  const fetchMssqlTables = useCallback(
+    (connectionId: string) => {
+      if (mssqlFetchedRef.current.has(connectionId)) return;
+      mssqlFetchedRef.current.add(connectionId);
+      if (!isDesktopRuntime()) {
+        mssqlFetchedRef.current.delete(connectionId);
+        setMssqlLoads((prev) => ({
+          ...prev,
+          [`mssql:${connectionId}`]: {
+            status: "error",
+            message: t("addData.mssql.errorDesktopOnly"),
+          },
+        }));
+        return;
+      }
+      setMssqlLoads((prev) => ({ ...prev, [`mssql:${connectionId}`]: { status: "loading" } }));
+      void startGeoLibreSidecar()
+        .catch(() => {})
+        .then(() => fetchMssqlStatus())
+        .then((status) => {
+          if (!status.available) {
+            throw new Error(
+              t("addData.mssql.errorRuntimeMissing", { detail: status.message }),
+            );
+          }
+          return withMssqlSession(connectionId, (sessionId) => listMssqlTables(sessionId));
+        })
+        .then((tables) => {
+          const seen = new Set<string>();
+          const unique = tables.filter((table) => {
+            const key = `${table.schema}.${table.table}`;
+            if (seen.has(key)) return false;
+            seen.add(key);
+            return true;
+          });
+          setMssqlLoads((prev) => ({
+            ...prev,
+            [`mssql:${connectionId}`]: { status: "loaded", tables: unique },
+          }));
+        })
+        .catch((err: unknown) => {
+          mssqlFetchedRef.current.delete(connectionId);
+          setMssqlLoads((prev) => ({
+            ...prev,
+            [`mssql:${connectionId}`]: {
+              status: "error",
+              message:
+                err instanceof MssqlReconnectRequiredError
+                  ? t("addData.mssql.errorReconnectRequired")
+                  : errorMessage(err, t("addData.mssql.errorConnect")),
+            },
+          }));
+        });
+    },
+    [t],
+  );
   const fetchConnectionTables = useCallback(
     (connectionString: string) => {
       if (connFetchedRef.current.has(connectionString)) return;
@@ -337,7 +398,10 @@ export function BrowserPanel({
     () =>
       augmentArcGISServices(
         augmentFolders(
-          augmentConnections(tree, connLoads, loadingLabel),
+          augmentConnections(tree, {
+            ...connLoads,
+            ...mssqlLoads,
+          }, loadingLabel),
           folderLoads,
           foldersLoadingLabel,
           isLoadableFilePath,
@@ -346,9 +410,18 @@ export function BrowserPanel({
         arcgisLoads,
         arcgisLabels,
       ),
-    [tree, connLoads, loadingLabel, folderLoads, foldersLoadingLabel, arcgisLoads, arcgisLabels, t],
+    [
+      tree,
+      connLoads,
+      loadingLabel,
+      mssqlLoads,
+      folderLoads,
+      foldersLoadingLabel,
+      arcgisLoads,
+      arcgisLabels,
+      t,
+    ],
   );
-
   const filtered = useMemo(() => filterBrowserTree(augmented, query), [augmented, query]);
 
   // While searching, expand every group so matches deep in the tree are
@@ -365,6 +438,8 @@ export function BrowserPanel({
     // expanded.
     if (id.startsWith(CONNECTION_ID_PREFIX) && !expanded.has(id)) {
       fetchConnectionTables(id.slice(CONNECTION_ID_PREFIX.length));
+    } else if (id.startsWith(MSSQL_CONNECTION_ID_PREFIX) && !expanded.has(id)) {
+      fetchMssqlTables(id.slice(MSSQL_CONNECTION_ID_PREFIX.length));
     } else if (id.startsWith(FOLDER_ID_PREFIX) && !expanded.has(id)) {
       fetchFolder(id.slice(FOLDER_ID_PREFIX.length));
     } else if (id.startsWith(SERVICE_ID_PREFIX) && !expanded.has(id)) {
@@ -565,6 +640,14 @@ export function BrowserPanel({
       } finally {
         endBusy();
       }
+    } else if (node.kind === "table" && node.mssqlConnectionId) {
+      openAddData("mssql", {
+        mssql: {
+          connectionId: node.mssqlConnectionId,
+          schema: node.tableSchema,
+          table: node.tableName,
+        },
+      });
     } else if (node.kind === "table" && node.connectionString) {
       // Reuse the proven PostgreSQL Add Data flow (desktop Martin lifecycle) to
       // add the table as a layer, opening it prefilled with this connection and

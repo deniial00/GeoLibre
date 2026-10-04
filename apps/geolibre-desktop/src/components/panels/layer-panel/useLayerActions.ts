@@ -36,7 +36,7 @@ import {
   type MapEngine,
 } from "@geolibre/map";
 import { importStyleText } from "@geolibre/map/style-import";
-import { readPostgisTable, writePostgisTable, writeVectorToSource } from "@geolibre/processing";
+import { readMssqlTable, readPostgisTable, writeMssqlTable, writePostgisTable, writeVectorToSource } from "@geolibre/processing";
 import { commitPendingAttributeDrafts } from "../../../lib/attribute-draft-commit";
 import { bindTemporalLayer, createAppAPI, usePluginRegistry } from "../../../hooks/usePlugins";
 import {
@@ -71,7 +71,12 @@ import {
   postgisFeatureKeys,
   resolvePostgisConnection,
 } from "../../../lib/postgis-connections";
-import { isPostgisEditableLayer, type LayerRefreshStatus } from "./layer-panel-utils";
+import {
+  MssqlReconnectRequiredError,
+  mssqlBaselineKeys,
+  withMssqlSession,
+} from "../../../lib/mssql-sessions";
+import { isMssqlEditableLayer, isPostgisEditableLayer, type LayerRefreshStatus } from "./layer-panel-utils";
 
 type PluginRegistry = ReturnType<typeof usePluginRegistry>;
 
@@ -748,9 +753,10 @@ export function useLayerActions({
       clearRefreshStatusTimer(clickedLayer.id);
       const layer = commitTableDrafts(clickedLayer);
       if (!layer) return;
+      const isMssql = isMssqlEditableLayer(layer);
       const isPostgis = isPostgisEditableLayer(layer);
       const path = typeof layer.sourcePath === "string" ? layer.sourcePath.trim() : "";
-      if (!isPostgis && !isArcGISWritableLayer(layer) && !path) return;
+      if (!isMssql && !isPostgis && !isArcGISWritableLayer(layer) && !path) return;
       try {
         if (isArcGISWritableLayer(layer)) {
           const result = await saveArcGISLayerEdits(layer.id);
@@ -780,7 +786,91 @@ export function useLayerActions({
           return;
         }
         let message: string;
-        if (isPostgis) {
+        if (isMssql) {
+          const connectionId = layer.metadata.mssqlConnectionId as string;
+          const schema =
+            typeof layer.metadata.mssqlSchema === "string"
+              ? layer.metadata.mssqlSchema
+              : "dbo";
+          const table = layer.metadata.mssqlTable as string;
+          const geometryColumn =
+            typeof layer.metadata.mssqlGeometryColumn === "string"
+              ? layer.metadata.mssqlGeometryColumn
+              : undefined;
+          let result;
+          try {
+            result = await withMssqlSession(connectionId, (sessionId) =>
+              writeMssqlTable({
+                session_id: sessionId,
+                schema_name: schema,
+                table,
+                geometry_column: geometryColumn,
+                geojson,
+                baseline_keys: mssqlBaselineKeys(layer),
+                capabilities: resolveLayerCapabilities(layer),
+              }),
+            );
+          } catch (error) {
+            if (!(error instanceof MssqlReconnectRequiredError)) throw error;
+            setRefreshStatuses((current) => ({
+              ...current,
+              [layer.id]: {
+                type: "error",
+                message: t("layers.saveEditsMssqlNoConnection"),
+              },
+            }));
+            scheduleStatusClear(layer.id);
+            return;
+          }
+          let fresh;
+          try {
+            fresh = await withMssqlSession(connectionId, (sessionId) =>
+              readMssqlTable({
+                session_id: sessionId,
+                schema_name: schema,
+                table,
+                geometry_column: geometryColumn,
+                excluded_fields: layer.fieldVisibility
+                  ? Object.keys(layer.fieldVisibility).filter(
+                      (k) => layer.fieldVisibility![k] === "excluded",
+                    )
+                  : undefined,
+              }),
+            );
+          } catch {
+            setRefreshStatuses((current) => ({
+              ...current,
+              [layer.id]: {
+                type: "error",
+                message: t("layers.saveEditsMssqlRefreshWarning"),
+              },
+            }));
+            scheduleStatusClear(layer.id);
+            return;
+          }
+          const currentMetadata =
+            useAppStore.getState().layers.find((l) => l.id === layer.id)?.metadata ??
+            layer.metadata;
+          updateLayer(layer.id, {
+            geojson: fresh.geojson,
+            metadata: {
+              ...currentMetadata,
+              featureCount: fresh.feature_count,
+              mssqlBaselineKeys: postgisFeatureKeys(fresh.geojson),
+            },
+          });
+          message = t("layers.saveEditsMssqlSuccess", {
+            table: `${schema}.${table}`,
+            inserted: result.inserted,
+            updated: result.updated,
+            deleted: result.deleted,
+          });
+          if (result.skipped_fields?.length) {
+            message = `${message} ${t("layers.saveEditsMssqlSkippedFields", {
+              fields: result.skipped_fields.join(", "),
+            })}`;
+          }
+        } else if (isPostgis) {
           const connection = resolvePostgisConnection(layer);
           if (!connection) {
             setRefreshStatuses((current) => ({
@@ -899,7 +989,12 @@ export function useLayerActions({
         }));
         scheduleStatusClear(layer.id);
       } catch (error) {
-        const message = error instanceof Error ? error.message : t("layers.saveEditsError");
+        const message =
+          error instanceof MssqlReconnectRequiredError
+            ? t("layers.saveEditsMssqlNoConnection")
+            : error instanceof Error
+              ? error.message
+              : t("layers.saveEditsError");
         setRefreshStatuses((current) => ({
           ...current,
           [layer.id]: { type: "error", message },

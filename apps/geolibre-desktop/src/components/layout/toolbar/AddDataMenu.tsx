@@ -132,20 +132,20 @@ export function AddDataMenu({
     // entry follows the same gate as the Deck.gl builder.
     duckdb: { onSelect: addLayer.duckdb, disabled: !capabilities.deckOverlay },
     postgres: { onSelect: () => onSetAddDataKind("postgres") },
+    mssql: { onSelect: () => onSetAddDataKind("mssql") },
     iceberg: { onSelect: () => onSetAddDataKind("iceberg") },
   };
 
   // Each rendered section is the catalog entries it owns, filtered by the UI
-  // profile (and the mobile rule for postgres, and the Mac App Store rule for
-  // the sidecar/martin-only sources). Sections with no visible items are
-  // dropped along with their header/separator.
+  // profile (and the mobile database rule, plus the Mac App Store rule for
+  // sidecar-only sources). Sections with no visible items are dropped too.
   const sections = DATA_SOURCE_SECTION_ORDER.map((section) => ({
     section,
     entries: DATA_SOURCE_CATALOG.filter(
       (entry) =>
         entry.section === section &&
         isDataSourceVisible(uiProfile, entry.id) &&
-        !(entry.id === "postgres" && mobile) &&
+        !((entry.id === "postgres" || entry.id === "mssql") && mobile) &&
         !masHidesDataSource(entry.id),
     ),
   })).filter((group) => group.entries.length > 0);
