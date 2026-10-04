@@ -36,6 +36,11 @@ export {
   type ModelStepResult,
   type RunModelOptions,
 } from "./runner";
+export {
+  runAlgorithmInBackground,
+  canRunVectorToolOnWorker,
+  WORKER_VECTOR_TOOL_IDS,
+} from "./vector-tool-runner";
 export { NETWORK_TOOLS, getNetworkTool, layerToSequencedPoints } from "./network-tools";
 export {
   STATISTICS_TOOLS,
@@ -355,6 +360,25 @@ export {
   type ViewshedObserver,
   type ViewshedResult,
 } from "./terrain-viewshed";
+export {
+  computeLineOfSight,
+  curvatureDrop,
+  fetchLineOfSightProfile,
+  greatCircleDistance,
+  sampleGreatCircleProfile,
+  DEFAULT_LOS_OBSERVER_HEIGHT_METERS,
+  DEFAULT_LOS_TARGET_HEIGHT_METERS,
+  DEFAULT_REFRACTION_COEFFICIENT,
+  MAX_LINE_OF_SIGHT_METERS,
+  MIN_LINE_OF_SIGHT_METERS,
+  type LineOfSightOptions,
+  type LineOfSightProfile,
+  type LineOfSightResult,
+  type LineOfSightSample,
+  type LineOfSightSegment,
+  type LngLat as LineOfSightPoint,
+  type ProfileSample,
+} from "./line-of-sight";
 export {
   INPUT_NODE_PORT,
   OUTPUT_NODE_PORT,

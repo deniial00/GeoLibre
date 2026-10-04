@@ -32,10 +32,16 @@ import {
   removePluginBundlePin,
   verifyPluginBundleIntegrity,
 } from "./plugin-integrity";
+import {
+  ensurePluginBlocklistLoaded,
+  getBlocklistedBundle,
+  hasPluginBlocklistEntries,
+} from "./plugin-blocklist";
 import { isTauri } from "./tauri-io";
 import type { DeploymentPolicy } from "./deployment-policy";
 import { getDeploymentPolicy } from "./deployment-env";
 import {
+  blocklistedDecision,
   evaluatePlugin,
   type PluginDenialDecision,
   type PluginPolicyDenial,
@@ -220,6 +226,11 @@ export async function loadExternalPlugins(
   for (const { bundle, source } of bundles) {
     try {
       enforcePluginPolicy(bundle.manifest.id, source, policy, bundle.archiveName, bundle.sourceUrl);
+      // URL bundles were hash-checked when fetched; archives and plugin
+      // directories are checked here, before their code runs.
+      if (source === "zip" || source === "directory") {
+        await assertBundleNotBlocklisted(bundle);
+      }
       const loadedFrom = externallyLoadedPluginSources.get(bundle.manifest.id);
       if (loadedFrom !== undefined) {
         // Already loaded by a previous scan; a settings change re-runs the
@@ -281,6 +292,30 @@ export async function loadExternalPlugins(
     loadedPluginIds,
     issues,
   };
+}
+
+/**
+ * Refuse a bundle whose exact code the registry's blocklist names (a single
+ * bad release, blocked by `bundleSha256`). A whole-plugin block is already
+ * refused by the policy gate. Call before the bundle's code is evaluated.
+ *
+ * @param bundle - The bundle about to be imported.
+ * @throws When the bundle is blocklisted.
+ */
+export async function assertBundleNotBlocklisted(bundle: ExternalPluginBundle): Promise<void> {
+  // Nothing to compare against: skip hashing (the usual case).
+  if (!hasPluginBlocklistEntries()) return;
+  const blocklisted = getBlocklistedBundle(
+    bundle.manifest.id,
+    await computePluginBundleHash(bundle),
+  );
+  if (blocklisted) {
+    throw new PluginPolicyError(
+      bundle.archiveName,
+      blocklistedDecision(bundle.manifest.id, blocklisted.reason),
+      bundle.sourceUrl,
+    );
+  }
 }
 
 /**
@@ -353,10 +388,25 @@ async function loadPluginUrlBundles(
         // crypto.subtle unavailable) to this one URL — letting it throw here would
         // reject the whole loadExternalPlugins Promise.all and drop every plugin.
         try {
+          // A bundle the registry's blocklist names is never executed, whatever
+          // the pin says (a whole-plugin block was already refused by policy).
+          const bundleHash = await computePluginBundleHash(bundle);
+          const blocklisted = getBlocklistedBundle(bundle.manifest.id, bundleHash);
+          if (blocklisted) {
+            const decision = blocklistedDecision(bundle.manifest.id, blocklisted.reason);
+            issues.push({
+              archiveName: bundle.archiveName,
+              sourceUrl: bundle.sourceUrl,
+              message: decision.reason,
+              policyDenial: decision.denial,
+            });
+            continue;
+          }
           const integrity = await verifyPluginBundleIntegrity(
             manifestUrls[index],
             bundle,
             bundle.manifest.version,
+            bundleHash,
           );
           if (integrity.status === "changed") {
             const heldBack: HeldBackPluginBundle = {
@@ -664,11 +714,14 @@ export async function installWebPluginArchive(
   app: GeoLibreAppAPI,
   policy: DeploymentPolicy | null = getDeploymentPolicy(),
 ): Promise<string> {
+  // The blocklist check below must not run against a list still loading.
+  await ensurePluginBlocklistLoaded();
   if (policy?.plugins?.sideload === false) {
     enforcePluginPolicy("", "zip", policy, fileName);
   }
   const bundle = await bundleFromZipBytes(fileName, bytes);
   enforcePluginPolicy(bundle.manifest.id, "zip", policy, fileName);
+  await assertBundleNotBlocklisted(bundle);
   // importExternalPlugin validates the exported plugin, that it matches the
   // manifest id/name/version, and rejects activeByDefault.
   const plugin = await importExternalPlugin(bundle);
@@ -959,6 +1012,14 @@ async function reloadExternalUrlPluginUncoalesced(
     if (options.expectedHash !== undefined && bundleHash !== options.expectedHash) {
       throw new Error(
         `Cannot update plugin: the code downloaded from '${manifestUrl}' does not match the version the registry lists. It may still be publishing; refresh the plugin list and try again in a few minutes.`,
+      );
+    }
+    const blocklisted = getBlocklistedBundle(bundle.manifest.id, bundleHash);
+    if (blocklisted) {
+      throw new PluginPolicyError(
+        manifestUrl,
+        blocklistedDecision(bundle.manifest.id, blocklisted.reason),
+        manifestUrl,
       );
     }
     // The timeout only bounds the fetch/stream above; a dynamic import() of a

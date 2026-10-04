@@ -148,6 +148,13 @@ export interface GeoLibreWmsLayerOptions extends GeoLibreTileLayerOptions {
    * such a layer stays blank there. Any other value throws.
    */
   crs?: string;
+  /**
+   * Pass `false` when the service's capabilities mark the requested layers
+   * `queryable="0"`: identify then sends no GetFeatureInfo for this layer and
+   * says the layer provides no feature information. Omitted or `true`, the
+   * layer is queried.
+   */
+  queryable?: boolean;
 }
 
 /** Options for adding a host-managed WFS GetFeature layer. */
@@ -1031,6 +1038,19 @@ export interface GeoLibreAppAPI {
     defaultValue: string,
     params?: Record<string, string | number>,
   ) => string;
+  /**
+   * Ship a plugin's own translations, so an externally installed plugin can
+   * localize without a GeoLibre catalog change. `resources` maps a locale code
+   * to flat dotted keys, e.g.
+   * `{ de: { "plugin.my-plugin.title": "Werkbank" } }`; {@link translate}
+   * then resolves those keys in that locale.
+   *
+   * Only string values under `plugin.<id>.` are accepted (anything else is
+   * dropped with a console warning), and a key the host's bundled catalogs
+   * already define keeps the host's text. Registrations last for the session;
+   * re-registering the same key is a no-op, so call it once from `activate`.
+   */
+  registerTranslations?: (resources: Record<string, Record<string, string>>) => void;
   /**
    * Save small secrets (access tokens, API keys) for this plugin. On the
    * desktop app they live in the OS credential store; on the web build, the

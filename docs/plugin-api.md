@@ -257,6 +257,9 @@ export interface GeoLibreAppAPI {
     defaultValue: string,
     params?: Record<string, string | number>
   ) => string;
+  registerTranslations?: (
+    resources: Record<string, Record<string, string>>
+  ) => void;
   // Credential storage (see "Saving credentials" below).
   credentials?: GeoLibrePluginCredentials;
   // Top toolbar menus (see "Toolbar menus" below).
@@ -727,6 +730,7 @@ export interface GeoLibreWmsLayerOptions extends GeoLibreTileLayerOptions {
   transparent?: boolean; // default true
   version?: string; // "1.1.1" (default) or "1.3.0" (sends CRS instead of SRS)
   crs?: string; // "EPSG:3857" (default), "EPSG:4326", "CRS:84" (1.3.0 only), any "EPSG:<code>"
+  queryable?: boolean; // false when the capabilities mark the layers queryable="0": identify skips it
 }
 
 export interface GeoLibreWfsLayerOptions {
@@ -782,6 +786,13 @@ app.addWmsLayer?.("Cadastral parcels", {
   crs: "EPSG:6706",
 });
 
+// The capabilities mark the layer queryable="0": identify skips it.
+app.addWmsLayer?.("Buildings", {
+  url: "https://wms.example.it/wms",
+  layers: "buildings",
+  queryable: false,
+});
+
 // A layer found in a catalogue: keep its provenance with it.
 app.addWmsLayer?.("Bathymetry", {
   url: "https://wms.example.org/wms",
@@ -802,7 +813,7 @@ const cogId = await app.addCogLayer?.(
 );
 ```
 
-`addTileLayer`, `addWmtsLayer`, `addWmsLayer`, and `addWfsLayer` take an optional `metadata` object, merged into the new layer's `metadata`. Use it to leave a catalogue layer's provenance with it (the record id, a link to its metadata page, the publisher, the licence): it is shown in the layer's Metadata dialog and saved with the project. It must be a plain, JSON-serializable object, or the call throws (`addWfsLayer` rejects). GeoLibre's own keys win over a field of the same name, and credential-named fields (`token`, `apiKey`, ...) are stripped when the project is shared or exported. The Metadata dialog also shows the service address and request fields GeoLibre keeps on a service or tile layer's `source` (for WMS: `url`, `layers`, `styles`, `format`, `version`, `crs`), with credentials removed.
+`addTileLayer`, `addWmtsLayer`, `addWmsLayer`, and `addWfsLayer` take an optional `metadata` object, merged into the new layer's `metadata`. Use it to leave a catalogue layer's provenance with it (the record id, a link to its metadata page, the publisher, the licence): it is shown in the layer's Metadata dialog and saved with the project. It must be a plain, JSON-serializable object, or the call throws (`addWfsLayer` rejects). GeoLibre's own keys win over a field of the same name, and credential-named fields (`token`, `apiKey`, ...) are stripped when the project is shared or exported. The Metadata dialog also shows the service address and request fields GeoLibre keeps on a service or tile layer's `source` (for WMS: `url`, `layers`, `styles`, `format`, `version`, `crs`, and `queryable` when false), with credentials removed.
 
 WFS layers use the host's GetFeature loader, including GeoJSON/GML fallback, reprojection, desktop native HTTP, and refresh. `addWfsLayer` resolves with the new layer id and rejects if loading fails or the service returns no features. Saved projects normally keep the request URL rather than embedding the downloaded collection, and reopening fetches it again. Exception: if saving strips credentials from the URL, the fetched collection is embedded so the layer remains visible without storing the secret; it is not refetched from the sanitized URL. The optional bbox is WGS84 `[west, south, east, north]` and must not cross the antimeridian (`west` must not exceed `east` — a Pacific-spanning box throws); the host applies the existing 1,000-feature limit.
 
@@ -1175,7 +1186,7 @@ Items use the same shape as [toolbar menus](#toolbar-menus): actions, submenus a
 
 ## Following the app language
 
-The GeoLibre UI is translated with react-i18next, but a plugin renders its panels as plain DOM and cannot use the host's React hooks. Three methods bridge that gap:
+The GeoLibre UI is translated with react-i18next, but a plugin renders its panels as plain DOM and cannot use the host's React hooks. Four methods bridge that gap:
 
 ```typescript
 // The active catalog code ("en", "zh", "pt-BR", ...).
@@ -1192,14 +1203,36 @@ const label = app.translate?.("plugin.my-plugin.count", "{{n}} features", {
 // call it from `deactivate`, or the listener keeps re-rendering DOM you no
 // longer own.
 const stop = app.onLocaleChange?.((next) => renderPanel(container, next));
+
+// Ship your own translations (call once, from `activate`). Flat dotted keys per
+// locale; `translate` then resolves them in that language.
+app.registerTranslations?.({
+  de: {
+    "plugin.my-plugin.title": "Werkbank",
+    "plugin.my-plugin.count": "{{n}} Objekte",
+  },
+  fr: {
+    "plugin.my-plugin.title": "Atelier",
+    "plugin.my-plugin.count": "{{n}} entités",
+  },
+});
 ```
 
 Conventions:
 
-- **Always pass your own English text as `defaultValue`.** GeoLibre's catalogs do not ship your plugin's strings, so the fallback is what makes your UI read correctly today; translations are an upgrade, not a prerequisite.
-- **Namespace your keys by plugin id** (`plugin.<your-id>.<something>`) so they cannot collide with the host's own keys.
+- **Always pass your own English text as `defaultValue`.** It is what renders in a language you ship no translation for, and on a host that predates these methods, so translations are an upgrade, not a prerequisite.
+- **Namespace your keys by plugin id** (`plugin.<your-id>.<something>`) so they cannot collide with the host's own keys. `registerTranslations` enforces this: it accepts only string values under `plugin.<id>.` and drops (with a console warning) anything else.
+- **The host's catalogs win.** A key GeoLibre's bundled catalogs already define keeps the host's text, and `registerTranslations` never overwrites an existing entry. Registrations last for the session; registering the same key again is a no-op, so do it once rather than on every activation.
+- Plural keys work as they do in the host: register `plugin.my-plugin.items_one` / `plugin.my-plugin.items_other` (and the extra forms languages such as Russian or Arabic need) and pass `{ count }` in `params`.
 - These methods are typed optional like the rest of the API, so call them with optional chaining and keep a literal fallback.
-- Panel titles and toolbar labels take getters precisely so they can call `app.translate?.()` and stay current; use those rather than re-registering on every language change.
+- Panel titles and toolbar labels take getters precisely so they can call `app.translate?.()` and stay current; use those rather than re-registering on every language change. DOM you build once (buttons, hints, status lines) should be re-labelled from an `onLocaleChange` listener.
+
+Built-in plugins (in `packages/plugins`) follow the same contract with two helpers exported from `@geolibre/plugins`:
+
+- `createPluginTranslator(app, pluginId)` returns `tr(key, english, params?)`, which resolves `plugin.<pluginId>.<key>` and interpolates the English fallback itself when the host has no `translate`. A key starting with `@` is absolute, for reusing a host key (`tr("@common.cancel", "Cancel")`). `app` may be a getter, for plugins that keep the API in a module-level variable.
+- `pluginDisplayTitle(app, pluginId, name)` returns a panel-title getter that reads `toolbar.plugin.<pluginId>`, the plugin's name as the Plugins menu shows it, so the dock header and the menu entry stay in the same language.
+
+Their strings live in GeoLibre's bundled catalogs (`apps/geolibre-desktop/src/i18n/locales/*.json`) rather than in `registerTranslations`, and the catalog test requires every locale to carry them (see `docs/i18n.md`).
 
 ## Saving credentials
 
@@ -1386,6 +1419,8 @@ a `plugins` array, of entries:
 `id`, `name`, `version`, and `manifestUrl` are required; the rest are optional. A relative `manifestUrl` is resolved against the registry location, so a plugin hosted alongside the registry (e.g. `sample/plugin.json`) can be listed with a relative path. `minGeoLibreVersion` gates installation against the running app version. `publishableSettings` is optional and lets a plugin's project state (`getProjectState()`) survive "Strip credentials" and shared or exported projects. By default an external plugin's whole state is dropped there and counted as credential-bearing, because it can hold anything. List the top-level state keys that are safe to publish (`["search", "filters"]`), or use `true` to keep the whole state. The declaration is reviewed with the registry entry and is never read from a project file. What is kept is still scrubbed for credential-named fields and credentialed URLs, and a registry entry cannot widen a built-in plugin's list. Keep secrets out of those keys; use `app.credentials` for them.
 
 `bundleSha256` is optional: the lowercase hex SHA-256 of the published bundle, computed the way `computePluginBundleHash` in `plugin-integrity.ts` does (SHA-256 of the entry, SHA-256 of the style or of an empty string, then SHA-256 of the two digests). The hosted registry generates it for every plugin it serves. When an entry has one, installing it from the marketplace or a `?plugin=` deep link pins that hash before the URL is installed, so the first load checks the downloaded code against the reviewed hash instead of trusting whatever the URL serves first; a mismatch is held back like any changed bundle. The Update action likewise refuses a download that doesn't match, before evaluating it. An entry without `bundleSha256` keeps the trust-on-first-use pin.
+
+The registry's maintainers can also pull plugins through `blocklist.json`, published next to the registry (`https://plugins.geolibre.app/blocklist.json` for the hosted one, or `blocklist.json` beside a configured `registryUrl`). GeoLibre fetches it once per session before loading external plugins and caches it for offline starts. An entry with only an `id` blocks every version of that plugin from every external source (registry, manifest URL, zip, plugin directory): installing and loading are refused through the same policy gate as deployment-policy `blocked`, with the entry's `reason` shown. An entry that also has a `bundleSha256` blocks just that bundle, from every external source: a URL plugin, zip archive or plugin directory with exactly that code isn't loaded or installed, and an Update to it is refused, all before the code runs. Bundled drop-ins are never blocked. If the blocklist can't be fetched (or returns 404 after a list was cached), the cached copy applies; a registry that has never published one blocks nothing.
 
 Curate the registry and host plugin bundles in the [opengeos/geolibre-plugins](https://github.com/opengeos/geolibre-plugins) repo, which ships a `sample/` template.
 
