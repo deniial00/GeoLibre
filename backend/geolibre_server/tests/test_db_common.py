@@ -48,6 +48,9 @@ def test_scrub_secrets_covers_urls_odbc_and_known_literals() -> None:
     scrubbed = scrub_secrets("postgresql://alice:p@ss@db.example.com/gis")
     assert "p@ss" not in scrubbed
     assert "****@db.example.com" in scrubbed
+    assert "secret" not in scrub_secrets("db_password=secret")
+    assert "secret" not in scrub_secrets("old_pwd=secret")
+    assert "secret" not in scrub_secrets("userPassword=secret")
     assert "a}}b" not in scrub_secrets("PWD={a}}b};")
     assert "sekret" not in scrub_secrets("token sekret", ["sekret"])
 

@@ -74,7 +74,21 @@ def _import_psycopg() -> Any:
 
 
 def _validate_postgis_target(conninfo: dict[str, str]) -> Optional[tuple[str, str]]:
-    """Validate every destination against the configured host allowlist."""
+    """Validate all DSN destinations against the configured host allowlist.
+
+    Args:
+        conninfo: Parsed libpq connection keywords from the request DSN.
+
+    Returns:
+        Explicit host/port overrides, or ``None`` when the allowlist is ``*``.
+
+    Raises:
+        HTTPException: If the allowlist is unset, invalid, or excludes a target.
+
+    ``service`` can resolve or change hosts after validation, and ``hostaddr``
+    can route to an IP that differs from an allowlisted hostname, so neither
+    indirection is accepted when a host allowlist is active.
+    """
     allowed = allowlist_from_env(
         _POSTGIS_HOSTS_ENV,
         f"PostGIS access is disabled; configure {_POSTGIS_HOSTS_ENV}",
@@ -605,6 +619,12 @@ def postgis_write(request: PostgisWriteRequest) -> dict[str, Any]:
                 skipped = set(diff.skipped_fields)
                 inserted = len(diff.inserts)
                 updated = len(diff.updates)
+                # Pipeline mode batches per-feature statements into fewer
+                # network round trips. Counts follow the chosen branch because
+                # reading rowcount per statement would force a sync each time.
+                # A concurrent delete after the snapshot can therefore make
+                # an UPDATE match zero rows while still counting as updated;
+                # conflict detection is a separate concern (issue #1070).
                 with conn.pipeline():
                     for change in diff.updates:
                         columns = list(change.values)
@@ -681,6 +701,11 @@ def postgis_write(request: PostgisWriteRequest) -> dict[str, Any]:
                 to_delete = diff.deletes
                 deleted = 0
                 if to_delete:
+                    # Text comparison matches the JSON-safe keys emitted by
+                    # /read for common integer, text, uuid, numeric, and date
+                    # keys. Timestamp and floating-point textual formatting
+                    # can differ between Python and Postgres, causing those
+                    # uncommon key types' deletes to match no rows.
                     cur.execute(
                         sql.SQL("DELETE FROM {schema}.{table} WHERE {pk}::text = ANY(%s)").format(
                             schema=schema_ident,

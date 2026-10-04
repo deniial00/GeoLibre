@@ -3,33 +3,50 @@
 from __future__ import annotations
 
 import ipaddress
+import os
 import re
 from dataclasses import dataclass
 from typing import Any, Iterable, Optional
 
 from fastapi import HTTPException
 
+from geolibre_server import vector_ops
+
 UNRESTRICTED = "*"
 _PASSWORD_URL_RE = re.compile(r"(://[^:/\s@]*:)[^\s]+@")
 _PASSWORD_KV_RE = re.compile(
-    r"(?i)(\b(?:password|pwd|client_secret|access_token)\s*=\s*)('[^']*'|\{(?:[^}]|\}\})*\}|[^\s]+)"
+    r"(?i)((?:password|pwd|client_secret|access_token)\s*=\s*)"
+    r"('[^']*'|\{(?:[^}]|\}\})*\}|[^\s]+)"
 )
 
 
 def normalize_host(host: str) -> str:
+    """Normalize an IP/DNS host for exact allowlist matching."""
     candidate = host.strip()
     if candidate.startswith("[") and candidate.endswith("]"):
         candidate = candidate[1:-1]
+    # Check after unwrapping so a bracketed-empty host is rejected.
     if not candidate or candidate.startswith("/"):
         raise ValueError("host must be a TCP hostname or IP address")
     try:
         return str(ipaddress.ip_address(candidate))
     except ValueError:
+        # DNS names are case-insensitive; a final dot only marks the DNS root.
         return candidate.rstrip(".").lower()
 
 
 def parse_host_allowlist(value: str) -> Optional[set[tuple[str, Optional[int]]]]:
+    """Parse comma-separated host[:port] entries.
+
+    ``None`` means the explicit unrestricted ``*`` setting; a host-only entry
+    allows any port on that host.
+
+    Raises:
+        ValueError: An entry is malformed or ``*`` is mixed with hosts.
+    """
     entries = [entry.strip() for entry in value.split(",") if entry.strip()]
+    # Mixing * with hosts looks like a narrowing but actually disables the
+    # restriction, so reject the ambiguous configuration.
     if UNRESTRICTED in entries:
         if len(entries) > 1:
             raise ValueError(f"'{UNRESTRICTED}' must be the only entry")
@@ -50,6 +67,8 @@ def parse_host_allowlist(value: str) -> Optional[set[tuple[str, Optional[int]]]]
             host, port_text = entry.rsplit(":", 1)
             port = int(port_text)
         elif entry.count(":") > 1:
+            # Unbracketed IPv6 with a port is ambiguous with a valid IPv6
+            # address; requiring brackets prevents silently widening access.
             raise ValueError("IPv6 entries must be bracketed, e.g. [2001:db8::1]:5432")
         if port is not None and not 1 <= port <= 65535:
             raise ValueError("port must be between 1 and 65535")
@@ -60,8 +79,11 @@ def parse_host_allowlist(value: str) -> Optional[set[tuple[str, Optional[int]]]]
 def allowlist_from_env(
     env_var: str, disabled_detail: str
 ) -> Optional[set[tuple[str, Optional[int]]]]:
-    import os
+    """Read an exact-host allowlist from the environment.
 
+    Returns ``None`` for the explicit unrestricted ``*`` setting. Raises
+    HTTP 403 when unset/empty and HTTP 500 for an invalid configuration.
+    """
     try:
         allowed = parse_host_allowlist(os.environ.get(env_var, ""))
     except (TypeError, ValueError) as exc:
@@ -74,11 +96,19 @@ def allowlist_from_env(
 def host_port_allowed(
     allowed: set[tuple[str, Optional[int]]], host: str, port: Optional[int]
 ) -> bool:
+    """Check exact host/port; host-only entries allow any port.
+
+    A ``None`` target port (used for SQL Server named instances) matches only
+    an allowlist entry with no port.
+    """
     host = normalize_host(host)
     return (host, port) in allowed or (host, None) in allowed
 
 
 def scrub_secrets(message: str, secrets: Iterable[str] = ()) -> str:
+    """Redact URL credentials, credential-like key/value pairs, and known literals."""
+    # Match compound names too (e.g. db_password=); drivers may use them in
+    # connection error text.
     scrubbed = _PASSWORD_URL_RE.sub(r"\1****@", message)
     scrubbed = _PASSWORD_KV_RE.sub(r"\1****", scrubbed)
     for secret in secrets:
@@ -88,6 +118,11 @@ def scrub_secrets(message: str, secrets: Iterable[str] = ()) -> str:
 
 
 def json_safe(value: Any) -> Any:
+    """Convert database values to JSON-safe equivalents.
+
+    Integers outside JavaScript's safe range become strings so clients do not
+    round primary keys and then submit a key that cannot match the source row.
+    """
     if value is None or isinstance(value, (bool, float, str)):
         return value
     if isinstance(value, int):
@@ -102,8 +137,6 @@ def json_safe(value: Any) -> Any:
 
 
 def require_features(geojson: Optional[dict]) -> list[dict]:
-    from geolibre_server import vector_ops
-
     features = geojson.get("features") if geojson else None
     if not isinstance(features, list) or not features:
         raise HTTPException(status_code=400, detail="No features to write.")
@@ -141,12 +174,19 @@ def plan_feature_diff(
     capabilities: Optional[dict[str, bool]],
     table_label: str,
 ) -> FeatureDiff:
+    """Plan row-level changes without executing database-specific SQL.
+
+    Feature IDs fall back to ``feature.id`` when an editor clears the key
+    property. Deletes are scoped to the original baseline when supplied, so
+    concurrent inserts are not removed by a save of an older layer snapshot.
+    """
     writable = set(writable_columns)
     existing = set(existing_rows)
     kept: set[Any] = set()
     updates: list[RowChange] = []
     inserts: list[RowChange] = []
     skipped: set[str] = set()
+    # Missing capability flags default to allowed, matching frontend inference.
     caps = capabilities or {}
     for feature in features:
         properties = feature.get("properties") or {}
@@ -154,6 +194,7 @@ def plan_feature_diff(
         columns = [column for column in writable_columns if column in properties]
         values = {column: properties[column] for column in columns}
         geometry = feature.get("geometry")
+        # Editors may clear a key property while preserving feature.id.
         key = properties.get(primary_key)
         if key is None:
             key = feature.get("id")
@@ -171,6 +212,8 @@ def plan_feature_diff(
             if geometry == stored_geometry and all(
                 properties[column] == stored_values.get(column) for column in columns
             ):
+                # The client submits the whole layer; skipping unchanged rows
+                # avoids needless UPDATE triggers and MVCC churn.
                 continue
             if not caps.get("update", True):
                 raise HTTPException(
