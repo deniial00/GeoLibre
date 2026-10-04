@@ -442,14 +442,19 @@ def test_session_sensitive_includes_live_token():
 def test_bind_value_restores_column_types():
     # json_safe stringifies these, but SQL Server cannot implicitly cast them back.
     assert mssql._bind_value("00ff", "varbinary") == b"\x00\xff"
-    assert mssql._bind_value("2024-01-01 12:00:00.123456", "datetime2") == datetime.datetime(
+    # datetime2/time are bound as strings so all seven fractional digits survive.
+    assert mssql._bind_value("2024-01-01 12:00:00.1234567", "datetime2") == (
+        "2024-01-01 12:00:00.1234567"
+    )
+    assert mssql._bind_value("2024-01-01 12:00:00.123456", "datetime") == datetime.datetime(
         2024, 1, 1, 12, 0, 0, 123456
     )
     assert mssql._bind_value("2024-01-01", "date") == datetime.date(2024, 1, 1)
     assert mssql._bind_value("12:00:00.5", "time") == "12:00:00.5"
-    assert mssql._bind_value("2024-01-15T10:30:00Z", "datetime2") == datetime.datetime(
+    assert mssql._bind_value("2024-01-15T10:30:00Z", "smalldatetime") == datetime.datetime(
         2024, 1, 15, 10, 30, tzinfo=datetime.timezone.utc
     )
+    assert mssql._bind_value("12:00:00.1234567", "time") == "12:00:00.1234567"
     assert mssql._bind_value("2024-01-01 10:00:00.5 +01:00", "datetimeoffset") == (
         "2024-01-01 10:00:00.5 +01:00"
     )
@@ -521,14 +526,14 @@ def live_db(monkeypatch):
     cur.execute(
         "CREATE TABLE dbo.geolibre_writeback_test (gid int IDENTITY PRIMARY KEY, "
         "name nvarchar(100) NOT NULL, population int, "
-        "seen datetime2, seen_tz datetimeoffset, at_time time(7), "
+        "seen datetime2(7), seen_tz datetimeoffset, at_time time(7), "
         "blob varbinary(8), geom geometry)"
     )
     cur.execute(
         "INSERT INTO dbo.geolibre_writeback_test"
         "(name,population,seen,seen_tz,at_time,blob,geom) VALUES "
-        "('Knoxville',190000,CAST('2024-01-01T12:00:00.123456' AS datetime2),"
-        "'2024-01-01 12:00:00.5 +01:00','12:00:00.5',0x0102,"
+        "('Knoxville',190000,CAST('2024-01-01T12:00:00.1234567' AS datetime2(7)),"
+        "'2024-01-01 12:00:00.5 +01:00','12:00:00.1234567',0x0102,"
         "geometry::Point(-9342009.589714656,4295201.3456280865,3857)),"
         "('Second',2,NULL,NULL,NULL,NULL,geometry::Point(-9000000,4000000,3857)),"
         "('Third',3,NULL,NULL,NULL,NULL,geometry::Point(-8000000,3500000,3857))"
@@ -710,3 +715,9 @@ def test_geography_with_non_wgs84_srid_is_reprojected():
 def test_datetimeoffset_output_converter_decodes_struct():
     raw = struct.pack("<6hI2h", 2024, 1, 2, 3, 4, 5, 123456700, -5, -30)
     assert mssql._datetimeoffset_to_str(raw) == "2024-01-02 03:04:05.123456700 -05:30"
+
+
+def test_time_and_timestamp_decoders_keep_seven_digits():
+    assert mssql._time2_to_str(struct.pack("@3HI", 12, 0, 1, 123456700)) == "12:00:01.1234567"
+    raw = struct.pack("@h5HI", 2024, 1, 2, 3, 4, 5, 123456700)
+    assert mssql._timestamp_to_str(raw) == "2024-01-02 03:04:05.1234567"

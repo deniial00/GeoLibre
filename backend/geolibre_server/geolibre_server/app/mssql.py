@@ -6,6 +6,7 @@ import datetime
 import json
 import logging
 import os
+import re
 import secrets
 import struct
 import sys
@@ -47,12 +48,14 @@ _MAX_SESSIONS = 32
 _TOKEN_SCOPE = "https://database.windows.net/.default"
 _SQL_COPT_SS_ACCESS_TOKEN = 1256
 _SQL_SS_TIMESTAMPOFFSET = -155
+_SQL_SS_TIME2 = -154
+_SQL_TYPE_TIMESTAMP = 93
 _PREFERRED_DRIVERS = ("ODBC Driver 18 for SQL Server", "ODBC Driver 17 for SQL Server")
 # `json_safe` stringifies these, but SQL Server will not implicitly cast the
 # string back (nvarchar -> varbinary is error 257, and the six-digit microsecond
 # form is error 241), so the write path rebinds them as native Python values.
 _BINARY_COLUMN_TYPES = frozenset({"binary", "varbinary", "image"})
-_TEMPORAL_COLUMN_TYPES = frozenset({"datetime", "smalldatetime", "datetime2", "date", "time"})
+_TEMPORAL_COLUMN_TYPES = frozenset({"datetime", "smalldatetime", "date", "time"})
 # pyproj Transformer objects are not documented as thread-safe, and FastAPI
 # runs these sync endpoints in a thread pool, so serialize their use.
 _TRANSFORM_LOCK = threading.Lock()
@@ -282,6 +285,30 @@ def _datetimeoffset_to_str(raw: bytes) -> str:
     )
 
 
+def _time2_to_str(raw: bytes) -> str:
+    """Decode SQL_SS_TIME2_STRUCT keeping all seven fractional digits.
+
+    pyodbc's default time path divides the nanosecond fraction down to
+    microseconds, so an untouched time(7) column would be rewritten with its
+    last digit lost whenever another column on the row is edited.
+    """
+    hour, minute, second, nanos = struct.unpack("@3HI", raw)
+    return f"{hour:02d}:{minute:02d}:{second:02d}.{nanos // 100:07d}"
+
+
+def _timestamp_to_str(raw: bytes) -> str:
+    """Decode TIMESTAMP_STRUCT (datetime2/datetime/smalldatetime) to 7 digits."""
+    year, month, day, hour, minute, second, nanos = struct.unpack("@h5HI", raw)
+    return (
+        f"{year:04d}-{month:02d}-{day:02d} {hour:02d}:{minute:02d}:{second:02d}.{nanos // 100:07d}"
+    )
+
+
+def _trim_fraction(value: str) -> str:
+    """Cut fractional seconds to microseconds so fromisoformat accepts them (3.10)."""
+    return re.sub(r"(\.\d{6})\d+", r"\1", value)
+
+
 def _open_connection(session: _Session) -> Any:
     pyodbc = _import_pyodbc()
     attrs = None
@@ -305,6 +332,8 @@ def _open_connection(session: _Session) -> Any:
         )
         conn.timeout = _QUERY_TIMEOUT_S
         conn.add_output_converter(_SQL_SS_TIMESTAMPOFFSET, _datetimeoffset_to_str)
+        conn.add_output_converter(_SQL_SS_TIME2, _time2_to_str)
+        conn.add_output_converter(_SQL_TYPE_TIMESTAMP, _timestamp_to_str)
         return conn
     except Exception as exc:
         raise HTTPException(
@@ -505,17 +534,27 @@ def _bind_value(value: Any, sql_type: str) -> Any:
         try:
             # Validate only: pyodbc sends datetime.time as TIME_STRUCT, which
             # drops fractional seconds, so bind the string instead.
-            datetime.time.fromisoformat(value.removesuffix("Z"))
+            datetime.time.fromisoformat(_trim_fraction(value.removesuffix("Z")))
             return value.removesuffix("Z")
         except ValueError:
             raise HTTPException(400, "Value for time column is not a valid time") from None
     if sql_type == "datetimeoffset":
         # Read back by _datetimeoffset_to_str in a form SQL Server parses.
         return value
+    if sql_type == "datetime2":
+        # Validate, but bind the string: a datetime object would cut the seventh
+        # fractional digit that the read path preserved.
+        try:
+            datetime.datetime.fromisoformat(_trim_fraction(value.removesuffix("Z")))
+            return value.removesuffix("Z")
+        except ValueError:
+            raise HTTPException(
+                400, "Value for datetime2 column is not a valid timestamp"
+            ) from None
     if sql_type in _TEMPORAL_COLUMN_TYPES:
         try:
             return datetime.datetime.fromisoformat(
-                value[:-1] + "+00:00" if value.endswith("Z") else value
+                _trim_fraction(value[:-1] + "+00:00" if value.endswith("Z") else value)
             )
         except ValueError:
             raise HTTPException(
