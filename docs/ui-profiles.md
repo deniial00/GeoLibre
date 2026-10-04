@@ -24,8 +24,9 @@ level at any time from **Settings → Interface** (see below):
 - **Intermediate** — common data sources, services, and plugins.
 - **Advanced** — everything GeoLibre offers (the default).
 
-An administrator profile can pre-configure the interface for a whole deployment
-and lock these controls.
+An administrator can pre-configure the interface in the primary
+[`deployment.json` policy](deployment-policy.md), or use the legacy
+`admin-profile.json` fallback described below.
 
 ### Settings → Interface
 
@@ -51,19 +52,30 @@ always shown so the profile UI can never be hidden away.
 
 ## For administrators
 
-A deployment can be pre-configured (and optionally locked) with an
-`admin-profile.json` file. When present, it is applied on startup, the onboarding
-wizard is skipped, and — if `lock` is set — the Interface settings are read-only.
+Use the `interface` section in the primary deployment policy. For example:
 
-### File location
+```json
+{
+  "version": 1,
+  "interface": {
+    "enabled": true,
+    "level": "intermediate",
+    "lock": true,
+    "hiddenDataSources": ["postgres", "video"],
+    "hiddenPlugins": ["maplibre-gl-geoagent"]
+  }
+}
+```
 
-- **Web / embed:** serve `admin-profile.json` from the application root (for the
-  Docker/nginx build, the served document root). A missing file is ignored.
-- **Desktop:** place `admin-profile.json` in the app config directory
-  (`read_admin_profile` reads `<app_config_dir>/admin-profile.json`). The desktop
-  file takes precedence over a bundled web file.
+The `interface` field table below describes this section. Provision it at
+[`<base>/deployment.json` for web/embed](deployment-policy.md#loading),
+the [desktop config directory](deployment-policy.md#desktop), or as a
+[Docker source policy](deployment-policy.md#docker).
 
-### File format
+### Legacy: `admin-profile.json` — still honoured
+
+The legacy file remains a fallback when the selected deployment policy has no
+non-empty, valid `interface` section. Its unwrapped format is:
 
 ```json
 {
@@ -75,11 +87,22 @@ wizard is skipped, and — if `lock` is set — the Interface settings are read-
 }
 ```
 
+For web/embed, serve it from the application root. On desktop, the original
+file remains at `<app_config_dir>/admin-profile.json`; see the standard
+[Tauri config paths](deployment-policy.md#desktop). A present desktop file is
+authoritative even if malformed, and does not fall back to the bundled copy.
+Only an absent file or a failed read/command selects the web copy.
+
+### Interface fields
+
+The primary `interface` object and the legacy `admin-profile.json` file share
+these profile fields; the legacy file stores them at top level.
+
 | Field | Type | Meaning |
 | --- | --- | --- |
-| `enabled` | boolean | Whether filtering is active. Defaults to `true` for an admin file. |
+| `enabled` | boolean | Whether filtering is active. Defaults to `true`. |
 | `level` | `"beginner" \| "intermediate" \| "advanced"` | Seeds the hidden lists from each item's tier. Optional. |
-| `lock` | boolean | When `true`, users cannot change the profile from Settings. Removing the file (or serving one without `lock`) releases the lock on the next launch. |
+| `lock` | boolean | When `true`, users cannot change the profile from Settings. To release the lock on the next launch, remove or clear `interface.lock` in the selected deployment policy, or the top-level `lock` in the legacy profile. |
 | `hiddenDataSources` | string[] | Explicit data-source ids to hide. Overrides the preset when present. |
 | `hiddenPlugins` | string[] | Explicit plugin ids to hide. Overrides the preset when present. |
 | `hiddenMenus` | string[] | Top-level menu ids to hide (`project`, `edit`, `addData`, `processing`, `controls`, `plugins`, `help`). |

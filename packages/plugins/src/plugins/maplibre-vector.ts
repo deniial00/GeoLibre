@@ -43,6 +43,7 @@ import {
 import { bridgeVectorControlToStore, exceedsCesiumVectorLimit } from "./vector-cesium-bridge";
 import { applyVectorContainerColors, groupVectorContainerImports } from "./vector-container-group";
 import { readableStacLayerHref } from "./stac-signing";
+import { focusPanel, restorePanelFocus } from "./panel-focus";
 import type { FeatureCollection } from "geojson";
 
 const vectorControlPosition: GeoLibreMapControlPosition = "top-left";
@@ -107,6 +108,14 @@ let vectorControl: VectorControl | null = null;
 let vectorControlMounted = false;
 let openPanelTimeout: number | null = null;
 let restorePanelExpandTimeout: number | null = null;
+/**
+ * The `projectGeneration` in which the user last opened the panel, or null once
+ * it is closed. A restore pass for that same project (the map finishing its
+ * first style load, a basemap swap) must not apply the project's saved panel
+ * state over the user's newer choice: opening Add Data → Vector Layer before
+ * the basemap loaded used to show the panel and then hide it again (#2895).
+ */
+let panelOpenedInGeneration: number | null = null;
 /**
  * Layer ids with an `addData` replay in flight, from project restore or from
  * replayVectorControlLayerById.
@@ -186,9 +195,13 @@ export function setKmlFileImportHandler(handler: KmlFileImportHandler | null): v
  * @param app - The GeoLibre app API.
  */
 export function openVectorLayerPanel(app: GeoLibreAppAPI): void {
+  const openedInGeneration = useAppStore.getState().projectGeneration;
   void (async () => {
     const control = await ensureVectorControl(app);
     if (!control) return;
+    // Recorded only once the control exists, so a failed open never makes a
+    // later restore skip the project's saved panel state.
+    panelOpenedInGeneration = openedInGeneration;
     // Defer by one task so the control finishes its mount cycle before the
     // panel is shown and expanded, matching the other standalone panels
     // (Earth Engine, 3D Tiles, raster); expanding in the same task as
@@ -209,6 +222,8 @@ export function openVectorLayerPanel(app: GeoLibreAppAPI): void {
         applyVectorPanelClass(control);
         wireDesktopFilePicker(control, app);
         wireKmlFileImporter(control);
+        // Take keyboard focus off the menu trigger and into the panel (#2895).
+        focusPanel((control as unknown as VectorControlInternals)._panel, VECTOR_CLOSE_SELECTOR);
       } catch (error) {
         console.error("[GeoLibre] Failed to open the vector layer panel", error);
       }
@@ -219,6 +234,7 @@ export function openVectorLayerPanel(app: GeoLibreAppAPI): void {
 }
 
 export function closeVectorLayerPanel(app: GeoLibreAppAPI): void {
+  panelOpenedInGeneration = null;
   if (openPanelTimeout !== null) {
     window.clearTimeout(openPanelTimeout);
     openPanelTimeout = null;
@@ -322,7 +338,11 @@ export function restoreVectorLayers(app: GeoLibreAppAPI): void {
       // Isolated so a DOM error from the panel-state restore cannot abort
       // the layer replay below.
       try {
-        applyRestoredVectorPanelState(control, panelCollapsed);
+        // The user opened the panel after this project loaded, so their choice
+        // is newer than the saved state; leave the panel as they left it.
+        if (panelOpenedInGeneration !== useAppStore.getState().projectGeneration) {
+          applyRestoredVectorPanelState(control, panelCollapsed);
+        }
       } catch (error) {
         console.error("[GeoLibre] Failed to restore vector panel state", error);
       }
@@ -1154,18 +1174,24 @@ function applyVectorPanelClass(control: VectorControl): void {
   internals._panel?.classList.add(VECTOR_PANEL_CLASS);
 }
 
+const VECTOR_CLOSE_SELECTOR = ".vector-control-close";
+
 // The upstream close button only collapses the panel, leaving the map
 // button visible. Hide the whole control too so closing the panel restores
 // the pre-open map, like dismissing the dialog it replaces. Loaded layers
 // keep rendering; the layer panel still manages them.
 function wireVectorCloseButton(control: VectorControl): void {
   const panel = (control as unknown as VectorControlInternals)._panel;
-  const closeButton = panel?.querySelector<HTMLElement>(".vector-control-close");
+  const closeButton = panel?.querySelector<HTMLElement>(VECTOR_CLOSE_SELECTOR);
   if (!closeButton || closeButton.dataset.geolibreCloseWired === "true") {
     return;
   }
   closeButton.dataset.geolibreCloseWired = "true";
-  closeButton.addEventListener("click", () => hideVectorControl(control));
+  closeButton.addEventListener("click", () => {
+    panelOpenedInGeneration = null;
+    restorePanelFocus(panel);
+    hideVectorControl(control);
+  });
 }
 
 // On desktop the host can read a chosen `.shp`'s sidecar files from the same

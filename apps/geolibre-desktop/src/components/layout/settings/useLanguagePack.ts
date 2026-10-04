@@ -1,4 +1,4 @@
-import { useEffect, useState, type ChangeEvent } from "react";
+import { useEffect, useRef, useState, type ChangeEvent } from "react";
 import { useTranslation } from "react-i18next";
 import {
   LANGUAGE_PACK_MAX_BYTES,
@@ -12,6 +12,7 @@ import {
   installLanguagePackFile,
   removeLanguagePack,
 } from "../../../i18n";
+import { createOperationTokens } from "../../../lib/operation-tokens";
 
 export type LanguagePackBusy = "download" | "import" | "remove" | null;
 
@@ -59,6 +60,27 @@ export function useLanguagePack(open: boolean, language: string): LanguagePackSt
   // not download from.
   const languagePackHost = languagePackBaseUrl();
   const languagePackDownloadsEnabled = languagePackHost.length > 0;
+  // Download/import/remove all await, and the user can switch the UI language
+  // before they settle. Each handler takes a token and only touches state while
+  // it is still current, so a download started for one language can't mark the
+  // next language's pack as installed, and a late remove can't clear it (#2866).
+  const operationsRef = useRef(createOperationTokens());
+  // The language a late-settling import compares its pack's locale against:
+  // the one active when it settles, not the one captured when it started.
+  const languageRef = useRef(language);
+  // Counts operations started, never reset by a language change, so a late
+  // import can tell whether a newer download/import/remove has since written
+  // the installed state (which it must not overwrite).
+  const startedRef = useRef(0);
+
+  useEffect(() => {
+    // Orphan anything in flight for the previous language and drop its busy
+    // state and notice: neither describes the language now shown.
+    languageRef.current = language;
+    operationsRef.current.invalidate();
+    setLanguagePackBusy(null);
+    setLanguagePackNotice(null);
+  }, [language]);
 
   useEffect(() => {
     if (!open) return;
@@ -105,16 +127,21 @@ export function useLanguagePack(open: boolean, language: string): LanguagePackSt
   };
 
   const handleLanguagePackDownload = async () => {
+    const operations = operationsRef.current;
+    const token = operations.begin();
+    startedRef.current += 1;
     setLanguagePackBusy("download");
     setLanguagePackNotice(null);
     try {
       const installed = await downloadLanguagePack(language);
+      if (!operations.isCurrent(token)) return;
       setInstalledLanguagePack(installed);
       setLanguagePackNotice({ kind: "success", text: t("settings.languagePack.downloaded") });
     } catch (packError) {
+      if (!operations.isCurrent(token)) return;
       setLanguagePackNotice({ kind: "error", text: languagePackErrorMessage(packError) });
     } finally {
-      setLanguagePackBusy(null);
+      if (operations.isCurrent(token)) setLanguagePackBusy(null);
     }
   };
 
@@ -130,33 +157,48 @@ export function useLanguagePack(open: boolean, language: string): LanguagePackSt
       setLanguagePackNotice({ kind: "error", text: t("settings.languagePack.errorTooLarge") });
       return;
     }
+    const operations = operationsRef.current;
+    const token = operations.begin();
+    const started = ++startedRef.current;
     setLanguagePackBusy("import");
     setLanguagePackNotice(null);
     try {
       const installed = await installLanguagePackFile(await file.text());
-      if (installed.locale === language) setInstalledLanguagePack(installed);
+      // The file names its own locale, so the pack is still worth showing when
+      // it matches whatever language is active by now, even if the language
+      // changed while it installed.
+      if (installed.locale === languageRef.current && startedRef.current === started) {
+        setInstalledLanguagePack(installed);
+      }
+      if (!operations.isCurrent(token)) return;
       setLanguagePackNotice({
         kind: "success",
         text: t("settings.languagePack.imported", { locale: installed.locale }),
       });
     } catch (packError) {
+      if (!operations.isCurrent(token)) return;
       setLanguagePackNotice({ kind: "error", text: languagePackErrorMessage(packError) });
     } finally {
-      setLanguagePackBusy(null);
+      if (operations.isCurrent(token)) setLanguagePackBusy(null);
     }
   };
 
   const handleLanguagePackRemove = async () => {
+    const operations = operationsRef.current;
+    const token = operations.begin();
+    startedRef.current += 1;
     setLanguagePackBusy("remove");
     setLanguagePackNotice(null);
     try {
       await removeLanguagePack(language);
+      if (!operations.isCurrent(token)) return;
       setInstalledLanguagePack(null);
       setLanguagePackNotice({ kind: "success", text: t("settings.languagePack.removed") });
     } catch (packError) {
+      if (!operations.isCurrent(token)) return;
       setLanguagePackNotice({ kind: "error", text: languagePackErrorMessage(packError) });
     } finally {
-      setLanguagePackBusy(null);
+      if (operations.isCurrent(token)) setLanguagePackBusy(null);
     }
   };
 

@@ -143,7 +143,7 @@ Caching is split to keep the first visit light:
 
 So each of these CDN engines needs the network on **first** use, then works offline. To remove even the first-use dependency, build with `GEOLIBRE_PGLITE_CDN=0` and `GEOLIBRE_CEREUS_CDN=0`, which vendor PGlite/PostGIS and the CereusDB wasm back into the build under `/assets/`, where the same-origin rule covers them (PGlite alone re-adds ~22 MB to the Tauri binary).
 
-To strip **all GeoLibre-controlled** external CDN references from the build output — for deployments that cannot load any resource from untrusted CDNs — use `GEOLIBRE_NO_EXTERNAL_CDN=1`. This implies `GEOLIBRE_PGLITE_CDN=0`, `GEOLIBRE_CEREUS_CDN=0`, `GEOLIBRE_GDAL_CDN=0`, and `GEOLIBRE_DUCKDB_WASM_CDN=0`, and additionally disables features whose code references external CDNs: storymap HTML export (which injects `<script>` tags from `unpkg.com`), built-in object detection models (YOLO ONNX weights from `cdn.jsdelivr.net`), the ONNX Runtime WASM backend, 3D Tiles Draco/KTX2 decoder fallback paths, and the default Pyodide index URL. Note: some third-party npm packages (DuckDB-WASM, loaders.gl, maplibre-gl-3d-tiles) contain their own internal CDN URL strings that cannot be removed without forking them; these are data/WASM fetch targets (`connect-src`), not remote script execution (`script-src`). The 3D Tiles decoders are the case worth spelling out: three.js's `DRACOLoader`/`KTX2Loader` fetch `draco_wasm_wrapper.js` / the basis transcoder **as text** and the matching `.wasm` as an ArrayBuffer (so `connect-src`), then concatenate the JS into a `Blob` and run it with `new Worker(blobURL)` — no `importScripts`. So compressed 3D Tiles need `worker-src blob:`, not a remote `script-src` allowance.
+To strip **all GeoLibre-controlled** external CDN references from the build output — for deployments that cannot load any resource from untrusted CDNs — use `GEOLIBRE_NO_EXTERNAL_CDN=1`. This implies `GEOLIBRE_PGLITE_CDN=0`, `GEOLIBRE_CEREUS_CDN=0`, `GEOLIBRE_GDAL_CDN=0`, and `GEOLIBRE_DUCKDB_WASM_CDN=0`, and additionally disables features whose code references external CDNs: storymap HTML export (which injects `<script>` tags from `unpkg.com`), built-in object detection models (YOLO ONNX weights from `cdn.jsdelivr.net`), Segment Everything, 3D Tiles Draco/KTX2 decoders, and GDAL export. Pyodide remains available when `VITE_PYODIDE_INDEX_URL` points to an approved mirror. Runtime `deployment.json` configures client policy; it does not change this build-time CDN packaging.
 
 **DuckDB-WASM goes the other way**, because it is on the critical path for opening a local vector file and so is bundled by default. `GEOLIBRE_DUCKDB_WASM_CDN=1` moves it to jsDelivr instead — or `npm run lite:build`, which sets that flag and then _asserts_ no emitted file exceeds the ceiling, so a regression fails the build rather than the upload. It is pinned to the installed version by duckdb-wasm's own `getJsDelivrBundles()`, so the fetched engine cannot drift from the loader compiled into the bundle. The flag exists for one reason: `duckdb-mvp.wasm` (~40 MB) and `duckdb-eh.wasm` (~35 MB) both exceed the **25 MiB per-asset limit on Cloudflare Pages and Workers static assets**, which rejects the upload outright, and nothing else in the build comes close (the next largest is ~22 MB). So this single flag decides whether the web build can be hosted there at all — it takes the output from ~251 MB to ~176 MB with no file over the ceiling. GitHub Pages allows 100 MB per file and needs none of this. The flag is ignored for both targets that ship no service worker: a Tauri build, which must stay offline-capable, and an embed build (`GEOLIBRE_EMBED=1`), where the engine would otherwise be refetched every notebook session with no runtime cache behind it. Neither has the size ceiling this exists for, since a binary and a wheel are not uploaded to Cloudflare. A CDN-hosted worker script cannot be passed to `new Worker` (it must be same-origin), so that variant wraps it in a same-origin blob that `importScripts` the real one; this needs `worker-src blob:` and the CDN in `script-src`, both already in `docker/nginx.conf`. The nested `importScripts` is matched against `script-src` rather than `worker-src` — verified against that policy in Chromium and Firefox, since Firefox has historically checked worker sub-resources against `worker-src`/`child-src`.
 
@@ -155,11 +155,30 @@ A new deploy is picked up via `registerType: "autoUpdate"`: the new service work
 
 ## Container image
 
-The root Dockerfile packages the browser version of the app. It uses a Node build stage to run the workspace build for `geolibre-desktop`, then copies `apps/geolibre-desktop/dist` into an nginx runtime image. The nginx config serves static assets and falls back to `index.html` for browser-entry URLs.
+The root Dockerfile packages the browser app: a Node build stage runs the
+`geolibre-desktop` workspace build, then copies `apps/geolibre-desktop/dist`
+into nginx. The nginx config serves static assets and falls back to `index.html`
+for browser-entry URLs.
 
-The `Publish Container Image` GitHub Actions workflow builds the image for pull requests and publishes it to GitHub Container Registry for pushes to `main`, version tags, and manual runs. The upstream image name is `ghcr.io/opengeos/geolibre`.
+At startup, the entrypoint validates the selected source policy, applies
+nonblank environment overrides, generates nginx guards, conditionally starts
+the Python sidecar, and serves the generated public `/deployment.json`. The
+browser fetches that policy before first render, then resolves settings from
+policy, runtime environment and build environment, in that order. See
+[Deployment Policy](deployment-policy.md) and
+[Self-Hosting: container policy enforcement](self-hosting.md#container-policy-enforcement).
 
-The image also bundles the optional Python sidecar (uvicorn) and reverse-proxies it at `/sidecar`, so the browser reaches it same-origin with no CORS; set `GEOLIBRE_DISABLE_SIDECAR=1` to run nginx alone. The container does not run the Tauri desktop shell, so workflows that depend on desktop filesystem access still require the installed desktop app. See [Run with Docker](getting-started.md#run-with-docker) for what the bundled sidecar does and does not back.
+The `Publish Container Image` workflow builds the image for pull requests and
+publishes it to GitHub Container Registry for pushes to `main`, version tags,
+and manual runs. The upstream image name is `ghcr.io/opengeos/geolibre`.
+
+The image bundles the optional Python sidecar (uvicorn) and reverse-proxies it
+at `/sidecar`; it starts only when the final policy grants `processing:run` or
+`data:add` and `GEOLIBRE_DISABLE_SIDECAR` is not `1`. The container does not
+run the Tauri desktop shell, so workflows that depend on desktop filesystem
+access still require the installed desktop app. Client policy and nginx guards
+do not enforce desktop processing, browser WASM, separately exposed sidecars,
+or plugin execution.
 
 ## Security
 
