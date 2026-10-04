@@ -1086,7 +1086,8 @@ export async function fetchMssqlStatus(baseUrl = DEFAULT_SIDECAR_URL): Promise<M
   } catch (error) {
     throw sidecarConnectionError(baseUrl, error);
   }
-  if (!res.ok) throw new Error(await responseErrorMessage(res, "Could not check SQL Server runtime"));
+  if (!res.ok)
+    throw new Error(await responseErrorMessage(res, "Could not check SQL Server runtime"));
   return (await res.json()) as MssqlStatus;
 }
 export async function connectMssql(
@@ -1106,7 +1107,10 @@ export async function connectMssql(
   if (!res.ok) throw new Error(await responseErrorMessage(res, "Could not connect to SQL Server"));
   return (await res.json()) as { session_id: string };
 }
-export async function disconnectMssql(sessionId: string, baseUrl = DEFAULT_SIDECAR_URL): Promise<void> {
+export async function disconnectMssql(
+  sessionId: string,
+  baseUrl = DEFAULT_SIDECAR_URL,
+): Promise<void> {
   let res: Response;
   try {
     res = await sidecarFetch(`${baseUrl}/mssql/disconnect`, {
@@ -1117,9 +1121,13 @@ export async function disconnectMssql(sessionId: string, baseUrl = DEFAULT_SIDEC
   } catch (error) {
     throw sidecarConnectionError(baseUrl, error);
   }
-  if (!res.ok) throw new Error(await responseErrorMessage(res, "Could not disconnect from SQL Server"));
+  if (!res.ok)
+    throw new Error(await responseErrorMessage(res, "Could not disconnect from SQL Server"));
 }
-export async function listMssqlTables(sessionId: string, baseUrl = DEFAULT_SIDECAR_URL): Promise<MssqlTableInfo[]> {
+export async function listMssqlTables(
+  sessionId: string,
+  baseUrl = DEFAULT_SIDECAR_URL,
+): Promise<MssqlTableInfo[]> {
   let res: Response;
   try {
     res = await sidecarFetch(`${baseUrl}/mssql/tables`, {
@@ -1130,7 +1138,10 @@ export async function listMssqlTables(sessionId: string, baseUrl = DEFAULT_SIDEC
   } catch (error) {
     throw sidecarConnectionError(baseUrl, error);
   }
-  if (res.status === 410) throw new MssqlSessionExpiredError(await responseErrorMessage(res, "SQL Server session expired"));
+  if (res.status === 410)
+    throw new MssqlSessionExpiredError(
+      await responseErrorMessage(res, "SQL Server session expired"),
+    );
   if (!res.ok) throw new Error(await responseErrorMessage(res, "Could not list SQL Server tables"));
   return ((await res.json()) as { tables: MssqlTableInfo[] }).tables;
 }
@@ -1148,7 +1159,10 @@ export async function readMssqlTable(
   } catch (error) {
     throw sidecarConnectionError(baseUrl, error);
   }
-  if (res.status === 410) throw new MssqlSessionExpiredError(await responseErrorMessage(res, "SQL Server session expired"));
+  if (res.status === 410)
+    throw new MssqlSessionExpiredError(
+      await responseErrorMessage(res, "SQL Server session expired"),
+    );
   if (!res.ok) throw new Error(await responseErrorMessage(res, "Could not read SQL Server table"));
   return (await res.json()) as ReadMssqlTableResult;
 }
@@ -1166,8 +1180,12 @@ export async function writeMssqlTable(
   } catch (error) {
     throw sidecarConnectionError(baseUrl, error);
   }
-  if (res.status === 410) throw new MssqlSessionExpiredError(await responseErrorMessage(res, "SQL Server session expired"));
-  if (!res.ok) throw new Error(await responseErrorMessage(res, "Could not save edits to SQL Server"));
+  if (res.status === 410)
+    throw new MssqlSessionExpiredError(
+      await responseErrorMessage(res, "SQL Server session expired"),
+    );
+  if (!res.ok)
+    throw new Error(await responseErrorMessage(res, "Could not save edits to SQL Server"));
   return (await res.json()) as WriteMssqlTableResult;
 }
 

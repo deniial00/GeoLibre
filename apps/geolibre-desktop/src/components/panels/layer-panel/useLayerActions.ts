@@ -36,7 +36,13 @@ import {
   type MapEngine,
 } from "@geolibre/map";
 import { importStyleText } from "@geolibre/map/style-import";
-import { readMssqlTable, readPostgisTable, writeMssqlTable, writePostgisTable, writeVectorToSource } from "@geolibre/processing";
+import {
+  readMssqlTable,
+  readPostgisTable,
+  writeMssqlTable,
+  writePostgisTable,
+  writeVectorToSource,
+} from "@geolibre/processing";
 import { commitPendingAttributeDrafts } from "../../../lib/attribute-draft-commit";
 import { bindTemporalLayer, createAppAPI, usePluginRegistry } from "../../../hooks/usePlugins";
 import {
@@ -76,7 +82,11 @@ import {
   mssqlBaselineKeys,
   withMssqlSession,
 } from "../../../lib/mssql-sessions";
-import { isMssqlEditableLayer, isPostgisEditableLayer, type LayerRefreshStatus } from "./layer-panel-utils";
+import {
+  isMssqlEditableLayer,
+  isPostgisEditableLayer,
+  type LayerRefreshStatus,
+} from "./layer-panel-utils";
 
 type PluginRegistry = ReturnType<typeof usePluginRegistry>;
 
@@ -789,9 +799,7 @@ export function useLayerActions({
         if (isMssql) {
           const connectionId = layer.metadata.mssqlConnectionId as string;
           const schema =
-            typeof layer.metadata.mssqlSchema === "string"
-              ? layer.metadata.mssqlSchema
-              : "dbo";
+            typeof layer.metadata.mssqlSchema === "string" ? layer.metadata.mssqlSchema : "dbo";
           const table = layer.metadata.mssqlTable as string;
           const geometryColumn =
             typeof layer.metadata.mssqlGeometryColumn === "string"

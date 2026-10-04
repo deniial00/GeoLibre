@@ -97,7 +97,11 @@ import { canExportRasterLayer } from "../../../lib/raster-export";
 import { canExtractRasterSubset } from "../../../lib/raster-subset-export";
 import { layerSupportsPolylineExport } from "../../../lib/vector-export";
 import { isTauri } from "../../../lib/is-tauri";
-import { canWriteEditsToSource, isMssqlEditableLayer, isPostgisEditableLayer } from "./layer-panel-utils";
+import {
+  canWriteEditsToSource,
+  isMssqlEditableLayer,
+  isPostgisEditableLayer,
+} from "./layer-panel-utils";
 import type { LayerActions } from "./useLayerActions";
 import type { LayerRefresh } from "./useLayerRefresh";
 import type { TimeSliderBinding } from "./useTimeSliderBinding";

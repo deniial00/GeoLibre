@@ -19,7 +19,12 @@ import {
   type MssqlConnectionProfile,
   type MssqlStoredSecret,
 } from "../../../../lib/saved-mssql-connections";
-import { openMssqlSession, requiredMssqlSecret, resolveMssqlSecret, withMssqlSession } from "../../../../lib/mssql-sessions";
+import {
+  openMssqlSession,
+  requiredMssqlSecret,
+  resolveMssqlSecret,
+  withMssqlSession,
+} from "../../../../lib/mssql-sessions";
 import { postgisFeatureKeys } from "../../../../lib/postgis-connections";
 import { postgisTableKey, postgisTableLabel } from "../../../../lib/postgis-table-selection";
 import { isDesktopRuntime, isWindows } from "../../../../lib/is-mobile";
@@ -43,8 +48,7 @@ const AUTH_LABEL_KEY: Record<MssqlAuthMethod, `addData.mssql.auth.${MssqlAuthMet
   token: "addData.mssql.auth.token",
 };
 
-
-type MssqlLabelKey = Exclude<keyof typeof en["addData"]["mssql"], "auth">;
+type MssqlLabelKey = Exclude<keyof (typeof en)["addData"]["mssql"], "auth">;
 export function MssqlSource({ initialMssql }: MssqlSourceProps) {
   const { t } = useTranslation();
   const source = useAddDataSource(t("addData.mssql.defaultName"));
@@ -62,7 +66,9 @@ export function MssqlSource({ initialMssql }: MssqlSourceProps) {
   const [trustServerCertificate, setTrustServerCertificate] = useState(
     () => selectedSaved?.trustServerCertificate ?? false,
   );
-  const [authMethod, setAuthMethod] = useState<MssqlAuthMethod>(() => selectedSaved?.authMethod ?? "sql");
+  const [authMethod, setAuthMethod] = useState<MssqlAuthMethod>(
+    () => selectedSaved?.authMethod ?? "sql",
+  );
   const [username, setUsername] = useState(() => selectedSaved?.username ?? "");
   const [tenantId, setTenantId] = useState(() => selectedSaved?.tenantId ?? "");
   const [clientId, setClientId] = useState(() => selectedSaved?.clientId ?? "");
@@ -104,11 +110,19 @@ export function MssqlSource({ initialMssql }: MssqlSourceProps) {
       setTenantId(next.tenantId ?? "");
       setClientId(next.clientId ?? "");
     } else {
-      setServer(""); setPort("1433"); setDatabase(""); setEncrypt(true);
-      setTrustServerCertificate(false); setAuthMethod("sql"); setUsername("");
-      setTenantId(""); setClientId("");
+      setServer("");
+      setPort("1433");
+      setDatabase("");
+      setEncrypt(true);
+      setTrustServerCertificate(false);
+      setAuthMethod("sql");
+      setUsername("");
+      setTenantId("");
+      setClientId("");
     }
-    setPassword(""); setClientSecret(""); setAccessToken("");
+    setPassword("");
+    setClientSecret("");
+    setAccessToken("");
     invalidateConnection();
   };
 
@@ -137,18 +151,29 @@ export function MssqlSource({ initialMssql }: MssqlSourceProps) {
       if (!Number.isInteger(portNumber) || portNumber < 1 || portNumber > 65535) {
         throw new Error(t("addData.mssql.errorPort"));
       }
-      const requiredField = authMethod === "sql" || authMethod === "entra_password"
-        ? (!username.trim() ? "username" : "")
-        : authMethod === "entra_sp"
-          ? (!tenantId.trim() ? "tenantId" : !clientId.trim() ? "clientId" : "")
-          : "";
+      const requiredField =
+        authMethod === "sql" || authMethod === "entra_password"
+          ? !username.trim()
+            ? "username"
+            : ""
+          : authMethod === "entra_sp"
+            ? !tenantId.trim()
+              ? "tenantId"
+              : !clientId.trim()
+                ? "clientId"
+                : ""
+            : "";
       if (requiredField) {
         const fieldLabel = t(`addData.mssql.${requiredField}`);
         throw new Error(t("addData.mssql.errorMissingField", { field: fieldLabel }));
       }
       const draft: Omit<MssqlConnectionProfile, "id"> = {
-        server: server.trim(), port: portNumber, database: database.trim(), encrypt,
-        trustServerCertificate, authMethod,
+        server: server.trim(),
+        port: portNumber,
+        database: database.trim(),
+        encrypt,
+        trustServerCertificate,
+        authMethod,
         ...(username.trim() ? { username: username.trim() } : {}),
         ...(tenantId.trim() ? { tenantId: tenantId.trim() } : {}),
         ...(clientId.trim() ? { clientId: clientId.trim() } : {}),
@@ -156,40 +181,81 @@ export function MssqlSource({ initialMssql }: MssqlSourceProps) {
       const id = findMssqlConnectionId(draft) ?? crypto.randomUUID();
       const profile: MssqlConnectionProfile = { ...draft, id };
       const secret: MssqlStoredSecret & { accessToken?: string } = {
-        ...(password ? { password } : {}), ...(clientSecret ? { clientSecret } : {}),
+        ...(password ? { password } : {}),
+        ...(clientSecret ? { clientSecret } : {}),
         ...(accessToken ? { accessToken } : {}),
       };
       const resolved = resolveMssqlSecret(id, secret);
       const required = requiredMssqlSecret(authMethod);
       if (required && !resolved[required]) {
         const cached = savedMssqlSecret(id);
-        const placeholderAvailable = required === "password" ? cached?.password : required === "clientSecret" ? cached?.clientSecret : false;
+        const placeholderAvailable =
+          required === "password"
+            ? cached?.password
+            : required === "clientSecret"
+              ? cached?.clientSecret
+              : false;
         if (!placeholderAvailable) {
-          throw new Error(t("addData.mssql.errorMissingField", { field: t(`addData.mssql.${required === "clientSecret" ? "clientSecret" : required === "accessToken" ? "accessToken" : "password"}`) }));
+          throw new Error(
+            t("addData.mssql.errorMissingField", {
+              field: t(
+                `addData.mssql.${required === "clientSecret" ? "clientSecret" : required === "accessToken" ? "accessToken" : "password"}`,
+              ),
+            }),
+          );
         }
       }
-      try { await startGeoLibreSidecar(); } catch { /* status request below reports the runtime failure */ }
+      try {
+        await startGeoLibreSidecar();
+      } catch {
+        /* status request below reports the runtime failure */
+      }
       const runtime = await fetchMssqlStatus();
-      if (!runtime.available) throw new Error(t("addData.mssql.errorRuntimeMissing", { detail: runtime.message }));
-      if (!runtime.auth_methods.includes(authMethod)) throw new Error(t("addData.mssql.errorAuthMethodUnavailable"));
-      setStatus(t(authMethod === "entra_interactive" ? "addData.mssql.statusSigningIn" : "addData.mssql.statusConnecting"));
+      if (!runtime.available)
+        throw new Error(t("addData.mssql.errorRuntimeMissing", { detail: runtime.message }));
+      if (!runtime.auth_methods.includes(authMethod))
+        throw new Error(t("addData.mssql.errorAuthMethodUnavailable"));
+      setStatus(
+        t(
+          authMethod === "entra_interactive"
+            ? "addData.mssql.statusSigningIn"
+            : "addData.mssql.statusConnecting",
+        ),
+      );
       const sessionId = await openMssqlSession(profile, resolved);
       const listed = await listMssqlTables(sessionId);
       if (listRequestRef.current !== requestToken) return;
-      setSavedProfiles(rememberMssqlConnection(profile, resolved.password || resolved.clientSecret
-        ? { password: resolved.password, clientSecret: resolved.clientSecret } : null));
+      setSavedProfiles(
+        rememberMssqlConnection(
+          profile,
+          resolved.password || resolved.clientSecret
+            ? { password: resolved.password, clientSecret: resolved.clientSecret }
+            : null,
+        ),
+      );
       setSelectedSavedId(id);
       setActiveProfileId(id);
       setTables(listed);
       const desired = desiredTableRef.current;
-      const preferred = desired && listed.find((table) => table.primary_key && table.table === desired.table && (!desired.schema || table.schema === desired.schema));
+      const preferred =
+        desired &&
+        listed.find(
+          (table) =>
+            table.primary_key &&
+            table.table === desired.table &&
+            (!desired.schema || table.schema === desired.schema),
+        );
       const chosen = preferred ?? listed.find((table) => table.primary_key);
       setSelectedTableKey(chosen ? postgisTableKey(chosen) : "");
       setSelectedGeometryColumn(chosen?.geometry_column ?? "");
       desiredTableRef.current = null;
-      setStatus(listed.length
-        ? t("addData.mssql.statusTablesFound", { count: new Set(listed.map(postgisTableKey)).size })
-        : t("addData.mssql.statusNoTables"));
+      setStatus(
+        listed.length
+          ? t("addData.mssql.statusTablesFound", {
+              count: new Set(listed.map(postgisTableKey)).size,
+            })
+          : t("addData.mssql.statusNoTables"),
+      );
     } catch (error) {
       if (listRequestRef.current === requestToken) {
         source.setError(errorMessage(error, t("addData.mssql.errorConnect")));
@@ -212,33 +278,48 @@ export function MssqlSource({ initialMssql }: MssqlSourceProps) {
   const selectedGeometries = tables.filter((table) => postgisTableKey(table) === selectedTableKey);
 
   const handleSubmit = source.runSubmit(async () => {
-    const table = tables.find((item) => postgisTableKey(item) === selectedTableKey && item.geometry_column === selectedGeometryColumn);
+    const table = tables.find(
+      (item) =>
+        postgisTableKey(item) === selectedTableKey &&
+        item.geometry_column === selectedGeometryColumn,
+    );
     if (!activeProfileId || !table) throw new Error(t("addData.mssql.errorConnectFirst"));
     if (!table.primary_key) throw new Error(t("addData.mssql.errorSelectTable"));
-    const result = await withMssqlSession(activeProfileId, (sessionId) => readMssqlTable({
-      session_id: sessionId,
-      schema_name: table.schema,
-      table: table.table,
-      geometry_column: table.geometry_column,
-    }));
+    const result = await withMssqlSession(activeProfileId, (sessionId) =>
+      readMssqlTable({
+        session_id: sessionId,
+        schema_name: table.schema,
+        table: table.table,
+        geometry_column: table.geometry_column,
+      }),
+    );
     const savedProfile = readSavedMssqlConnections().find((item) => item.id === activeProfileId);
     if (!savedProfile) throw new Error(t("addData.mssql.errorReconnectRequired"));
     const layer = {
-      ...createBaseLayer(source.layerName.trim() || table.table, "geojson", {
-        type: "geojson", service: "mssql", schema: result.schema, table: result.table,
-      }, {
-        featureCount: result.feature_count,
-        sourceKind: "mssql-table",
-        mssqlConnectionId: activeProfileId,
-        mssqlConnectionLabel: mssqlConnectionLabel(savedProfile),
-        mssqlSchema: result.schema,
-        mssqlTable: result.table,
-        mssqlPrimaryKey: result.primary_key,
-        mssqlGeometryColumn: result.geometry_column,
-        mssqlColumnType: result.column_type,
-        mssqlSrid: result.srid,
-        mssqlBaselineKeys: postgisFeatureKeys(result.geojson),
-      }, { geojson: result.geojson }),
+      ...createBaseLayer(
+        source.layerName.trim() || table.table,
+        "geojson",
+        {
+          type: "geojson",
+          service: "mssql",
+          schema: result.schema,
+          table: result.table,
+        },
+        {
+          featureCount: result.feature_count,
+          sourceKind: "mssql-table",
+          mssqlConnectionId: activeProfileId,
+          mssqlConnectionLabel: mssqlConnectionLabel(savedProfile),
+          mssqlSchema: result.schema,
+          mssqlTable: result.table,
+          mssqlPrimaryKey: result.primary_key,
+          mssqlGeometryColumn: result.geometry_column,
+          mssqlColumnType: result.column_type,
+          mssqlSrid: result.srid,
+          mssqlBaselineKeys: postgisFeatureKeys(result.geojson),
+        },
+        { geojson: result.geojson },
+      ),
       geojson: result.geojson,
     };
     source.addAndClose(layer, { fit: true });
@@ -247,40 +328,267 @@ export function MssqlSource({ initialMssql }: MssqlSourceProps) {
   const savedSecret = selectedSavedId ? savedMssqlSecret(selectedSavedId) : undefined;
   const label = (key: MssqlLabelKey): string => t(`addData.mssql.${key}`);
   return (
-    <AddDataSourceForm layerName={source.layerName} onLayerNameChange={source.setLayerName}
-      beforeLayerId={source.beforeLayerId} onBeforeLayerIdChange={source.setBeforeLayerId}
-      onSubmit={handleSubmit} error={source.error}
-      submitDisabled={source.isSubmitting || !selectedTableKey || !activeProfileId}>
+    <AddDataSourceForm
+      layerName={source.layerName}
+      onLayerNameChange={source.setLayerName}
+      beforeLayerId={source.beforeLayerId}
+      onBeforeLayerIdChange={source.setBeforeLayerId}
+      onSubmit={handleSubmit}
+      error={source.error}
+      submitDisabled={source.isSubmitting || !selectedTableKey || !activeProfileId}
+    >
       <div className="space-y-3">
-        {!desktopRuntime ? <p className="rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs text-amber-700 dark:text-amber-300">{t("addData.mssql.desktopOnlyNotice")}</p> : null}
+        {!desktopRuntime ? (
+          <p className="rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs text-amber-700 dark:text-amber-300">
+            {t("addData.mssql.desktopOnlyNotice")}
+          </p>
+        ) : null}
         <p className="text-xs text-muted-foreground">{t("addData.mssql.editableNotice")}</p>
         <div className="space-y-1.5">
           <Label htmlFor="mssql-saved">{label("savedConnection")}</Label>
-          <Select id="mssql-saved" value={selectedSavedId} onChange={(event) => changeSavedProfile(event.target.value)}>
+          <Select
+            id="mssql-saved"
+            value={selectedSavedId}
+            onChange={(event) => changeSavedProfile(event.target.value)}
+          >
             <option value="">{label("selectSavedConnection")}</option>
-            {savedProfiles.map((item) => <option key={item.id} value={item.id}>{mssqlConnectionLabel(item)}</option>)}
+            {savedProfiles.map((item) => (
+              <option key={item.id} value={item.id}>
+                {mssqlConnectionLabel(item)}
+              </option>
+            ))}
           </Select>
         </div>
         <div className="grid gap-3 sm:grid-cols-2">
-          <div className="space-y-1.5"><Label htmlFor="mssql-server">{label("server")}</Label><Input id="mssql-server" placeholder={t("addData.mssql.serverPlaceholder")} value={server} onChange={(event) => changeField(() => setServer(event.target.value))} /></div>
-          <div className="space-y-1.5"><Label htmlFor="mssql-port">{label("port")}</Label><Input id="mssql-port" inputMode="numeric" value={port} onChange={(event) => changeField(() => setPort(event.target.value))} /></div>
-          <div className="space-y-1.5"><Label htmlFor="mssql-database">{label("database")}</Label><Input id="mssql-database" value={database} onChange={(event) => changeField(() => setDatabase(event.target.value))} /></div>
-          <div className="space-y-1.5"><Label htmlFor="mssql-auth">{label("authMethod")}</Label><Select id="mssql-auth" value={authMethod} onChange={(event) => changeField(() => setAuthMethod(event.target.value as MssqlAuthMethod))}>{MSSQL_AUTH_METHODS.map((method) => <option key={method} value={method} disabled={method === "windows" && !windowsHost}>{t(AUTH_LABEL_KEY[method])}</option>)}</Select></div>
+          <div className="space-y-1.5">
+            <Label htmlFor="mssql-server">{label("server")}</Label>
+            <Input
+              id="mssql-server"
+              placeholder={t("addData.mssql.serverPlaceholder")}
+              value={server}
+              onChange={(event) => changeField(() => setServer(event.target.value))}
+            />
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="mssql-port">{label("port")}</Label>
+            <Input
+              id="mssql-port"
+              inputMode="numeric"
+              value={port}
+              onChange={(event) => changeField(() => setPort(event.target.value))}
+            />
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="mssql-database">{label("database")}</Label>
+            <Input
+              id="mssql-database"
+              value={database}
+              onChange={(event) => changeField(() => setDatabase(event.target.value))}
+            />
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="mssql-auth">{label("authMethod")}</Label>
+            <Select
+              id="mssql-auth"
+              value={authMethod}
+              onChange={(event) =>
+                changeField(() => setAuthMethod(event.target.value as MssqlAuthMethod))
+              }
+            >
+              {MSSQL_AUTH_METHODS.map((method) => (
+                <option key={method} value={method} disabled={method === "windows" && !windowsHost}>
+                  {t(AUTH_LABEL_KEY[method])}
+                </option>
+              ))}
+            </Select>
+          </div>
         </div>
-        {authMethod === "windows" && !windowsHost ? <p className="text-xs text-muted-foreground">{label("authWindowsOnly")}</p> : null}
+        {authMethod === "windows" && !windowsHost ? (
+          <p className="text-xs text-muted-foreground">{label("authWindowsOnly")}</p>
+        ) : null}
         <div className="flex flex-wrap gap-x-5 gap-y-2">
-          <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={encrypt} onChange={(event) => changeField(() => setEncrypt(event.target.checked))} />{label("encrypt")}</label>
-          <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={trustServerCertificate} onChange={(event) => changeField(() => setTrustServerCertificate(event.target.checked))} />{label("trustServerCertificate")}</label>
+          <label className="flex items-center gap-2 text-sm">
+            <input
+              type="checkbox"
+              checked={encrypt}
+              onChange={(event) => changeField(() => setEncrypt(event.target.checked))}
+            />
+            {label("encrypt")}
+          </label>
+          <label className="flex items-center gap-2 text-sm">
+            <input
+              type="checkbox"
+              checked={trustServerCertificate}
+              onChange={(event) =>
+                changeField(() => setTrustServerCertificate(event.target.checked))
+              }
+            />
+            {label("trustServerCertificate")}
+          </label>
         </div>
-        {(authMethod === "sql" || authMethod === "entra_password") ? <div className="grid gap-3 sm:grid-cols-2"><div className="space-y-1.5"><Label htmlFor="mssql-username">{label("username")}</Label><Input id="mssql-username" value={username} onChange={(event) => changeField(() => setUsername(event.target.value))} /></div><div className="space-y-1.5"><Label htmlFor="mssql-password">{label("password")}</Label><Input id="mssql-password" type="password" autoComplete="off" placeholder={!password && savedSecret?.password ? t("addData.mssql.passwordSavedPlaceholder") : undefined} value={password} onChange={(event) => changeField(() => setPassword(event.target.value))} /></div></div> : null}
-        {authMethod === "entra_sp" ? <div className="grid gap-3 sm:grid-cols-3"><div className="space-y-1.5"><Label htmlFor="mssql-tenant">{label("tenantId")}</Label><Input id="mssql-tenant" value={tenantId} onChange={(event) => changeField(() => setTenantId(event.target.value))} /></div><div className="space-y-1.5"><Label htmlFor="mssql-client">{label("clientId")}</Label><Input id="mssql-client" value={clientId} onChange={(event) => changeField(() => setClientId(event.target.value))} /></div><div className="space-y-1.5"><Label htmlFor="mssql-client-secret">{label("clientSecret")}</Label><Input id="mssql-client-secret" type="password" autoComplete="off" placeholder={!clientSecret && savedSecret?.clientSecret ? t("addData.mssql.passwordSavedPlaceholder") : undefined} value={clientSecret} onChange={(event) => changeField(() => setClientSecret(event.target.value))} /></div></div> : null}
-        {authMethod === "entra_interactive" ? <><div className="grid gap-3 sm:grid-cols-2"><div className="space-y-1.5"><Label htmlFor="mssql-tenant">{label("tenantId")}</Label><Input id="mssql-tenant" value={tenantId} onChange={(event) => changeField(() => setTenantId(event.target.value))} /></div><div className="space-y-1.5"><Label htmlFor="mssql-client">{label("clientId")}</Label><Input id="mssql-client" value={clientId} onChange={(event) => changeField(() => setClientId(event.target.value))} /></div></div><p className="text-xs text-muted-foreground">{label("interactiveNotice")}</p></> : null}
-        {authMethod === "msi" ? <div className="space-y-1.5"><Label htmlFor="mssql-client">{label("clientId")}</Label><Input id="mssql-client" value={clientId} onChange={(event) => changeField(() => setClientId(event.target.value))} /></div> : null}
-        {authMethod === "token" ? <div className="space-y-1.5"><Label htmlFor="mssql-token">{label("accessToken")}</Label><Input id="mssql-token" type="password" autoComplete="off" value={accessToken} onChange={(event) => changeField(() => setAccessToken(event.target.value))} /></div> : null}
-        <Button type="button" variant="outline" onClick={() => void handleConnect()} disabled={source.isSubmitting || !desktopRuntime}>{label("connect")}</Button>
+        {authMethod === "sql" || authMethod === "entra_password" ? (
+          <div className="grid gap-3 sm:grid-cols-2">
+            <div className="space-y-1.5">
+              <Label htmlFor="mssql-username">{label("username")}</Label>
+              <Input
+                id="mssql-username"
+                value={username}
+                onChange={(event) => changeField(() => setUsername(event.target.value))}
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="mssql-password">{label("password")}</Label>
+              <Input
+                id="mssql-password"
+                type="password"
+                autoComplete="off"
+                placeholder={
+                  !password && savedSecret?.password
+                    ? t("addData.mssql.passwordSavedPlaceholder")
+                    : undefined
+                }
+                value={password}
+                onChange={(event) => changeField(() => setPassword(event.target.value))}
+              />
+            </div>
+          </div>
+        ) : null}
+        {authMethod === "entra_sp" ? (
+          <div className="grid gap-3 sm:grid-cols-3">
+            <div className="space-y-1.5">
+              <Label htmlFor="mssql-tenant">{label("tenantId")}</Label>
+              <Input
+                id="mssql-tenant"
+                value={tenantId}
+                onChange={(event) => changeField(() => setTenantId(event.target.value))}
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="mssql-client">{label("clientId")}</Label>
+              <Input
+                id="mssql-client"
+                value={clientId}
+                onChange={(event) => changeField(() => setClientId(event.target.value))}
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="mssql-client-secret">{label("clientSecret")}</Label>
+              <Input
+                id="mssql-client-secret"
+                type="password"
+                autoComplete="off"
+                placeholder={
+                  !clientSecret && savedSecret?.clientSecret
+                    ? t("addData.mssql.passwordSavedPlaceholder")
+                    : undefined
+                }
+                value={clientSecret}
+                onChange={(event) => changeField(() => setClientSecret(event.target.value))}
+              />
+            </div>
+          </div>
+        ) : null}
+        {authMethod === "entra_interactive" ? (
+          <>
+            <div className="grid gap-3 sm:grid-cols-2">
+              <div className="space-y-1.5">
+                <Label htmlFor="mssql-tenant">{label("tenantId")}</Label>
+                <Input
+                  id="mssql-tenant"
+                  value={tenantId}
+                  onChange={(event) => changeField(() => setTenantId(event.target.value))}
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="mssql-client">{label("clientId")}</Label>
+                <Input
+                  id="mssql-client"
+                  value={clientId}
+                  onChange={(event) => changeField(() => setClientId(event.target.value))}
+                />
+              </div>
+            </div>
+            <p className="text-xs text-muted-foreground">{label("interactiveNotice")}</p>
+          </>
+        ) : null}
+        {authMethod === "msi" ? (
+          <div className="space-y-1.5">
+            <Label htmlFor="mssql-client">{label("clientId")}</Label>
+            <Input
+              id="mssql-client"
+              value={clientId}
+              onChange={(event) => changeField(() => setClientId(event.target.value))}
+            />
+          </div>
+        ) : null}
+        {authMethod === "token" ? (
+          <div className="space-y-1.5">
+            <Label htmlFor="mssql-token">{label("accessToken")}</Label>
+            <Input
+              id="mssql-token"
+              type="password"
+              autoComplete="off"
+              value={accessToken}
+              onChange={(event) => changeField(() => setAccessToken(event.target.value))}
+            />
+          </div>
+        ) : null}
+        <Button
+          type="button"
+          variant="outline"
+          onClick={() => void handleConnect()}
+          disabled={source.isSubmitting || !desktopRuntime}
+        >
+          {label("connect")}
+        </Button>
         {status ? <p className="text-xs text-muted-foreground">{status}</p> : null}
-        {tables.length > 0 ? <div className="space-y-1.5"><Label htmlFor="mssql-table">{label("editableTable")}</Label><Select id="mssql-table" value={selectedTableKey} onChange={(event) => { setSelectedTableKey(event.target.value); const chosen = tables.find((table) => postgisTableKey(table) === event.target.value); setSelectedGeometryColumn(chosen?.geometry_column ?? ""); }}><option value="">{label("errorSelectTable")}</option>{uniqueTables.map((table) => { const key = postgisTableKey(table); const title = postgisTableLabel(table); const optionLabel = `${title} — ${table.geometry_column} (${table.geometry_type}, ${table.column_type}, EPSG:${table.srid})`; return <option key={key} value={key} disabled={!table.primary_key}>{table.primary_key ? optionLabel : t("addData.mssql.tableReadOnly", { table: title })}</option>; })}</Select></div> : null}
-        {selectedGeometries.length > 1 ? <div className="space-y-1.5"><Label htmlFor="mssql-geometry">{label("geometryColumn")}</Label><Select id="mssql-geometry" value={selectedGeometryColumn} onChange={(event) => setSelectedGeometryColumn(event.target.value)}>{selectedGeometries.map((table) => <option key={table.geometry_column} value={table.geometry_column}>{table.geometry_column} ({table.geometry_type}, {table.column_type}, EPSG:{table.srid})</option>)}</Select></div> : null}
+        {tables.length > 0 ? (
+          <div className="space-y-1.5">
+            <Label htmlFor="mssql-table">{label("editableTable")}</Label>
+            <Select
+              id="mssql-table"
+              value={selectedTableKey}
+              onChange={(event) => {
+                setSelectedTableKey(event.target.value);
+                const chosen = tables.find(
+                  (table) => postgisTableKey(table) === event.target.value,
+                );
+                setSelectedGeometryColumn(chosen?.geometry_column ?? "");
+              }}
+            >
+              <option value="">{label("errorSelectTable")}</option>
+              {uniqueTables.map((table) => {
+                const key = postgisTableKey(table);
+                const title = postgisTableLabel(table);
+                const optionLabel = `${title} — ${table.geometry_column} (${table.geometry_type}, ${table.column_type}, EPSG:${table.srid})`;
+                return (
+                  <option key={key} value={key} disabled={!table.primary_key}>
+                    {table.primary_key
+                      ? optionLabel
+                      : t("addData.mssql.tableReadOnly", { table: title })}
+                  </option>
+                );
+              })}
+            </Select>
+          </div>
+        ) : null}
+        {selectedGeometries.length > 1 ? (
+          <div className="space-y-1.5">
+            <Label htmlFor="mssql-geometry">{label("geometryColumn")}</Label>
+            <Select
+              id="mssql-geometry"
+              value={selectedGeometryColumn}
+              onChange={(event) => setSelectedGeometryColumn(event.target.value)}
+            >
+              {selectedGeometries.map((table) => (
+                <option key={table.geometry_column} value={table.geometry_column}>
+                  {table.geometry_column} ({table.geometry_type}, {table.column_type}, EPSG:
+                  {table.srid})
+                </option>
+              ))}
+            </Select>
+          </div>
+        ) : null}
       </div>
     </AddDataSourceForm>
   );

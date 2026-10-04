@@ -629,7 +629,6 @@ export function buildMssqlTableNodes(
     }));
 }
 
-
 /**
  * Returns a copy of the tree with each `connection` node's children replaced by
  * the current lazy-load state: a status row while loading or on error, or the
@@ -655,7 +654,9 @@ export function augmentConnections(
       const load = loads[isMssql ? `mssql:${connectionId}` : connectionId];
       let children: BrowserNode[] = [];
       if (load?.status === "loading") {
-        children = [{ id: `${node.id}:loading`, kind: "info", label: loadingLabel, addable: false }];
+        children = [
+          { id: `${node.id}:loading`, kind: "info", label: loadingLabel, addable: false },
+        ];
       } else if (load?.status === "error") {
         children = [{ id: `${node.id}:error`, kind: "info", label: load.message, addable: false }];
       } else if (load?.status === "loaded") {

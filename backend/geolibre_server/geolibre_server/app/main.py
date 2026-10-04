@@ -28,9 +28,9 @@ from starlette.middleware.trustedhost import TrustedHostMiddleware
 from .conversion import router as conversion_router
 from .ml import router as ml_router
 from .ml import stop_child_server
+from .mssql import router as mssql_router
 from .pointcloud import router as pointcloud_router
 from .postgis import router as postgis_router
-from .mssql import router as mssql_router
 from .raster import router as raster_router
 from .sql import router as sql_router
 from .vector import router as vector_router

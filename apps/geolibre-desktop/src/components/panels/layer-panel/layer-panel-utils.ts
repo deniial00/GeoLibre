@@ -131,7 +131,6 @@ export function canWriteEditsToSource(layer: GeoLibreLayer): boolean {
   return ext ? WRITEBACK_EXTENSIONS.includes(ext) : false;
 }
 
-
 /**
  * Async state of the GeoTIFF header read that backs the raster section of the
  * metadata dialog. `layerId` scopes the state to the layer it was read for:

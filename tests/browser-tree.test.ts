@@ -627,8 +627,14 @@ describe("SQL Server Browser tree", () => {
       { schema: "dbo", table: "a_roads" },
       { schema: "dbo", table: "z_roads" },
     ]);
-    assert.deepEqual(schemas.map((schema) => schema.label), ["dbo", "gis"]);
-    assert.deepEqual(schemas[0].children?.map((table) => table.label), ["a_roads", "z_roads"]);
+    assert.deepEqual(
+      schemas.map((schema) => schema.label),
+      ["dbo", "gis"],
+    );
+    assert.deepEqual(
+      schemas[0].children?.map((table) => table.label),
+      ["a_roads", "z_roads"],
+    );
     const table = schemas[0].children?.[1];
     assert.equal(table?.kind, "table");
     assert.equal(table?.mssqlConnectionId, ID);
@@ -638,10 +644,18 @@ describe("SQL Server Browser tree", () => {
 
   it("injects SQL Server loading, error, and loaded states without mutating the source tree", () => {
     const tree = baseTree();
-    const loading = augmentConnections(tree, { [`mssql:${ID}`]: { status: "loading" } }, "Loading tables…");
+    const loading = augmentConnections(
+      tree,
+      { [`mssql:${ID}`]: { status: "loading" } },
+      "Loading tables…",
+    );
     assert.equal(find(loading, `mssql-connection:${ID}:loading`)?.label, "Loading tables…");
 
-    const error = augmentConnections(tree, { [`mssql:${ID}`]: { status: "error", message: "offline" } }, "");
+    const error = augmentConnections(
+      tree,
+      { [`mssql:${ID}`]: { status: "error", message: "offline" } },
+      "",
+    );
     assert.equal(find(error, `mssql-connection:${ID}:error`)?.label, "offline");
 
     const loaded = augmentConnections(
@@ -653,7 +667,6 @@ describe("SQL Server Browser tree", () => {
     assert.deepEqual(find(tree, `mssql-connection:${ID}`)?.children, []);
   });
 });
-
 
 describe("flattenVisibleTree", () => {
   const tree = buildBrowserTree({

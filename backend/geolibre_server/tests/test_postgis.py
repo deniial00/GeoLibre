@@ -148,7 +148,6 @@ def test_postgis_allowlist_rejects_indirect_destinations(monkeypatch) -> None:
         assert exc.value.status_code == 400
 
 
-
 @requires_psycopg
 def test_nested_dbname_cannot_redirect_the_connection(monkeypatch) -> None:
     """A conninfo-shaped ``dbname`` must not move the connection off its host.
