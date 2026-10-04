@@ -154,7 +154,7 @@ integrated and interactive Entra authentication; those methods are unavailable
 to a shared sidecar. Managed identity (`msi`) is likewise disabled by default,
 since it would let any caller borrow the sidecar host's Azure identity; a
 single-tenant operator can opt in with
-`GEOLIBRE_MSSQL_ALLOW_MANAGED_IDENTITY=1`. Writes are 2D, so Z/M coordinates
+`GEOLIBRE_MSSQL_ALLOW_MANAGED_IDENTITY=1`. `GEOLIBRE_MSSQL_DESKTOP_AUTH=1` (set by the desktop app) implies that opt-in as well as enabling Windows and interactive sign-in, so do not set it on a shared sidecar. Writes are 2D, so Z/M coordinates
 are not retained for features that are saved.
 
 ## Endpoints

@@ -275,8 +275,10 @@ _SESSIONS: dict[str, _Session] = {}
 _SESSIONS_LOCK = threading.Lock()
 
 
-def _datetimeoffset_to_str(raw: bytes) -> str:
+def _datetimeoffset_to_str(raw: Any) -> Any:
     """Decode SQL_SS_TIMESTAMPOFFSET_STRUCT, which pyodbc cannot read natively."""
+    if not isinstance(raw, (bytes, bytearray)):
+        return raw
     year, month, day, hour, minute, second, nanos, tz_h, tz_m = struct.unpack("<6hI2h", raw)
     sign = "-" if tz_h < 0 or tz_m < 0 else "+"
     return (
@@ -926,7 +928,7 @@ def mssql_write(request: MssqlWriteRequest) -> dict[str, Any]:
                 for c, v in change.values.items():
                     sets.append(f"{_q(c)} = ?")
                     params.append(_bind_value(v, types[c]))
-                params.append(change.key)
+                params.append(_bind_value(change.key, types[pk]))
                 cur.execute(f"UPDATE {table} SET {', '.join(sets)} WHERE {_q(pk)} = ?", params)
                 updated += 1
             for change in diff.inserts:
@@ -940,7 +942,7 @@ def mssql_write(request: MssqlWriteRequest) -> dict[str, Any]:
                 params.extend(_bind_value(v, types[c]) for c, v in change.values.items())
                 if change.key is not None:
                     insert_cols.append(pk)
-                    params.append(change.key)
+                    params.append(_bind_value(change.key, types[pk]))
                 cols_sql = ", ".join([geom] + [_q(c) for c in insert_cols])
                 vals_sql = ", ".join(
                     [geom_expr] + ["?"] * (len(params) - (1 if change.geometry is not None else 0))
@@ -948,7 +950,7 @@ def mssql_write(request: MssqlWriteRequest) -> dict[str, Any]:
                 cur.execute(f"INSERT INTO {table} ({cols_sql}) VALUES ({vals_sql})", params)
                 inserted += 1
             for start in range(0, len(diff.deletes), 1000):
-                keys = diff.deletes[start : start + 1000]
+                keys = [_bind_value(k, types[pk]) for k in diff.deletes[start : start + 1000]]
                 cur.execute(
                     f"DELETE FROM {table} WHERE {_q(pk)} IN ({','.join('?' for _ in keys)})", keys
                 )

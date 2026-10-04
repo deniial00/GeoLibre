@@ -618,6 +618,26 @@ def test_live_write_roundtrip_and_unchanged_save(live_db):
         )
     )
     assert (result["updated"], result["inserted"], result["deleted"]) == (1, 1, 1)
+    # The edit rewrote the row, so check the stored value, not a re-read: a read
+    # and a write that truncate identically would still compare equal.
+    conn = mssql._open_connection(mssql._get_session(live_db))
+    cur = conn.cursor()
+    cur.execute(
+        "SELECT CONVERT(varchar(33), seen, 121), CONVERT(varchar(16), at_time, 121), "
+        "CONVERT(varchar(40), seen_tz, 121) FROM dbo.geolibre_writeback_test "
+        "WHERE name = 'Changed'"
+    )
+    seen, at_time, seen_tz = cur.fetchone()
+    conn.close()
+    assert seen == "2024-01-01 12:00:00.1234567"
+    assert at_time == "12:00:00.1234567"
+    assert seen_tz.startswith("2024-01-01 12:00:00.5") and seen_tz.endswith("+01:00")
+    row = next(
+        f
+        for f in mssql.mssql_read(request)["geojson"]["features"]
+        if f["properties"]["name"] == "Changed"
+    )
+    assert row["properties"]["seen_tz"].endswith("+01:00")
 
 
 @requires_live_mssql
@@ -721,3 +741,12 @@ def test_time_and_timestamp_decoders_keep_seven_digits():
     assert mssql._time2_to_str(struct.pack("@3HI", 12, 0, 1, 123456700)) == "12:00:01.1234567"
     raw = struct.pack("@h5HI", 2024, 1, 2, 3, 4, 5, 123456700)
     assert mssql._timestamp_to_str(raw) == "2024-01-02 03:04:05.1234567"
+
+
+def test_datetimeoffset_converter_passes_non_bytes_through():
+    assert mssql._datetimeoffset_to_str("already text") == "already text"
+
+
+def test_primary_key_is_rebound_by_column_type():
+    assert mssql._bind_value("0a0b", "varbinary") == b"\x0a\x0b"
+    assert mssql._bind_value(7, "int") == 7
