@@ -30,6 +30,10 @@ export const defaultMssqlSessionClient: MssqlSessionClient = {
 };
 const sessionByProfileId = new Map<string, string>();
 const memorySecrets = new Map<string, MssqlSessionSecret>();
+// One in-flight recovery per profile: concurrent callers (a save-back, the
+// Browser listing, an import) share it instead of each opening a session that
+// would disconnect the one another caller is still using.
+const restoringByProfileId = new Map<string, Promise<string>>();
 export function requiredMssqlSecret(
   method: MssqlAuthMethod,
 ): "password" | "clientSecret" | "accessToken" | null {
@@ -102,19 +106,31 @@ async function restoreSession(profileId: string, client: MssqlSessionClient): Pr
     throw new MssqlReconnectRequiredError("Reconnect to SQL Server in Add Data.");
   return openMssqlSession(profile, secret, client);
 }
+function restoreSessionOnce(profileId: string, client: MssqlSessionClient): Promise<string> {
+  let pending = restoringByProfileId.get(profileId);
+  if (!pending) {
+    pending = restoreSession(profileId, client).finally(() =>
+      restoringByProfileId.delete(profileId),
+    );
+    restoringByProfileId.set(profileId, pending);
+  }
+  return pending;
+}
 export async function withMssqlSession<T>(
   profileId: string,
   run: (sessionId: string) => Promise<T>,
   client = defaultMssqlSessionClient,
 ): Promise<T> {
-  let sessionId = sessionByProfileId.get(profileId);
-  if (!sessionId) sessionId = await restoreSession(profileId, client);
+  let sessionId =
+    sessionByProfileId.get(profileId) ?? (await restoreSessionOnce(profileId, client));
   try {
     return await run(sessionId);
   } catch (error) {
     if (!(error instanceof MssqlSessionExpiredError)) throw error;
-    sessionByProfileId.delete(profileId);
-    sessionId = await restoreSession(profileId, client);
+    // Drop only the session that expired: another caller may already have
+    // replaced it, and that newer session is the one to retry on.
+    if (sessionByProfileId.get(profileId) === sessionId) sessionByProfileId.delete(profileId);
+    sessionId = sessionByProfileId.get(profileId) ?? (await restoreSessionOnce(profileId, client));
     return run(sessionId);
   }
 }
@@ -152,4 +168,5 @@ export function mssqlBaselineKeys(layer: GeoLibreLayer): Array<string | number> 
 export function resetMssqlSessions(): void {
   sessionByProfileId.clear();
   memorySecrets.clear();
+  restoringByProfileId.clear();
 }

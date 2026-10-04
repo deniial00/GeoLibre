@@ -225,4 +225,70 @@ describe("MSSQL sessions", () => {
       env.restore();
     }
   });
+
+  it("shares one recovery between concurrent callers instead of evicting each other", async () => {
+    const env = installStorage();
+    resetMssqlSessions();
+    setKeychainMssqlSecrets({ [profile.id]: { password: "pw" } });
+    rememberMssqlConnection(profile, null);
+    const disconnected: string[] = [];
+    let connections = 0;
+    const client = {
+      connect: async () => ({ session_id: `session-${++connections}` }),
+      disconnect: async (sessionId: string) => {
+        disconnected.push(sessionId);
+      },
+      startSidecar: async () => {},
+    } as unknown as MssqlSessionClient;
+    try {
+      const used = await Promise.all([
+        withMssqlSession(profile.id, async (sessionId) => sessionId, client),
+        withMssqlSession(profile.id, async (sessionId) => sessionId, client),
+      ]);
+      assert.deepEqual(used, ["session-1", "session-1"]);
+      assert.equal(connections, 1);
+      assert.deepEqual(disconnected, []);
+    } finally {
+      resetMssqlSessions();
+      setKeychainMssqlSecrets({});
+      env.restore();
+    }
+  });
+
+  it("retries on a session another caller already restored rather than reconnecting again", async () => {
+    const env = installStorage();
+    resetMssqlSessions();
+    setKeychainMssqlSecrets({ [profile.id]: { password: "pw" } });
+    rememberMssqlConnection(profile, null);
+    const disconnected: string[] = [];
+    let connections = 0;
+    const client = {
+      connect: async () => ({ session_id: `session-${++connections}` }),
+      disconnect: async (sessionId: string) => {
+        disconnected.push(sessionId);
+      },
+      startSidecar: async () => {},
+    } as unknown as MssqlSessionClient;
+    try {
+      await openMssqlSession(profile, { password: "pw" }, client);
+      // Both callers start on session-1; it expires under both of them.
+      const run = async (sessionId: string) => {
+        await Promise.resolve();
+        if (sessionId === "session-1") throw new MssqlSessionExpiredError("expired");
+        return sessionId;
+      };
+      const used = await Promise.all([
+        withMssqlSession(profile.id, run, client),
+        withMssqlSession(profile.id, run, client),
+      ]);
+      assert.deepEqual(used, ["session-2", "session-2"]);
+      assert.equal(connections, 2);
+      // The sidecar already dropped session-1; the restored session-2 is never evicted.
+      assert.deepEqual(disconnected, []);
+    } finally {
+      resetMssqlSessions();
+      setKeychainMssqlSecrets({});
+      env.restore();
+    }
+  });
 });
