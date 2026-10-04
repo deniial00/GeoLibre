@@ -85,6 +85,7 @@ export {
 } from "./file-io/file-dialogs";
 export {
   openProjectFile,
+  type OpenedProjectFile,
   openQgisProjectFile,
   openArcgisProjectFile,
   RecentProjectGoneError,

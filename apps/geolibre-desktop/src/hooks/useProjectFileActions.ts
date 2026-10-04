@@ -44,6 +44,7 @@ import {
   saveProjectFileToPath,
   saveStartupProjectSnapshot,
   saveTextFileWithFallback,
+  type OpenedProjectFile,
 } from "../lib/tauri-io";
 import { useDesktopSettingsStore } from "./useDesktopSettings";
 import { buildProjectHtml, viewerChromeParams } from "../lib/html-export";
@@ -951,7 +952,44 @@ export function useProjectFileActions(mapControllerRef: MapControllerRef) {
   // set the shared `actionError` itself, so each caller can route the failure to
   // its own surface (the toolbar's modal vs. the Browser panel's inline banner)
   // now that a single instance is shared across both.
+  // The browser cannot reopen a file by the name it was saved under, so a local
+  // recent entry on the web asks the user to pick the file again (GeoLibre#2921).
+  const reopenRecentWithPicker = async (signal: AbortSignal): Promise<string | null> => {
+    let result: OpenedProjectFile | null;
+    try {
+      result = await openProjectFile();
+    } catch (error) {
+      if (signal.aborted) return null;
+      console.error("Failed to open recent project", error);
+      return error instanceof Error ? error.message : t("toolbar.error.couldNotOpenRecentProject");
+    }
+    if (!result || signal.aborted) return null;
+    try {
+      const project = await resolveProjectXyzLayers(result.project, signal);
+      if (signal.aborted) return null;
+      loadProject(project, result.path);
+      return null;
+    } catch (error) {
+      if (signal.aborted) return null;
+      console.error("Failed to load recent project", error);
+      return error instanceof Error ? error.message : t("toolbar.error.couldNotLoadRecentProject");
+    }
+  };
+
   const handleOpenRecent = async (path: string): Promise<string | null> => {
+    if (!isTauri() && !isHttpUrl(path)) {
+      // Cancel any previous open; stale picker results must not replace a newer
+      // project selection.
+      recentAbortRef.current?.abort();
+      const controller = new AbortController();
+      recentAbortRef.current = controller;
+      // Called synchronously: Safari only opens a file picker inside the user gesture.
+      return reopenRecentWithPicker(controller.signal).finally(() => {
+        if (recentAbortRef.current === controller) {
+          recentAbortRef.current = null;
+        }
+      });
+    }
     // Cancel any previous in-flight open so rapid clicks cannot race and let a
     // stale fetch win by resolving last.
     recentAbortRef.current?.abort();
