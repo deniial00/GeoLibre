@@ -269,14 +269,18 @@ _SESSIONS_LOCK = threading.Lock()
 def _open_connection(session: _Session) -> Any:
     pyodbc = _import_pyodbc()
     attrs = None
+    # A token fetched here is not in session.secrets, so add it to the values
+    # scrubbed from any driver error before that error reaches the caller.
+    secrets = session.secrets
     if session.static_token is not None or session.credential is not None:
         try:
             token = session.static_token or session.credential.get_token(_TOKEN_SCOPE).token
+            secrets = (*secrets, token)
             raw = token.encode("utf-16-le")
             attrs = {_SQL_COPT_SS_ACCESS_TOKEN: struct.pack(f"<I{len(raw)}s", len(raw), raw)}
         except Exception as exc:
             raise HTTPException(
-                400, f"Microsoft Entra sign-in failed: {scrub_secrets(str(exc), session.secrets)}"
+                400, f"Microsoft Entra sign-in failed: {scrub_secrets(str(exc), secrets)}"
             ) from exc
     try:
         conn = pyodbc.connect(
@@ -289,8 +293,20 @@ def _open_connection(session: _Session) -> Any:
         return conn
     except Exception as exc:
         raise HTTPException(
-            400, f"Could not connect to SQL Server: {scrub_secrets(str(exc), session.secrets)}"
+            400, f"Could not connect to SQL Server: {scrub_secrets(str(exc), secrets)}"
         ) from exc
+
+
+def _safe_rollback(conn: Any, secrets: tuple[str, ...]) -> None:
+    """Roll back without masking the write error that triggered the rollback.
+
+    A broken connection (lost network, query timeout) raises from rollback()
+    too; swallowing that keeps the original, scrubbed error and the 400 intact.
+    """
+    try:
+        conn.rollback()
+    except Exception as exc:
+        logger.warning("SQL Server rollback failed: %s", scrub_secrets(str(exc), secrets))
 
 
 @contextmanager
@@ -872,10 +888,10 @@ def mssql_write(request: MssqlWriteRequest) -> dict[str, Any]:
                 deleted += max(cur.rowcount, 0)
             conn.commit()
         except HTTPException:
-            conn.rollback()
+            _safe_rollback(conn, session.secrets)
             raise
         except Exception as exc:
-            conn.rollback()
+            _safe_rollback(conn, session.secrets)
             msg = scrub_secrets(str(exc), session.secrets)
             logger.error("SQL Server write-back failed: %s", msg)
             raise HTTPException(400, f"Write-back failed: {msg}") from exc

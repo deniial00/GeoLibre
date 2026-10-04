@@ -361,6 +361,49 @@ def test_connect_closes_connection_when_probe_fails(monkeypatch):
     assert conn.closed
 
 
+def test_write_rollback_failure_keeps_original_error(monkeypatch):
+    conn = FakeConnection()
+    conn.execute_hook = _fail
+
+    def failing_rollback():
+        raise FakePyodbcError("rollback also failed")
+
+    conn.rollback = failing_rollback
+    request = _install_session(monkeypatch, conn)
+    with pytest.raises(HTTPException) as exc:
+        mssql.mssql_write(
+            mssql.MssqlWriteRequest(
+                session_id=request.session_id,
+                table="t",
+                geojson={
+                    "type": "FeatureCollection",
+                    "features": [{"type": "Feature", "properties": {}, "geometry": None}],
+                },
+            )
+        )
+    assert exc.value.status_code == 400
+    assert "Write-back failed" in exc.value.detail
+    assert conn.closed
+
+
+def test_open_connection_scrubs_fresh_token(monkeypatch):
+    class Credential:
+        def get_token(self, scope):
+            return type("Token", (), {"token": "fresh-secret-token"})()
+
+    class Fake:
+        @staticmethod
+        def connect(*args, **kwargs):
+            raise Exception("driver echoed fresh-secret-token")
+
+    monkeypatch.setattr(mssql, "_import_pyodbc", lambda: Fake)
+    session = mssql._Session("cs", Credential(), None, (), time.monotonic())
+    with pytest.raises(HTTPException) as exc:
+        mssql._open_connection(session)
+    assert "fresh-secret-token" not in exc.value.detail
+    assert "****" in exc.value.detail
+
+
 def test_bind_value_restores_column_types():
     # json_safe stringifies these, but SQL Server cannot implicitly cast them back.
     assert mssql._bind_value("00ff", "varbinary") == b"\x00\xff"
