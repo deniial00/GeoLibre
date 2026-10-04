@@ -521,11 +521,14 @@ def live_db(monkeypatch):
     cur.execute(
         "CREATE TABLE dbo.geolibre_writeback_test (gid int IDENTITY PRIMARY KEY, "
         "name nvarchar(100) NOT NULL, population int, "
-        "seen datetime2, seen_tz datetimeoffset, at_time time(7), blob varbinary(8), geom geometry)"
+        "seen datetime2, seen_tz datetimeoffset, at_time time(7), "
+        "blob varbinary(8), geom geometry)"
     )
     cur.execute(
-        "INSERT INTO dbo.geolibre_writeback_test(name,population,seen,seen_tz,at_time,blob,geom) VALUES "
-        "('Knoxville',190000,CAST('2024-01-01T12:00:00.123456' AS datetime2),'2024-01-01 12:00:00.5 +01:00','12:00:00.5',0x0102,"
+        "INSERT INTO dbo.geolibre_writeback_test"
+        "(name,population,seen,seen_tz,at_time,blob,geom) VALUES "
+        "('Knoxville',190000,CAST('2024-01-01T12:00:00.123456' AS datetime2),"
+        "'2024-01-01 12:00:00.5 +01:00','12:00:00.5',0x0102,"
         "geometry::Point(-9342009.589714656,4295201.3456280865,3857)),"
         "('Second',2,NULL,NULL,NULL,NULL,geometry::Point(-9000000,4000000,3857)),"
         "('Third',3,NULL,NULL,NULL,NULL,geometry::Point(-8000000,3500000,3857))"
