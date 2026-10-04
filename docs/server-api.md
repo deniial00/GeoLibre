@@ -591,10 +591,10 @@ and `identity provider discovery failed`. Out-of-range values are a generic
   from reusing `sub` values to resolve existing accounts. Account migration or
   re-linking is not automatic; do not delete and recreate the provider as a
   workaround, since deletion removes the identity links.
-  A sign-in that was validated against the old `issuer` or `jwksUri` while a
-  `PUT` changed them is rejected rather than linked; on PostgreSQL the two
-  serialize on the provider row. A `PUT` racing the provider's deletion
-  answers `409 identity provider was removed; try again`.
+  A sign-in validated against old settings is rejected if those settings changed
+  before identity linking; `PUT` and sign-in serialize on the provider row in
+  PostgreSQL. A `PUT` racing provider removal or replacement returns HTTP 409
+  with message `identity provider was removed or replaced; try again`.
 
 - **Internal addresses (SSRF protection):** any signed-in user can create an
   organization and choose its provider URLs, so the server connects to an

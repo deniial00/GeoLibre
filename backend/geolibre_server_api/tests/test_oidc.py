@@ -5,13 +5,14 @@ from __future__ import annotations
 import json
 import logging
 import time
+from uuid import uuid4
 
 import httpx
 import pytest
 from conftest import PUBLIC_URL, WEB_REDIRECT
 from fake_idp import FakeIdp
 from fastapi.testclient import TestClient
-from geolibre_server_api import oidc
+from geolibre_server_api import enterprise_admin, oidc
 from geolibre_server_api.enterprise_models import FederatedIdentity, OrganizationIdentityProvider
 from helpers import (
     account,
@@ -147,6 +148,52 @@ def test_sign_in_is_refused_when_the_provider_moves_while_it_validates(
     _assert_rejected(callback, caplog, "identity provider changed during sign-in")
     with oauth_client.app.state.session_factory() as session:
         assert session.scalar(select(func.count()).select_from(FederatedIdentity)) == 0
+
+
+def test_put_rejects_provider_replaced_during_discovery(oauth_client, monkeypatch):
+    token, org_id = _org_with_idp(oauth_client)
+    lookup = enterprise_admin._provider_for
+    discovery_complete = False
+
+    def finish_discovery(_http, _issuer):
+        nonlocal discovery_complete
+        discovery_complete = True
+        return (
+            f"{FakeIdp.ISSUER}/authorize",
+            f"{FakeIdp.ISSUER}/token",
+            f"{FakeIdp.ISSUER}/jwks",
+        )
+
+    def lookup_provider(session, organization_id, *, lock=False):
+        provider = lookup(session, organization_id, lock=lock)
+        if not lock or not discovery_complete:
+            return provider
+        replacement = {
+            column.name: getattr(provider, column.name)
+            for column in OrganizationIdentityProvider.__table__.columns
+        }
+        session.delete(provider)
+        session.flush()
+        replacement["id"] = str(uuid4())
+        replacement["issuer"] = "https://replacement-idp.example"
+        replacement["jwks_uri"] = "https://replacement-idp.example/jwks"
+        recreated = OrganizationIdentityProvider(**replacement)
+        session.add(recreated)
+        session.flush()
+        return recreated
+
+    monkeypatch.setattr(enterprise_admin, "discover_endpoints", finish_discovery)
+    monkeypatch.setattr(enterprise_admin, "_provider_for", lookup_provider)
+    response = configure_idp(oauth_client, token, org_id)
+
+    assert response.status_code == 409
+    assert response.json()["error"] == "identity provider was removed or replaced; try again"
+    current = oauth_client.get(
+        f"/api/organizations/{org_id}/identity-provider",
+        headers=auth(token),
+    )
+    assert current.status_code == 200
+    assert current.json()["identityProvider"]["issuer"] == FakeIdp.ISSUER
 
 
 def test_identity_provider_validation(oauth_client):

@@ -332,6 +332,7 @@ def build_enterprise_admin_router() -> APIRouter:
         if not _is_https_url(body.issuer) or "?" in body.issuer or "#" in body.issuer:
             raise HTTPException(422, "issuer must be an https URL without query or fragment")
         provider = _provider_for(session, organization_id)
+        original_provider_id = provider.id if provider is not None else None
         if provider is not None and (
             provider.issuer != body.issuer
             or (body.jwks_uri is not None and provider.jwks_uri != body.jwks_uri)
@@ -387,13 +388,13 @@ def build_enterprise_admin_router() -> APIRouter:
             )
 
         now_ts = get_clock(request)()
-        if provider is not None:
+        if original_provider_id is not None:
             # Lock the row an SSO callback locks while linking an identity, so
             # no identity links between the guard below and this commit. Taken
             # only now: discovery above must not hold it across a network call.
             provider = _provider_for(session, organization_id, lock=True)
-            if provider is None:
-                raise HTTPException(409, "identity provider was removed; try again")
+            if provider is None or provider.id != original_provider_id:
+                raise HTTPException(409, "identity provider was removed or replaced; try again")
         if provider is None:
             provider = OrganizationIdentityProvider(
                 id=str(uuid.uuid4()),
