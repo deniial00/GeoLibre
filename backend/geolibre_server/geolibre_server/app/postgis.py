@@ -103,6 +103,8 @@ def _validate_postgis_target(conninfo: dict[str, str]) -> Optional[tuple[str, st
         raise HTTPException(
             status_code=400, detail="PostgreSQL hostaddr connection strings are not supported"
         )
+    # Strip each host before rejoining overrides; libpq treats whitespace in
+    # a quoted multi-host value as part of the hostname.
     hosts = [host.strip() for host in conninfo.get("host", "").split(",")]
     if not hosts or any(not host for host in hosts):
         raise HTTPException(
@@ -118,6 +120,8 @@ def _validate_postgis_target(conninfo: dict[str, str]) -> Optional[tuple[str, st
         ports *= len(hosts)
     if len(ports) != len(hosts):
         raise HTTPException(status_code=400, detail="Invalid PostgreSQL host/port list")
+    # An empty item in libpq's comma-separated port list means that host's
+    # default port (e.g. `host=a,b port=,5433`), not an invalid value.
     ports = [port if port else str(_DEFAULT_POSTGRES_PORT) for port in ports]
     for host, port_text in zip(hosts, ports):
         try:

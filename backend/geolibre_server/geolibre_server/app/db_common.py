@@ -12,8 +12,15 @@ from fastapi import HTTPException
 
 from geolibre_server import vector_ops
 
+# Explicit opt-in only. Desktop spawns a loopback-bound, token-authenticated
+# sidecar for the same local user; shared deployments leave the variable
+# unset and remain closed by default.
 UNRESTRICTED = "*"
+# Usernames may be empty (Postgres can use PGUSER); greedy matching redacts
+# through the last @ so a literal @ inside a password cannot leak its suffix.
 _PASSWORD_URL_RE = re.compile(r"(://[^:/\s@]*:)[^\s]+@")
+# Keep substring matching to redact compound driver keys like db_password.
+# Braced ODBC values may contain escaped closing braces (`}}`).
 _PASSWORD_KV_RE = re.compile(
     r"(?i)((?:password|pwd|client_secret|access_token)\s*=\s*)"
     r"('[^']*'|\{(?:[^}]|\}\})*\}|[^\s]+)"
@@ -137,6 +144,7 @@ def json_safe(value: Any) -> Any:
 
 
 def require_features(geojson: Optional[dict]) -> list[dict]:
+    """Validate that a GeoJSON payload contains a non-empty, bounded feature list."""
     features = geojson.get("features") if geojson else None
     if not isinstance(features, list) or not features:
         raise HTTPException(status_code=400, detail="No features to write.")
@@ -149,6 +157,8 @@ def require_features(geojson: Optional[dict]) -> list[dict]:
 
 @dataclass(frozen=True)
 class RowChange:
+    """One planned insert or update: its key, geometry, and column values."""
+
     key: Any
     geometry: Optional[dict]
     values: dict[str, Any]
@@ -156,6 +166,8 @@ class RowChange:
 
 @dataclass(frozen=True)
 class FeatureDiff:
+    """Ordered row changes for a write: updates, inserts, deletes, and skips."""
+
     updates: list[RowChange]
     inserts: list[RowChange]
     deletes: list[Any]
@@ -176,9 +188,12 @@ def plan_feature_diff(
 ) -> FeatureDiff:
     """Plan row-level changes without executing database-specific SQL.
 
-    Feature IDs fall back to ``feature.id`` when an editor clears the key
-    property. Deletes are scoped to the original baseline when supplied, so
-    concurrent inserts are not removed by a save of an older layer snapshot.
+    A feature's key is its primary-key property, falling back to ``feature.id``
+    when an editor cleared the property; that key both matches existing rows and
+    is inserted explicitly when ``insert_explicit_key`` allows. Deletes are
+    scoped to the supplied baseline so concurrent inserts survive. Capabilities
+    are caller-provided consistency hints, not authorization; database grants
+    remain the access-control boundary.
     """
     writable = set(writable_columns)
     existing = set(existing_rows)
@@ -186,7 +201,8 @@ def plan_feature_diff(
     updates: list[RowChange] = []
     inserts: list[RowChange] = []
     skipped: set[str] = set()
-    # Missing capability flags default to allowed, matching frontend inference.
+    # Callers may forward layer capabilities to prevent accidental edits, but
+    # requests can omit or replace them; database grants must enforce access.
     caps = capabilities or {}
     for feature in features:
         properties = feature.get("properties") or {}
@@ -194,18 +210,10 @@ def plan_feature_diff(
         columns = [column for column in writable_columns if column in properties]
         values = {column: properties[column] for column in columns}
         geometry = feature.get("geometry")
-        # Editors may clear a key property while preserving feature.id.
-        key = properties.get(primary_key)
-        if key is None:
-            key = feature.get("id")
-        if key is None and not pk_is_generated:
-            raise HTTPException(
-                status_code=400,
-                detail=(
-                    f"Feature without a '{primary_key}' value cannot be inserted: "
-                    f"{table_label}'s primary key has no default or identity."
-                ),
-            )
+        # Editors may clear a key property while preserving feature.id for
+        # matching an existing row.
+        property_key = properties.get(primary_key)
+        key = property_key if property_key is not None else feature.get("id")
         if key is not None and key in existing:
             kept.add(key)
             stored_geometry, stored_values = existing_rows[key]
@@ -221,11 +229,22 @@ def plan_feature_diff(
                 )
             updates.append(RowChange(key, geometry, values))
         else:
+            # A non-null key that is absent from the table is inserted
+            # explicitly so client-assigned keys survive; identity/default
+            # columns are left to the database when the key is dropped.
+            explicit_key = key if key is not None and insert_explicit_key else None
+            if explicit_key is None and not pk_is_generated:
+                raise HTTPException(
+                    status_code=400,
+                    detail=(
+                        f"Feature without a '{primary_key}' value cannot be inserted: "
+                        f"{table_label}'s primary key has no default or identity."
+                    ),
+                )
             if not caps.get("create", True):
                 raise HTTPException(
                     status_code=403, detail="Layer capability excludes feature creation."
                 )
-            explicit_key = key if key is not None and insert_explicit_key else None
             if explicit_key is not None:
                 kept.add(explicit_key)
             inserts.append(RowChange(explicit_key, geometry, values))
