@@ -4,6 +4,10 @@ import { createElement, createRef } from "react";
 import { setSidecarAuthToken } from "@geolibre/processing";
 import { fireEvent, mockFetch, render, screen, waitFor } from "./helpers/dom";
 import { resetMssqlSessions } from "../apps/geolibre-desktop/src/lib/mssql-sessions";
+import {
+  setKeychainMssqlSecrets,
+  setMssqlKeychainWritable,
+} from "../apps/geolibre-desktop/src/lib/saved-mssql-connections";
 import type { AddDataShellContextValue } from "../apps/geolibre-desktop/src/components/layout/add-data/context";
 
 const [{ MssqlSource }, { AddDataShellProvider }] = await Promise.all([
@@ -127,6 +131,77 @@ describe("MssqlSource", () => {
     } finally {
       resetMssqlSessions();
       setSidecarAuthToken(null);
+      if (previous === undefined) {
+        delete tauriWindow.__TAURI_INTERNALS__;
+      } else {
+        Object.defineProperty(tauriWindow, "__TAURI_INTERNALS__", {
+          configurable: true,
+          value: previous,
+        });
+      }
+    }
+  });
+
+  it("disconnects the active profile when switching to a new connection", async () => {
+    const tauriWindow = window as Window & {
+      __TAURI_INTERNALS__?: { invoke: (command: string) => Promise<unknown> };
+    };
+    const previous = tauriWindow.__TAURI_INTERNALS__;
+    Object.defineProperty(tauriWindow, "__TAURI_INTERNALS__", {
+      configurable: true,
+      value: {
+        invoke: async (command: string) => {
+          assert.equal(command, "start_geolibre_sidecar");
+          return { baseUrl: "http://127.0.0.1:8765", port: 8765, token: "test-token" };
+        },
+      },
+    });
+    resetMssqlSessions();
+    setKeychainMssqlSecrets({});
+    setMssqlKeychainWritable(false);
+    const requests: string[] = [];
+    mockFetch(async (input, init) => {
+      const url = new URL(String(input));
+      requests.push(`${init?.method ?? "GET"} ${url.pathname}`);
+      if (url.pathname.endsWith("/mssql/status")) {
+        return new Response(
+          JSON.stringify({ available: true, auth_methods: ["sql"], message: "" }),
+          { status: 200 },
+        );
+      }
+      if (url.pathname.endsWith("/mssql/connect")) {
+        return new Response(JSON.stringify({ session_id: "session-1" }), { status: 200 });
+      }
+      if (url.pathname.endsWith("/mssql/tables")) {
+        return new Response(JSON.stringify({ tables: [] }), { status: 200 });
+      }
+      if (url.pathname.endsWith("/mssql/disconnect")) {
+        return new Response("{}", { status: 200 });
+      }
+      throw new Error(`Unexpected request: ${url.pathname}`);
+    });
+
+    try {
+      renderMssqlSource();
+      fireEvent.change(screen.getByLabelText("Server"), { target: { value: "db.example" } });
+      fireEvent.change(screen.getByLabelText("Database"), { target: { value: "gis" } });
+      fireEvent.change(screen.getByLabelText("Username"), { target: { value: "user" } });
+      fireEvent.change(screen.getByLabelText("Password"), { target: { value: "password" } });
+      fireEvent.click(screen.getByRole("button", { name: "Connect" }));
+
+      await waitFor(() => {
+        assert.ok(screen.getByText("No spatial tables were found in this database."));
+      });
+      fireEvent.change(screen.getByLabelText("Saved connection"), { target: { value: "" } });
+
+      await waitFor(() => {
+        assert.equal(requests.filter((request) => request.endsWith("/mssql/disconnect")).length, 1);
+      });
+    } finally {
+      resetMssqlSessions();
+      setSidecarAuthToken(null);
+      setKeychainMssqlSecrets({});
+      setMssqlKeychainWritable(true);
       if (previous === undefined) {
         delete tauriWindow.__TAURI_INTERNALS__;
       } else {

@@ -130,6 +130,17 @@ export function releaseMssqlSession(
   }
   void client.disconnect(sessionId).catch(() => {});
 }
+
+/** Disconnect a live profile session but retain memory-only credentials for recovery. */
+export function disconnectMssqlProfileSession(
+  profileId: string,
+  client = defaultMssqlSessionClient,
+): void {
+  const sessionId = sessionByProfileId.get(profileId);
+  if (!sessionId) return;
+  sessionByProfileId.delete(profileId);
+  void client.disconnect(sessionId).catch(() => {});
+}
 export function mssqlBaselineKeys(layer: GeoLibreLayer): Array<string | number> | undefined {
   const keys = layer.metadata?.mssqlBaselineKeys;
   return Array.isArray(keys)

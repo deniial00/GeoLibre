@@ -413,7 +413,7 @@
       },
       "mssql": {
         "label": "Add SQL Server Layer",
-        "description": "Load a SQL Server or Azure SQL spatial table as an editable layer and save edits back."
+        "description": "Load a SQL Server or Azure SQL spatial table as an editable layer."
       },
       "postgres": {
         "label": "Add PostgreSQL Layer",

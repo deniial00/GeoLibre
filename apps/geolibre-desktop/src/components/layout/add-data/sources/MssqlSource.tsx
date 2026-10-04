@@ -20,6 +20,7 @@ import {
   type MssqlStoredSecret,
 } from "../../../../lib/saved-mssql-connections";
 import {
+  disconnectMssqlProfileSession,
   openMssqlSession,
   releaseMssqlSession,
   requiredMssqlSecret,
@@ -88,6 +89,9 @@ export function MssqlSource({ initialMssql }: MssqlSourceProps) {
   );
 
   const invalidateConnection = () => {
+    if (activeProfileId && !source.isSubmitting) {
+      disconnectMssqlProfileSession(activeProfileId);
+    }
     listRequestRef.current += 1;
     setTables([]);
     setSelectedTableKey("");
@@ -147,6 +151,9 @@ export function MssqlSource({ initialMssql }: MssqlSourceProps) {
   const handleConnect = async () => {
     const requestToken = ++listRequestRef.current;
     const flightId = ++connectFlightRef.current;
+    if (activeProfileId && !source.isSubmitting) {
+      disconnectMssqlProfileSession(activeProfileId);
+    }
     source.setError(null);
     setStatus(null);
     setTables([]);

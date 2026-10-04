@@ -3,6 +3,7 @@ import { describe, it } from "node:test";
 import { MssqlSessionExpiredError, type ConnectMssqlRequest } from "@geolibre/processing";
 import {
   MssqlReconnectRequiredError,
+  disconnectMssqlProfileSession,
   openMssqlSession,
   releaseMssqlSession,
   requiredMssqlSecret,
@@ -79,6 +80,30 @@ describe("MSSQL sessions", () => {
     try {
       await openMssqlSession({ ...profile, authMethod: "windows" }, {}, client);
       assert.equal(requests[0].auth.username, undefined);
+    } finally {
+      resetMssqlSessions();
+    }
+  });
+
+  it("disconnects a profile session without discarding memory-only credentials", async () => {
+    resetMssqlSessions();
+    const disconnected: string[] = [];
+    const client = {
+      connect: async () => ({ session_id: "session-token" }),
+      disconnect: async (sessionId: string) => {
+        disconnected.push(sessionId);
+      },
+      startSidecar: async () => {},
+    } as unknown as MssqlSessionClient;
+    try {
+      await openMssqlSession(
+        { ...profile, authMethod: "token" },
+        { accessToken: "memory-token" },
+        client,
+      );
+      disconnectMssqlProfileSession(profile.id, client);
+      assert.deepEqual(disconnected, ["session-token"]);
+      assert.deepEqual(resolveMssqlSecret(profile.id, {}), { accessToken: "memory-token" });
     } finally {
       resetMssqlSessions();
     }
