@@ -12,7 +12,7 @@ from conftest import PUBLIC_URL, WEB_REDIRECT
 from fake_idp import FakeIdp
 from fastapi.testclient import TestClient
 from geolibre_server_api import oidc
-from geolibre_server_api.enterprise_models import FederatedIdentity
+from geolibre_server_api.enterprise_models import FederatedIdentity, OrganizationIdentityProvider
 from helpers import (
     account,
     add_member,
@@ -124,6 +124,29 @@ def test_linked_identities_block_issuer_and_jwks_changes(oauth_client, fake_idp)
     assert current.status_code == 200
     assert current.json()["identityProvider"]["issuer"] == FakeIdp.ISSUER
     assert current.json()["identityProvider"]["jwksUri"] == f"{FakeIdp.ISSUER}/jwks"
+
+
+def test_sign_in_is_refused_when_the_provider_moves_while_it_validates(
+    oauth_client, fake_idp, monkeypatch, caplog
+):
+    _org_with_idp(oauth_client)
+    validate = oidc.validate_id_token
+
+    def validate_then_repoint(session, http, provider, *args, **kwargs):
+        claims = validate(session, http, provider, *args, **kwargs)
+        # An administrator's PUT commits while the sign-in is still validating:
+        # no identity is linked yet, so its guard lets the change through.
+        with oauth_client.app.state.session_factory() as admin:
+            moved = admin.get(OrganizationIdentityProvider, provider.id)
+            moved.jwks_uri = "https://replacement-idp.example/jwks"
+            admin.commit()
+        return claims
+
+    monkeypatch.setattr(oidc, "validate_id_token", validate_then_repoint)
+    callback, _ = sso_sign_in(oauth_client, fake_idp, "acme", fake_idp.base_claims("u1"))
+    _assert_rejected(callback, caplog, "identity provider changed during sign-in")
+    with oauth_client.app.state.session_factory() as session:
+        assert session.scalar(select(func.count()).select_from(FederatedIdentity)) == 0
 
 
 def test_identity_provider_validation(oauth_client):

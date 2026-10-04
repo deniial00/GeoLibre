@@ -110,6 +110,10 @@ describe("S3 signing region", () => {
       signed.href,
       /X-Amz-Credential=AKIAEXAMPLE%2F[^&]*%2Fus-west-2%2Fs3%2Faws4_request/,
     );
+    // The same object named through another region must not reuse that URL.
+    const other = await signer.presign({ bucket: "bucket", key: "key", region: "ap-southeast-2" });
+    assert.ok(other);
+    assert.match(other.href, /%2Fap-southeast-2%2Fs3%2Faws4_request/);
   });
 
   it("uses an AWS URL region ahead of the default for anonymous connections", async () => {

@@ -714,6 +714,8 @@ def resolve_oidc_account(
     provider: OrganizationIdentityProvider,
     claims: dict,
     now_ts: int,
+    *,
+    validated_with: tuple[str, str | None],
 ) -> Account:
     """Find or JIT-create the account for validated claims and apply the org mapping.
 
@@ -721,7 +723,20 @@ def resolve_oidc_account(
     (``_link_scim_user``). It never links to any other existing account by
     email: that would let any IdP that asserts an address take over a local
     account. A deactivated account gets no mapping, so its memberships stay gone.
+
+    *validated_with* is the provider's ``(issuer, jwks_uri)`` read before the
+    token was validated. The provider row stays locked from the check below
+    through the commit, the same lock the admin ``PUT`` takes, so an identity is
+    never linked under settings an administrator replaced mid-sign-in.
     """
+    locked = session.scalar(
+        select(OrganizationIdentityProvider)
+        .where(OrganizationIdentityProvider.id == provider.id)
+        .with_for_update()
+        .execution_options(populate_existing=True)
+    )
+    if locked is None or (locked.issuer, locked.jwks_uri) != validated_with:
+        raise OidcError("identity provider changed during sign-in")
     claimed_username, claimed_email = _claimed_values(claims, provider)
     _link_scim_user(session, provider, claims["sub"], (claimed_username, claimed_email), now_ts)
     account = _resolve_identity(

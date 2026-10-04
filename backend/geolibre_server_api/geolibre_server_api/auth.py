@@ -2129,6 +2129,8 @@ def build_oauth_router(config: OAuthConfig) -> APIRouter:
         if provider is None or not provider.enabled:
             return _sso_rejected()
         http = request.app.state.oidc_http
+        # The settings this sign-in validates against; linking re-checks them.
+        validated_with = (provider.issuer, provider.jwks_uri)
         try:
             id_token = oidc.exchange_authorization_code(
                 http, provider, code, login_state.code_verifier, sso_redirect_uri
@@ -2142,7 +2144,9 @@ def build_oauth_router(config: OAuthConfig) -> APIRouter:
                 now_ts=now_ts,
                 max_age=login_state.max_age,
             )
-            account = oidc.resolve_oidc_account(session, provider, claims, now_ts)
+            account = oidc.resolve_oidc_account(
+                session, provider, claims, now_ts, validated_with=validated_with
+            )
         except oidc.OidcError as exc:
             session.rollback()
             oidc.logger.warning("oidc sign-in rejected: %s", exc)

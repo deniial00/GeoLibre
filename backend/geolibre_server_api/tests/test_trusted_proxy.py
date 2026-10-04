@@ -54,18 +54,26 @@ def test_trusted_proxy_user_signs_in_without_a_password(proxied_app):
         assert _proxy_sign_in(proxy)["id"] == user["id"]
 
 
-def test_client_ip_uses_all_forwarded_header_lines(proxied_app):
-    request = Request(
+def _forwarded_request(app, *values: bytes) -> Request:
+    return Request(
         {
             "type": "http",
-            "headers": [
-                (b"x-forwarded-for", b"192.0.2.10"),
-                (b"x-forwarded-for", b"198.51.100.20"),
-            ],
+            "headers": [(b"x-forwarded-for", value) for value in values],
             "client": ("10.0.0.5", 5000),
-            "app": proxied_app,
+            "app": app,
         }
     )
+
+
+def test_client_ip_uses_all_forwarded_header_lines(proxied_app):
+    request = _forwarded_request(proxied_app, b"192.0.2.10", b"198.51.100.20")
+    assert str(client_ip(request)) == "198.51.100.20"
+
+
+def test_client_ip_skips_an_empty_forwarded_header(proxied_app):
+    # An empty line names no hop, so the trusted peer itself is the client.
+    assert str(client_ip(_forwarded_request(proxied_app, b""))) == "10.0.0.5"
+    request = _forwarded_request(proxied_app, b"198.51.100.20", b"")
     assert str(client_ip(request)) == "198.51.100.20"
 
 

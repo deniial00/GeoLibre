@@ -202,12 +202,15 @@ def identity_provider_json(
     }
 
 
-def _provider_for(session: Session, organization_id: str) -> OrganizationIdentityProvider | None:
-    return session.scalar(
-        select(OrganizationIdentityProvider).where(
-            OrganizationIdentityProvider.organization_id == organization_id
-        )
+def _provider_for(
+    session: Session, organization_id: str, *, lock: bool = False
+) -> OrganizationIdentityProvider | None:
+    query = select(OrganizationIdentityProvider).where(
+        OrganizationIdentityProvider.organization_id == organization_id
     )
+    if lock:
+        query = query.with_for_update().execution_options(populate_existing=True)
+    return session.scalar(query)
 
 
 def _require_no_linked_identities(session: Session, provider: OrganizationIdentityProvider) -> None:
@@ -384,6 +387,13 @@ def build_enterprise_admin_router() -> APIRouter:
             )
 
         now_ts = get_clock(request)()
+        if provider is not None:
+            # Lock the row an SSO callback locks while linking an identity, so
+            # no identity links between the guard below and this commit. Taken
+            # only now: discovery above must not hold it across a network call.
+            provider = _provider_for(session, organization_id, lock=True)
+            if provider is None:
+                raise HTTPException(409, "identity provider was removed; try again")
         if provider is None:
             provider = OrganizationIdentityProvider(
                 id=str(uuid.uuid4()),

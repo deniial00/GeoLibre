@@ -262,7 +262,8 @@ async function regionFor(
 function cacheKey(connection: S3Connection, request: S3PresignRequest): string | null {
   // Listings carry continuation tokens and are signed per call.
   if (!request.bucket || (request.query && Object.keys(request.query).length > 0)) return null;
-  return `${connection.id}\u0000${request.bucket}\u0000${request.key}`;
+  // The request's region wins over the connection's, so it is part of the URL.
+  return `${connection.id}\u0000${request.bucket}\u0000${request.key}\u0000${request.region ?? ""}`;
 }
 
 function rememberSignedUrl(key: string, signed: S3SignedUrl): void {
