@@ -91,21 +91,14 @@ file remains at `<app_config_dir>/admin-profile.json`; see the standard
 authoritative even if malformed, and does not fall back to the bundled copy.
 Only an absent file or a failed read/command selects the web copy.
 
-### File format
+### Interface fields
 
-```json
-{
-  "enabled": true,
-  "level": "intermediate",
-  "lock": true,
-  "hiddenDataSources": ["postgres", "video"],
-  "hiddenPlugins": ["maplibre-gl-geoagent"]
-}
-```
+The primary `interface` object and the legacy `admin-profile.json` file share
+these profile fields; the legacy file stores them at top level.
 
 | Field | Type | Meaning |
 | --- | --- | --- |
-| `enabled` | boolean | Whether filtering is active. Defaults to `true` for an admin file. |
+| `enabled` | boolean | Whether filtering is active. Defaults to `true`. |
 | `level` | `"beginner" \| "intermediate" \| "advanced"` | Seeds the hidden lists from each item's tier. Optional. |
 | `lock` | boolean | When `true`, users cannot change the profile from Settings. Remove or clear `interface.lock` in the selected deployment policy (or the legacy profile) to release the lock on the next launch. |
 | `hiddenDataSources` | string[] | Explicit data-source ids to hide. Overrides the preset when present. |

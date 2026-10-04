@@ -210,9 +210,10 @@ The final policy also controls `/ai`: `ai.enabled: false`, or an absent
 without credentials, path, query or fragment; the token may contain only
 `[A-Za-z0-9._-]`. Missing or invalid configuration stops boot.
 `GEOLIBRE_AI_URL=/ai` overrides a mounted false value; upstream URL/token alone
-do not enable AI. `GEOLIBRE_AI_MODEL` overrides policy only when `AI_URL` is
-set. Keep proxy credentials, sidecar token, trusted proxies, Basic Auth and CSP
-private; only public policy belongs in the generated file.
+do not enable AI. `GEOLIBRE_AI_MODEL` overrides policy only when
+`GEOLIBRE_AI_URL` is set. Keep proxy credentials, sidecar token, trusted
+proxies, Basic Auth and CSP private; only public policy belongs in the generated
+file.
 
 !!! warning "Container guards are not general authorization"
     These restrictions apply only to the bundled container's nginx routes.

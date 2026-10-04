@@ -116,8 +116,9 @@ https://web.geolibre.app/?url=https://share.geolibre.app/giswqs/3d-tiles.geolibr
 A plugin from the official plugin registry works too, by its registry id
 (`?plugin=openrndt-geolibre`). An uninstalled compatible entry prompts for
 **Trust and load**; confirming trust does not bypass deployment plugin policy.
-A denied plugin will not load or activate. This registry-id prompt is distinct
-from project-supplied manifest URLs, whose trust prompt is suppressed when
+A denied plugin will not load or activate. The registry-ID prompt is skipped in
+read-only `layout=viewer`, which never installs registry plugins. This is
+distinct from project manifest URL trust, whose prompt is suppressed when
 `sideload: false`. See [Plugin policy](../deployment-policy.md#plugin-precedence).
 
 Unknown names are ignored. A plugin that does not support the current renderer

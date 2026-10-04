@@ -116,8 +116,8 @@ const deploymentPolicyReady = loadDeploymentPolicy().then((policy) => {
   // retracts it. Primary source: deployment.json. The legacy
   // VITE_GEOLIBRE_CAPABILITIES input is still honoured as a fallback:
   // policy > window.__GEOLIBRE_DEPLOYMENT_ENV__ > build environment.
-  // `capabilities: []` grants none; an omitted value falls through to the
-  // default full grant, so existing deployments are unchanged.
+  // `capabilities: []` grants none; an omitted value uses the legacy env
+  // fallback when set, then the default full grant only if that is unset.
   if (policy?.capabilities !== undefined) {
     useAppStore.getState().setDeploymentCapabilities(policy.capabilities);
     return;

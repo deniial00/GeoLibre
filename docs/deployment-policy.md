@@ -279,9 +279,8 @@ instead.
 The `read_deployment_policy` command returns raw UTF-8 text, or `null` when
 the file is absent. A leading UTF-8 BOM is accepted by the parser. The selected
 policy is applied before the first render, including capability restrictions,
-The selected policy is applied before the first render, including capability
-restrictions, without rebuilding the app. Restart GeoLibre after changing the
-file; changes are not watched.
+without rebuilding the app. Restart GeoLibre after changing the file; changes
+are not watched.
 
 An existing config-dir file is authoritative, even if empty, malformed or of
 an unsupported version: it yields no policy rather than falling back to a
@@ -295,7 +294,6 @@ A non-empty, valid policy `interface` replaces the legacy profile whole; an
 absent, empty, or dropped invalid `interface` leaves the legacy profile
 eligible. The config directory is user-writable: this is desktop provisioning,
 not a security boundary or server-side enforcement.
-
 
 ## Docker
 
@@ -356,6 +354,7 @@ grants alone do not configure nginx.
     AI proxy URL and token, the sidecar token, trusted proxies, Basic Auth and
     CSP stay in server environment variables and files.
 
+!!! warning "Client hiding is not enforcement"
     Hiding or removing an interface element does not stop someone with browser
     devtools. Nginx enforcement applies only to the bundled Docker routes; it
     does not restrict desktop processing, browser WASM, separately exposed

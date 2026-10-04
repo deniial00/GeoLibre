@@ -100,6 +100,7 @@ do not configure Docker nginx route enforcement.
     runtime environment fallback, then the legacy build environment, then the
     default full grant. Client gates and browser WASM are not access control;
     use Docker nginx policy enforcement or protect APIs independently.
+
 ### Runtime examples
 
 A kiosk or exhibit terminal, with no optional capabilities:
