@@ -5,9 +5,11 @@ import { setSidecarAuthToken } from "@geolibre/processing";
 import { fireEvent, mockFetch, render, screen, waitFor } from "./helpers/dom";
 import { resetMssqlSessions } from "../apps/geolibre-desktop/src/lib/mssql-sessions";
 import {
+  MSSQL_CONNECTIONS_STORAGE_KEY,
   setKeychainMssqlSecrets,
   setMssqlKeychainWritable,
 } from "../apps/geolibre-desktop/src/lib/saved-mssql-connections";
+import type { OpenAddDataMssql } from "../apps/geolibre-desktop/src/components/layout/add-data/open-add-data";
 import type { AddDataShellContextValue } from "../apps/geolibre-desktop/src/components/layout/add-data/context";
 
 const [{ MssqlSource }, { AddDataShellProvider }] = await Promise.all([
@@ -15,7 +17,7 @@ const [{ MssqlSource }, { AddDataShellProvider }] = await Promise.all([
   import("../apps/geolibre-desktop/src/components/layout/add-data/context"),
 ]);
 
-function renderMssqlSource() {
+function renderMssqlSource(initialMssql?: OpenAddDataMssql) {
   const shell: AddDataShellContextValue = {
     mapControllerRef: createRef(),
     addLayer: () => {},
@@ -38,7 +40,13 @@ function renderMssqlSource() {
       stopTransient: () => {},
     },
   };
-  return render(createElement(AddDataShellProvider, { value: shell }, createElement(MssqlSource)));
+  return render(
+    createElement(
+      AddDataShellProvider,
+      { value: shell },
+      createElement(MssqlSource, { initialMssql }),
+    ),
+  );
 }
 
 describe("MssqlSource", () => {
@@ -52,6 +60,30 @@ describe("MssqlSource", () => {
     assert.equal(screen.getByRole("button", { name: "Connect" }).hasAttribute("disabled"), true);
   });
 
+  it("falls back to a new connection when the prefilled profile is missing", () => {
+    window.localStorage.setItem(
+      MSSQL_CONNECTIONS_STORAGE_KEY,
+      JSON.stringify([
+        {
+          id: "00000000-0000-4000-8000-000000000002",
+          server: "saved.example",
+          port: 1433,
+          database: "gis",
+          encrypt: true,
+          trustServerCertificate: false,
+          authMethod: "sql",
+          username: "sa",
+        },
+      ]),
+    );
+
+    renderMssqlSource({ connectionId: "00000000-0000-4000-8000-000000000003" });
+
+    const savedConnection = screen.getByLabelText("Saved connection") as HTMLSelectElement;
+    assert.equal(savedConnection.options.length, 2);
+    assert.equal(savedConnection.value, "");
+    assert.equal((screen.getByLabelText("Server") as HTMLInputElement).value, "");
+  });
   it("clears authentication-specific values when the method changes", () => {
     renderMssqlSource();
 

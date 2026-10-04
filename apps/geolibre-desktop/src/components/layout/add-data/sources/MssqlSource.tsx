@@ -57,9 +57,13 @@ export function MssqlSource({ initialMssql }: MssqlSourceProps) {
   const desktopRuntime = useMemo(() => isDesktopRuntime(), []);
   const windowsHost = useMemo(() => isWindows(), []);
   const [savedProfiles, setSavedProfiles] = useState(readSavedMssqlConnections);
-  const [selectedSavedId, setSelectedSavedId] = useState(
-    () => initialMssql?.connectionId ?? readSavedMssqlConnections()[0]?.id ?? "",
-  );
+  const [selectedSavedId, setSelectedSavedId] = useState(() => {
+    const requestedId = initialMssql?.connectionId;
+    if (requestedId) {
+      return savedProfiles.some((profile) => profile.id === requestedId) ? requestedId : "";
+    }
+    return savedProfiles[0]?.id ?? "";
+  });
   const selectedSaved = savedProfiles.find((item) => item.id === selectedSavedId);
   const [server, setServer] = useState(() => selectedSaved?.server ?? "");
   const [port, setPort] = useState(() => String(selectedSaved?.port ?? 1433));
