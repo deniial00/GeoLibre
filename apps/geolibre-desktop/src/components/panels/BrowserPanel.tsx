@@ -9,14 +9,14 @@ import {
 } from "@geolibre/core";
 import type { MapEngine } from "@geolibre/map";
 import { fetchArcGISMapServiceSublayers } from "@geolibre/plugins";
-import { fetchMssqlStatus, fetchPostgisStatus, listMssqlTables, listPostgisTables } from "@geolibre/processing";
+import { fetchPostgisStatus, listPostgisTables } from "@geolibre/processing";
 import { Input, ScrollArea } from "@geolibre/ui";
 import { Search } from "lucide-react";
 import { useCallback, useMemo, useRef, useState, type KeyboardEvent, type RefObject } from "react";
 import { useTranslation } from "react-i18next";
 import { isDesktopRuntime } from "../../lib/is-mobile";
 import { startGeoLibreSidecar } from "../../lib/sidecar";
-import { MssqlReconnectRequiredError, withMssqlSession } from "../../lib/mssql-sessions";
+import { fetchMssqlBrowserTables } from "../../lib/mssql-browser";
 import {
   isLoadableFilePath,
   listDirectory,
@@ -165,59 +165,8 @@ export function BrowserPanel({
   const mssqlFetchedRef = useRef<Set<string>>(new Set());
 
   const fetchMssqlTables = useCallback(
-    (connectionId: string) => {
-      if (mssqlFetchedRef.current.has(connectionId)) return;
-      mssqlFetchedRef.current.add(connectionId);
-      if (!isDesktopRuntime()) {
-        mssqlFetchedRef.current.delete(connectionId);
-        setMssqlLoads((prev) => ({
-          ...prev,
-          [`mssql:${connectionId}`]: {
-            status: "error",
-            message: t("addData.mssql.errorDesktopOnly"),
-          },
-        }));
-        return;
-      }
-      setMssqlLoads((prev) => ({ ...prev, [`mssql:${connectionId}`]: { status: "loading" } }));
-      void startGeoLibreSidecar()
-        .catch(() => {})
-        .then(() => fetchMssqlStatus())
-        .then((status) => {
-          if (!status.available) {
-            throw new Error(
-              t("addData.mssql.errorRuntimeMissing", { detail: status.message }),
-            );
-          }
-          return withMssqlSession(connectionId, (sessionId) => listMssqlTables(sessionId));
-        })
-        .then((tables) => {
-          const seen = new Set<string>();
-          const unique = tables.filter((table) => {
-            const key = `${table.schema}.${table.table}`;
-            if (seen.has(key)) return false;
-            seen.add(key);
-            return true;
-          });
-          setMssqlLoads((prev) => ({
-            ...prev,
-            [`mssql:${connectionId}`]: { status: "loaded", tables: unique },
-          }));
-        })
-        .catch((err: unknown) => {
-          mssqlFetchedRef.current.delete(connectionId);
-          setMssqlLoads((prev) => ({
-            ...prev,
-            [`mssql:${connectionId}`]: {
-              status: "error",
-              message:
-                err instanceof MssqlReconnectRequiredError
-                  ? t("addData.mssql.errorReconnectRequired")
-                  : errorMessage(err, t("addData.mssql.errorConnect")),
-            },
-          }));
-        });
-    },
+    (connectionId: string) =>
+      fetchMssqlBrowserTables(connectionId, mssqlFetchedRef.current, setMssqlLoads, t),
     [t],
   );
   const fetchConnectionTables = useCallback(
@@ -398,10 +347,14 @@ export function BrowserPanel({
     () =>
       augmentArcGISServices(
         augmentFolders(
-          augmentConnections(tree, {
-            ...connLoads,
-            ...mssqlLoads,
-          }, loadingLabel),
+          augmentConnections(
+            tree,
+            {
+              ...connLoads,
+              ...mssqlLoads,
+            },
+            loadingLabel,
+          ),
           folderLoads,
           foldersLoadingLabel,
           isLoadableFilePath,
