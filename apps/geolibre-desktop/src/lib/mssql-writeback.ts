@@ -7,7 +7,7 @@ export interface RefreshedMssqlTable {
 
 export type MssqlWritebackOutcome<TWrite> =
   | { kind: "blocked" }
-  | { kind: "refresh-failed"; writeResult: TWrite; error: unknown }
+  | { kind: "refresh-failed"; writeResult: TWrite }
   | { kind: "reconciled"; writeResult: TWrite; refreshed: RefreshedMssqlTable };
 
 /** Whether a SQL Server layer may save without replaying a committed insert. */
@@ -64,7 +64,7 @@ export async function writeMssqlAndRefresh<TWrite>(
   const writeResult = await write();
   try {
     return { kind: "reconciled", writeResult, refreshed: await refresh() };
-  } catch (error) {
-    return { kind: "refresh-failed", writeResult, error };
+  } catch {
+    return { kind: "refresh-failed", writeResult };
   }
 }

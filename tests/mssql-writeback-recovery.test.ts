@@ -10,6 +10,7 @@ import {
   writeMssqlAndRefresh,
 } from "../apps/geolibre-desktop/src/lib/mssql-writeback";
 import {
+  getRefreshFailureLayerPatch,
   isRefreshableLayer,
   supportsAutoRefresh,
 } from "../apps/geolibre-desktop/src/lib/layer-refresh";
@@ -106,6 +107,43 @@ describe("SQL Server write-back refresh recovery", () => {
       supportsAutoRefresh(activeLayer, refreshRequiredLayerIds.has(activeLayer.id)),
       false,
       "reconciliation is never automatic",
+    );
+    const clearOnFailureLayer = {
+      ...activeLayer,
+      connection: {
+        layerId: activeLayer.id,
+        interval: null,
+        lastSyncedAt: null,
+        lastError: null,
+        onFailure: "clear" as const,
+      },
+    };
+    const recoveryFailurePatch = getRefreshFailureLayerPatch(
+      clearOnFailureLayer,
+      "table read unavailable",
+      true,
+      false,
+    );
+    assert.equal(
+      recoveryFailurePatch.connection?.lastError,
+      "table read unavailable",
+      "a failed recovery reread still records the connection error",
+    );
+    assert.equal(
+      recoveryFailurePatch.geojson,
+      undefined,
+      "failed recovery refreshes preserve local features even when the old policy was clear",
+    );
+    const ordinaryFailurePatch = getRefreshFailureLayerPatch(
+      clearOnFailureLayer,
+      "refresh unavailable",
+      false,
+      false,
+    );
+    assert.deepEqual(
+      ordinaryFailurePatch.geojson,
+      { type: "FeatureCollection", features: [] },
+      "non-recovery refreshes retain the existing clear-on-failure policy",
     );
 
     const retry = await submit();

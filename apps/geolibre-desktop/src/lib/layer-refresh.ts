@@ -684,6 +684,23 @@ export function supportsRefreshFailurePolicy(layer: GeoLibreLayer): boolean {
   );
 }
 
+/** Whether clear-on-failure applies; MSSQL recovery reads keep local features. */
+function shouldClearGeoJsonOnRefreshFailure(
+  layer: {
+    connection?: { onFailure?: string };
+    geojson?: FeatureCollection | null;
+  },
+  mssqlRecoveryRefresh: boolean,
+  hasPendingEdits: boolean,
+): boolean {
+  return (
+    !mssqlRecoveryRefresh &&
+    layer.connection?.onFailure === "clear" &&
+    Boolean(layer.geojson) &&
+    !hasPendingEdits
+  );
+}
+
 export function isRefreshableLayer(layer: GeoLibreLayer, mssqlRecoveryRequired = false): boolean {
   return (
     Boolean(refreshSourceUrl(layer)) ||
@@ -787,6 +804,21 @@ export function setLayerConnectionResult(
       lastError: result.error === undefined ? (layer.connection?.lastError ?? null) : result.error,
       onFailure: layer.connection?.onFailure ?? "keep-last",
     },
+  };
+}
+
+/** Build the layer patch for a failed refresh, preserving recovery data when required. */
+export function getRefreshFailureLayerPatch(
+  layer: GeoLibreLayer,
+  error: string,
+  mssqlRecoveryRefresh: boolean,
+  hasPendingEdits: boolean,
+): Partial<GeoLibreLayer> {
+  return {
+    ...setLayerConnectionResult(layer, { error }),
+    ...(shouldClearGeoJsonOnRefreshFailure(layer, mssqlRecoveryRefresh, hasPendingEdits)
+      ? { geojson: { type: "FeatureCollection" as const, features: [] } }
+      : {}),
   };
 }
 

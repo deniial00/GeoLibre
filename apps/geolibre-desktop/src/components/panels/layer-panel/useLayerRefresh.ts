@@ -6,6 +6,7 @@ import type { GeoLibreLayer } from "@geolibre/core";
 import { reloadVectorControlLayer, replayVectorControlLayerById } from "@geolibre/plugins";
 import {
   getLayerRefreshConfig,
+  getRefreshFailureLayerPatch,
   isRefreshableLayer,
   isVectorControlRefreshLayer,
   refreshGeoJsonLayer,
@@ -136,6 +137,7 @@ export function useLayerRefresh({ layers, isCollapsed }: UseLayerRefreshOptions)
     async (layer: GeoLibreLayer, automatic = false) => {
       const requestGeneration = projectGeneration;
       const requestSourceUrl = layer.source.url;
+      const mssqlRecoveryRefresh = mssqlRefreshRequiredLayerIds.has(layer.id);
       const getCurrentRequestLayer = (): GeoLibreLayer | undefined => {
         const state = useAppStore.getState();
         if (state.projectGeneration !== requestGeneration) return undefined;
@@ -163,7 +165,7 @@ export function useLayerRefresh({ layers, isCollapsed }: UseLayerRefreshOptions)
       }));
 
       try {
-        if (mssqlRefreshRequiredLayerIds.has(layer.id)) {
+        if (mssqlRecoveryRefresh) {
           const connectionId =
             typeof layer.metadata.mssqlConnectionId === "string"
               ? layer.metadata.mssqlConnectionId
@@ -411,18 +413,15 @@ export function useLayerRefresh({ layers, isCollapsed }: UseLayerRefreshOptions)
         const latest = getCurrentRequestLayer();
         if (!latest) return;
         const message = error instanceof Error ? error.message : t("layers.refreshError");
-        if (latest) {
-          updateLayer(layer.id, {
-            ...setLayerConnectionResult(latest, { error: message }),
-            ...(latest.connection?.onFailure === "clear" &&
-            latest.geojson &&
-            !arcGISLayerHasPendingEdits(latest.id)
-              ? {
-                  geojson: { type: "FeatureCollection" as const, features: [] },
-                }
-              : {}),
-          });
-        }
+        updateLayer(
+          layer.id,
+          getRefreshFailureLayerPatch(
+            latest,
+            message,
+            mssqlRecoveryRefresh,
+            arcGISLayerHasPendingEdits(latest.id),
+          ),
+        );
         setRefreshStatuses((current) => ({
           ...current,
           [layer.id]: {
