@@ -8,6 +8,7 @@ import {
   buildBrowserTree,
   buildDirectoryNodes,
   buildFavoriteNodes,
+  buildMssqlTableNodes,
   buildPostgisTableNodes,
   filterBrowserTree,
   isArcGISMapServiceEntry,
@@ -599,6 +600,85 @@ describe("augmentConnections", () => {
     const tree = baseTree();
     augmentConnections(tree, { [CONN]: { status: "loading" } }, "Loading…");
     assert.deepEqual(find(tree, `connection:${CONN}`)?.children, []);
+  });
+});
+
+describe("SQL Server Browser tree", () => {
+  const ID = "profile-123";
+  const baseTree = () =>
+    buildBrowserTree({
+      services: [],
+      recentProjects: [],
+      mssqlConnections: [{ id: ID, label: "sql.example/db" }],
+    });
+
+  it("adds the SQL Server section only when the input is supplied", () => {
+    const without = buildBrowserTree({ services: [], recentProjects: [] });
+    assert.equal(find(without, "section:sql-server"), undefined);
+    const section = find(baseTree(), "section:sql-server");
+    assert.equal(section?.newConnectionKind, "mssql");
+    assert.equal(section?.children?.[0].id, `mssql-connection:${ID}`);
+    assert.equal(section?.children?.[0].mssqlConnectionId, ID);
+  });
+
+  it("groups sorted tables under schemas, deduplicating tables with multiple geometry columns", () => {
+    const schemas = buildMssqlTableNodes(ID, [
+      { schema: "dbo", table: "z_roads" },
+      { schema: "gis", table: "parcels" },
+      { schema: "dbo", table: "a_roads" },
+      { schema: "dbo", table: "z_roads" },
+    ]);
+    assert.deepEqual(
+      schemas.map((schema) => [schema.label, schema.count]),
+      [
+        ["dbo", 2],
+        ["gis", 1],
+      ],
+    );
+    assert.deepEqual(
+      schemas[0].children?.map((table) => table.label),
+      ["a_roads", "z_roads"],
+    );
+    const table = schemas[0].children?.[1];
+    assert.equal(table?.kind, "table");
+    assert.equal(table?.mssqlConnectionId, ID);
+    assert.equal(table?.connectionString, undefined);
+    assert.equal(table?.tableSchema, "dbo");
+    assert.equal(table?.tableName, "z_roads");
+  });
+
+  it("injects SQL Server loading, error, and loaded states without mutating the source tree", () => {
+    const tree = baseTree();
+    const loading = augmentConnections(
+      tree,
+      { [`mssql:${ID}`]: { status: "loading" } },
+      "Loading tables…",
+    );
+    assert.equal(find(loading, `mssql-connection:${ID}:loading`)?.label, "Loading tables…");
+
+    const error = augmentConnections(
+      tree,
+      { [`mssql:${ID}`]: { status: "error", message: "offline" } },
+      "",
+    );
+    assert.equal(find(error, `mssql-connection:${ID}:error`)?.label, "offline");
+
+    const loaded = augmentConnections(
+      tree,
+      { [`mssql:${ID}`]: { status: "loaded", tables: [{ schema: "dbo", table: "roads" }] } },
+      "",
+    );
+    assert.equal(find(loaded, `mssql-table:${ID}:dbo.roads`)?.kind, "table");
+    assert.deepEqual(find(tree, `mssql-connection:${ID}`)?.children, []);
+  });
+
+  it("does not apply a PostGIS load keyed by the bare profile id", () => {
+    const loaded = augmentConnections(
+      baseTree(),
+      { [ID]: { status: "loaded", tables: [{ schema: "dbo", table: "roads" }] } },
+      "",
+    );
+    assert.deepEqual(find(loaded, `mssql-connection:${ID}`)?.children, []);
   });
 });
 

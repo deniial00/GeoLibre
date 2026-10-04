@@ -16,6 +16,7 @@ import { useCallback, useMemo, useRef, useState, type KeyboardEvent, type RefObj
 import { useTranslation } from "react-i18next";
 import { isDesktopRuntime } from "../../lib/is-mobile";
 import { startGeoLibreSidecar } from "../../lib/sidecar";
+import { fetchMssqlBrowserTables } from "../../lib/mssql-browser";
 import {
   isLoadableFilePath,
   listDirectory,
@@ -49,6 +50,7 @@ import { BrowserTreeNode } from "./BrowserTreeNode";
 
 /** The `connection:` / `folder:` id prefixes (id = prefix + connString/path). */
 const CONNECTION_ID_PREFIX = "connection:";
+const MSSQL_CONNECTION_ID_PREFIX = "mssql-connection:";
 const FOLDER_ID_PREFIX = "folder:";
 /** The `service:` id prefix (id = prefix + saved-service id). */
 const SERVICE_ID_PREFIX = "service:";
@@ -76,6 +78,7 @@ const DEFAULT_EXPANDED = new Set([
   "section:services",
   "section:recent",
   "section:databases",
+  "section:sql-server",
   "section:files",
 ]);
 
@@ -158,6 +161,16 @@ export function BrowserPanel({
   // triggers) doesn't refetch. A failed fetch drops its entry so re-expanding
   // the connection retries (there is no separate refresh affordance).
   const connFetchedRef = useRef<Set<string>>(new Set());
+
+  // SQL Server introspection, keyed `mssql:<profile id>` so it merges with the
+  // PostGIS loads without colliding; same retry-on-failure tracking.
+  const [mssqlLoads, setMssqlLoads] = useState<Record<string, ConnectionLoad>>({});
+  const mssqlFetchedRef = useRef<Set<string>>(new Set());
+  const fetchMssqlTables = useCallback(
+    (connectionId: string) =>
+      fetchMssqlBrowserTables(connectionId, mssqlFetchedRef.current, setMssqlLoads, t),
+    [t],
+  );
 
   const fetchConnectionTables = useCallback(
     (connectionString: string) => {
@@ -337,7 +350,7 @@ export function BrowserPanel({
     () =>
       augmentArcGISServices(
         augmentFolders(
-          augmentConnections(tree, connLoads, loadingLabel),
+          augmentConnections(tree, { ...connLoads, ...mssqlLoads }, loadingLabel),
           folderLoads,
           foldersLoadingLabel,
           isLoadableFilePath,
@@ -346,7 +359,17 @@ export function BrowserPanel({
         arcgisLoads,
         arcgisLabels,
       ),
-    [tree, connLoads, loadingLabel, folderLoads, foldersLoadingLabel, arcgisLoads, arcgisLabels, t],
+    [
+      tree,
+      connLoads,
+      mssqlLoads,
+      loadingLabel,
+      folderLoads,
+      foldersLoadingLabel,
+      arcgisLoads,
+      arcgisLabels,
+      t,
+    ],
   );
 
   const filtered = useMemo(() => filterBrowserTree(augmented, query), [augmented, query]);
@@ -365,6 +388,8 @@ export function BrowserPanel({
     // expanded.
     if (id.startsWith(CONNECTION_ID_PREFIX) && !expanded.has(id)) {
       fetchConnectionTables(id.slice(CONNECTION_ID_PREFIX.length));
+    } else if (id.startsWith(MSSQL_CONNECTION_ID_PREFIX) && !expanded.has(id)) {
+      fetchMssqlTables(id.slice(MSSQL_CONNECTION_ID_PREFIX.length));
     } else if (id.startsWith(FOLDER_ID_PREFIX) && !expanded.has(id)) {
       fetchFolder(id.slice(FOLDER_ID_PREFIX.length));
     } else if (id.startsWith(SERVICE_ID_PREFIX) && !expanded.has(id)) {
@@ -565,6 +590,16 @@ export function BrowserPanel({
       } finally {
         endBusy();
       }
+    } else if (node.kind === "table" && node.mssqlConnectionId) {
+      // Open the SQL Server source with the saved profile and table preselected;
+      // the session and secret come from the keychain-backed session cache.
+      openAddData("mssql", {
+        mssql: {
+          connectionId: node.mssqlConnectionId,
+          schema: node.tableSchema,
+          table: node.tableName,
+        },
+      });
     } else if (node.kind === "table" && node.connectionString) {
       // Reuse the proven PostgreSQL Add Data flow (desktop Martin lifecycle) to
       // add the table as a layer, opening it prefilled with this connection and

@@ -872,7 +872,14 @@ def mssql_read(request: MssqlReadRequest) -> dict[str, Any]:
 def mssql_write(request: MssqlWriteRequest) -> dict[str, Any]:
     from geolibre_server import vector_ops
 
-    features = require_features(request.geojson)
+    submitted = request.geojson.get("features")
+    # Deleting every loaded feature is a valid save: with a non-empty baseline the
+    # diff deletes exactly those rows. Without one, an empty payload stays an error.
+    features = (
+        []
+        if request.baseline_keys and isinstance(submitted, list) and not submitted
+        else require_features(request.geojson)
+    )
     session = _get_session(request.session_id)
     inserted = updated = deleted = 0
     with _connection(session) as conn:

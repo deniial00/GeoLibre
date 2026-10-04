@@ -216,6 +216,27 @@ def test_session_unknown_and_idle_expiry(monkeypatch):
         mssql._SESSIONS.clear()
 
 
+def test_write_empty_features_requires_baseline(monkeypatch):
+    monkeypatch.setattr(mssql, "_SESSIONS", {})
+    empty = {"type": "FeatureCollection", "features": []}
+    for baseline_keys in (None, []):
+        with pytest.raises(HTTPException) as exc:
+            mssql.mssql_write(
+                mssql.MssqlWriteRequest(
+                    session_id="missing", table="t", geojson=empty, baseline_keys=baseline_keys
+                )
+            )
+        assert (exc.value.status_code, exc.value.detail) == (400, "No features to write.")
+    # A baseline lets the empty save past validation, to the session lookup.
+    with pytest.raises(HTTPException) as exc:
+        mssql.mssql_write(
+            mssql.MssqlWriteRequest(
+                session_id="missing", table="t", geojson=empty, baseline_keys=[1]
+            )
+        )
+    assert exc.value.status_code == 410
+
+
 def test_optional_imports_and_runtime_errors(monkeypatch):
     monkeypatch.setattr(mssql, "pyodbc_import_error", lambda: "missing")
     with pytest.raises(HTTPException) as exc:
@@ -638,6 +659,40 @@ def test_live_write_roundtrip_and_unchanged_save(live_db):
         if f["properties"]["name"] == "Changed"
     )
     assert row["properties"]["seen_tz"].endswith("+01:00")
+
+
+@requires_live_mssql
+def test_live_write_empty_with_baseline_deletes_rows(live_db):
+    read = mssql.mssql_read(
+        mssql.MssqlReadRequest(session_id=live_db, table="geolibre_writeback_test")
+    )
+    baseline_keys = [feature["id"] for feature in read["geojson"]["features"]]
+    assert len(baseline_keys) == 3
+    # A row added after the read is outside the baseline, so the empty save must keep it.
+    conn = mssql._open_connection(mssql._get_session(live_db))
+    cur = conn.cursor()
+    cur.execute(
+        "INSERT INTO dbo.geolibre_writeback_test(name,population,geom) VALUES "
+        "('Outside',4,geometry::Point(-7000000,3000000,3857))"
+    )
+    conn.commit()
+    conn.close()
+    result = mssql.mssql_write(
+        mssql.MssqlWriteRequest(
+            session_id=live_db,
+            table="geolibre_writeback_test",
+            geojson={"type": "FeatureCollection", "features": []},
+            baseline_keys=baseline_keys,
+        )
+    )
+    assert (result["inserted"], result["updated"], result["deleted"]) == (0, 0, 3)
+    conn = mssql._open_connection(mssql._get_session(live_db))
+    cur = conn.cursor()
+    cur.execute("SELECT gid, name FROM dbo.geolibre_writeback_test")
+    rows = [tuple(row) for row in cur.fetchall()]
+    conn.close()
+    assert [name for _, name in rows] == ["Outside"]
+    assert rows[0][0] not in baseline_keys
 
 
 @requires_live_mssql

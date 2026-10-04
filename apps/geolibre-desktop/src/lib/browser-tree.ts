@@ -54,14 +54,17 @@ export interface BrowserNode {
   serviceKind?: ServiceLibraryKind;
   /**
    * The Add Data source this node's "New connection" (＋) action opens — set on
-   * service-kind category groups (their kind) and the Databases section
-   * ("postgres"). Absent means the node shows no ＋.
+   * service-kind category groups (their kind), the Databases section
+   * ("postgres") and the SQL Server section ("mssql"). Absent means the node
+   * shows no ＋.
    */
   newConnectionKind?: AddDataKind;
   /** True on the Files section, whose ＋ opens a folder picker (kind `section`). */
   addFolderAction?: boolean;
   /** The saved database connection string a `connection`/`table` node belongs to. */
   connectionString?: string;
+  /** Saved SQL Server profile id of a `connection`/`table` node. */
+  mssqlConnectionId?: string;
   /** The schema of a `table` node. */
   tableSchema?: string;
   /** The table name of a `table` node. */
@@ -125,6 +128,8 @@ export interface BrowserTreeInput {
    * PostgreSQL add flow itself reports when it needs GeoLibre Desktop.
    */
   databaseConnections?: readonly { connectionString: string; label: string }[];
+  /** Saved SQL Server profiles listed under the SQL Server section; omitted hides the section. */
+  mssqlConnections?: readonly { id: string; label: string }[];
   /**
    * The user's pinned folders to list under the Files section. Omitted
    * (undefined) hides the section — the app passes it only on desktop
@@ -159,6 +164,7 @@ export interface BrowserTreeInput {
     files?: string;
     favorites?: string;
     myData?: string;
+    sqlServer?: string;
   };
 }
 
@@ -342,6 +348,30 @@ export function buildBrowserTree(input: BrowserTreeInput): BrowserNode[] {
           connectionString: connection.connectionString,
           // An empty child list marks it as an expandable group; the panel
           // lazily fills it with schema/table nodes on first expand.
+          children: [],
+        }),
+      ),
+    });
+  }
+
+  // Saved SQL Server profiles, keyed by profile id: the connection secret lives
+  // in the OS keychain, so nothing secret reaches the tree.
+  if (input.mssqlConnections) {
+    sections.push({
+      id: "section:sql-server",
+      kind: "section",
+      label: labels.sqlServer ?? "SQL Server",
+      addable: false,
+      newConnectionKind: "mssql",
+      count: input.mssqlConnections.length,
+      children: input.mssqlConnections.map(
+        (connection): BrowserNode => ({
+          id: `mssql-connection:${connection.id}`,
+          kind: "connection",
+          label: connection.label,
+          addable: false,
+          mssqlConnectionId: connection.id,
+          // Lazily filled with schema/table nodes on first expand.
           children: [],
         }),
       ),
@@ -555,6 +585,61 @@ export type ConnectionLoad =
   | { status: "loaded"; tables: readonly PostgisTableRef[] }
   | { status: "error"; message: string };
 
+/** A SQL Server spatial table shown in the Browser tree. */
+export interface MssqlTableRef {
+  schema: string;
+  table: string;
+}
+
+/**
+ * Groups a saved SQL Server connection's spatial tables into `schema` → `table`
+ * nodes, sorted by name, dropping repeated schema/table pairs.
+ *
+ * @param connectionId - The saved SQL Server profile id (embedded in node ids
+ *   and carried on table nodes for the add flow).
+ * @param tables - The spatial tables discovered for that connection.
+ * @returns One `schema` group per distinct schema, each with its `table` leaves.
+ */
+export function buildMssqlTableNodes(
+  connectionId: string,
+  tables: readonly MssqlTableRef[],
+): BrowserNode[] {
+  const bySchema = new Map<string, Map<string, MssqlTableRef>>();
+  for (const entry of tables) {
+    let bucket = bySchema.get(entry.schema);
+    if (!bucket) {
+      bucket = new Map();
+      bySchema.set(entry.schema, bucket);
+    }
+    if (!bucket.has(entry.table)) bucket.set(entry.table, entry);
+  }
+  return Array.from(bySchema.keys())
+    .sort(byLabel)
+    .map((schema) => {
+      const entries = [...(bySchema.get(schema)?.values() ?? [])];
+      return {
+        id: `mssql-schema:${connectionId}:${schema}`,
+        kind: "schema" as const,
+        label: schema,
+        addable: false,
+        count: entries.length,
+        children: entries
+          .sort((a, b) => byLabel(a.table, b.table))
+          .map(
+            (entry): BrowserNode => ({
+              id: `mssql-table:${connectionId}:${schema}.${entry.table}`,
+              kind: "table",
+              label: entry.table,
+              addable: true,
+              mssqlConnectionId: connectionId,
+              tableSchema: schema,
+              tableName: entry.table,
+            }),
+          ),
+      };
+    });
+}
+
 /**
  * Returns a copy of the tree with each `connection` node's children replaced by
  * the current lazy-load state: a status row while loading or on error, or the
@@ -564,7 +649,8 @@ export type ConnectionLoad =
  * Pure so the panel's tree augmentation unit-tests without React/the sidecar.
  *
  * @param nodes - The base tree from {@link buildBrowserTree}.
- * @param loads - Per-connection introspection state keyed by connection string.
+ * @param loads - Per-connection introspection state, keyed by connection string
+ *   (PostGIS) or `mssql:<profile id>` (SQL Server).
  * @param loadingLabel - Translated label for the "loading tables" status row.
  * @returns A new tree; connection nodes get their status/table children.
  */
@@ -574,8 +660,10 @@ export function augmentConnections(
   loadingLabel: string,
 ): BrowserNode[] {
   return nodes.map((node) => {
-    if (node.kind === "connection" && node.connectionString) {
-      const load = loads[node.connectionString];
+    if (node.kind === "connection" && (node.connectionString || node.mssqlConnectionId)) {
+      const isMssql = Boolean(node.mssqlConnectionId);
+      const connectionId = node.mssqlConnectionId ?? node.connectionString!;
+      const load = loads[isMssql ? `mssql:${connectionId}` : connectionId];
       let children: BrowserNode[] = [];
       if (load?.status === "loading") {
         children = [
@@ -596,7 +684,9 @@ export function augmentConnections(
           },
         ];
       } else if (load?.status === "loaded") {
-        children = buildPostgisTableNodes(node.connectionString, load.tables);
+        children = isMssql
+          ? buildMssqlTableNodes(connectionId, load.tables)
+          : buildPostgisTableNodes(connectionId, load.tables);
       }
       return { ...node, children };
     }

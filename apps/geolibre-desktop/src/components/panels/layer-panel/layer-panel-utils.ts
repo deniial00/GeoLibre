@@ -87,6 +87,21 @@ function sourceUrlsFromLayer(layer: GeoLibreLayer): string[] {
 const WRITEBACK_EXTENSIONS = ["gpkg", "geojson", "json"];
 
 /**
+ * Whether the layer is an editable SQL Server table with a usable primary key
+ * (loaded via Add Data > SQL Server). The sidecar diffs features against the
+ * table by that key on save.
+ */
+export function isMssqlEditableLayer(layer: GeoLibreLayer): boolean {
+  return (
+    layer.type === "geojson" &&
+    layer.metadata.sourceKind === "mssql-table" &&
+    typeof layer.metadata.mssqlTable === "string" &&
+    typeof layer.metadata.mssqlPrimaryKey === "string" &&
+    typeof layer.metadata.mssqlConnectionId === "string"
+  );
+}
+
+/**
  * Whether the layer is an editable PostGIS table with a usable primary key
  * (loaded via Add Data > PostgreSQL in editable mode). The sidecar diffs the
  * features against the source table by that key on save.
@@ -103,8 +118,9 @@ export function isPostgisEditableLayer(layer: GeoLibreLayer): boolean {
 /**
  * Whether the layer's edits can be committed back to its source: a
  * desktop-only, geojson-backed layer loaded either from a local file in a
- * supported format or from a PostGIS table with a primary key. The sidecar
- * needs real filesystem/database access, so this is false on the web build.
+ * supported format or from a PostGIS or SQL Server table with a primary key.
+ * The sidecar needs real filesystem/database access, so this is false on the
+ * web build.
  * This answers only "is there a writable source": the layer's capabilities are
  * applied by the caller (`canWriteBack`), so a layer that allows creates or
  * deletes but not updates still offers the save.
@@ -112,11 +128,11 @@ export function isPostgisEditableLayer(layer: GeoLibreLayer): boolean {
 export function canWriteEditsToSource(layer: GeoLibreLayer): boolean {
   if (isArcGISWritableLayer(layer)) return true;
   if (!isTauri() || layer.type !== "geojson") return false;
-  // Both write-back paths (PostGIS tables and local files) run through the
+  // All write-back paths (PostGIS/SQL Server tables and local files) run through the
   // Python sidecar, which the Mac App Store build compiles out, so edits are
   // export-only there, as on the web build.
   if (IS_MAS_BUILD) return false;
-  if (isPostgisEditableLayer(layer)) return true;
+  if (isPostgisEditableLayer(layer) || isMssqlEditableLayer(layer)) return true;
   const path = typeof layer.sourcePath === "string" ? layer.sourcePath.trim() : "";
   if (!path) return false;
   const ext = path.split(".").pop()?.toLowerCase();
