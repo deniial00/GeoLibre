@@ -684,10 +684,12 @@ export function supportsRefreshFailurePolicy(layer: GeoLibreLayer): boolean {
   );
 }
 
-export function isRefreshableLayer(layer: GeoLibreLayer): boolean {
+export function isRefreshableLayer(layer: GeoLibreLayer, mssqlRecoveryRequired = false): boolean {
   return (
     Boolean(refreshSourceUrl(layer)) ||
     isVectorControlRefreshLayer(layer) ||
+    // A committed SQL Server write whose refresh failed can be reconciled manually.
+    mssqlRecoveryRequired ||
     // SQL query layers refresh by re-executing their stored DuckDB statement
     // (see refreshSqlQueryLayer) rather than fetching a URL.
     isSqlQueryLayer(layer) ||
@@ -710,8 +712,8 @@ export function isRefreshableLayer(layer: GeoLibreLayer): boolean {
  * @param layer The store layer to test.
  * @returns Whether an automatic refresh interval may be scheduled for it.
  */
-export function supportsAutoRefresh(layer: GeoLibreLayer): boolean {
-  return !isIcebergLayer(layer);
+export function supportsAutoRefresh(layer: GeoLibreLayer, mssqlRecoveryRequired = false): boolean {
+  return !isIcebergLayer(layer) && !mssqlRecoveryRequired;
 }
 
 export function getLayerRefreshConfig(layer: GeoLibreLayer): LayerRefreshConfig {

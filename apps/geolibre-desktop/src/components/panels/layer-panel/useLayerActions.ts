@@ -84,6 +84,11 @@ import {
   withMssqlSession,
 } from "../../../lib/mssql-sessions";
 import {
+  canSaveMssqlWriteback,
+  reconcileMssqlWritebackMetadata,
+  writeMssqlAndRefresh,
+} from "../../../lib/mssql-writeback";
+import {
   isMssqlEditableLayer,
   isPostgisEditableLayer,
   type LayerRefreshStatus,
@@ -99,6 +104,8 @@ interface UseLayerActionsOptions {
   setRefreshStatuses: Dispatch<SetStateAction<Record<string, LayerRefreshStatus>>>;
   clearRefreshStatusTimer: (layerId: string) => void;
   scheduleStatusClear: (layerId: string) => void;
+  mssqlRefreshRequiredLayerIds: ReadonlySet<string>;
+  markMssqlRefreshRequired: (layerId: string) => void;
   isPluginActive: PluginRegistry["isActive"];
   togglePlugin: PluginRegistry["toggle"];
 }
@@ -118,6 +125,8 @@ export function useLayerActions({
   setRefreshStatuses,
   clearRefreshStatusTimer,
   scheduleStatusClear,
+  mssqlRefreshRequiredLayerIds,
+  markMssqlRefreshRequired,
   isPluginActive,
   togglePlugin,
 }: UseLayerActionsOptions) {
@@ -763,6 +772,14 @@ export function useLayerActions({
   const handleSaveEditsToSource = useCallback(
     async (clickedLayer: GeoLibreLayer) => {
       if (!canEditLayer(clickedLayer.id)) return;
+      const currentLayer = useAppStore.getState().layers.find((l) => l.id === clickedLayer.id);
+      if (
+        currentLayer &&
+        isMssqlEditableLayer(currentLayer) &&
+        !canSaveMssqlWriteback(clickedLayer.id, mssqlRefreshRequiredLayerIds)
+      ) {
+        return;
+      }
       clearRefreshStatusTimer(clickedLayer.id);
       const layer = commitTableDrafts(clickedLayer);
       if (!layer) return;
@@ -816,53 +833,38 @@ export function useLayerActions({
             typeof layer.metadata.mssqlGeometryColumn === "string"
               ? layer.metadata.mssqlGeometryColumn
               : undefined;
-          let result;
-          try {
-            result = await withMssqlSession(connectionId, (sessionId) =>
-              writeMssqlTable({
-                session_id: sessionId,
-                schema_name: schema,
-                table,
-                geometry_column: geometryColumn,
-                geojson,
-                baseline_keys: mssqlBaseline,
-                capabilities: resolveLayerCapabilities(layer),
-              }),
-            );
-          } catch (error) {
-            // Anything but a missing connection reaches the outer catch, which
-            // reports it as an error.
-            if (!(error instanceof MssqlReconnectRequiredError)) throw error;
-            setRefreshStatuses((current) => ({
-              ...current,
-              [layer.id]: {
-                type: "error",
-                message: t("layers.saveEditsMssqlNoConnection"),
-              },
-            }));
-            scheduleStatusClear(layer.id);
-            return;
-          }
-          // Re-read so inserted features pick up their database-assigned keys,
-          // as in the PostGIS branch below.
-          let fresh;
-          try {
-            fresh = await withMssqlSession(connectionId, (sessionId) =>
-              readMssqlTable({
-                session_id: sessionId,
-                schema_name: schema,
-                table,
-                geometry_column: geometryColumn,
-                excluded_fields: layer.fieldVisibility
-                  ? Object.keys(layer.fieldVisibility).filter(
-                      (k) => layer.fieldVisibility![k] === "excluded",
-                    )
-                  : undefined,
-              }),
-            );
-          } catch {
-            // The write committed but the baseline is now stale: report an
-            // error, never success, and leave the metadata untouched.
+          const outcome = await writeMssqlAndRefresh(
+            mssqlRefreshRequiredLayerIds.has(layer.id),
+            () =>
+              withMssqlSession(connectionId, (sessionId) =>
+                writeMssqlTable({
+                  session_id: sessionId,
+                  schema_name: schema,
+                  table,
+                  geometry_column: geometryColumn,
+                  geojson,
+                  baseline_keys: mssqlBaseline,
+                  capabilities: resolveLayerCapabilities(layer),
+                }),
+              ),
+            () =>
+              withMssqlSession(connectionId, (sessionId) =>
+                readMssqlTable({
+                  session_id: sessionId,
+                  schema_name: schema,
+                  table,
+                  geometry_column: geometryColumn,
+                  excluded_fields: layer.fieldVisibility
+                    ? Object.keys(layer.fieldVisibility).filter(
+                        (key) => layer.fieldVisibility![key] === "excluded",
+                      )
+                    : undefined,
+                }),
+              ),
+          );
+          if (outcome.kind === "blocked") return;
+          if (outcome.kind === "refresh-failed") {
+            markMssqlRefreshRequired(layer.id);
             setRefreshStatuses((current) => ({
               ...current,
               [layer.id]: {
@@ -873,16 +875,13 @@ export function useLayerActions({
             scheduleStatusClear(layer.id);
             return;
           }
+          const { writeResult: result, refreshed: fresh } = outcome;
           const currentMetadata =
-            useAppStore.getState().layers.find((l) => l.id === layer.id)?.metadata ??
+            useAppStore.getState().layers.find((current) => current.id === layer.id)?.metadata ??
             layer.metadata;
           updateLayer(layer.id, {
             geojson: fresh.geojson,
-            metadata: {
-              ...currentMetadata,
-              featureCount: fresh.feature_count,
-              mssqlBaselineKeys: postgisFeatureKeys(fresh.geojson),
-            },
+            metadata: reconcileMssqlWritebackMetadata(currentMetadata, fresh),
           });
           message = t("layers.saveEditsMssqlSuccess", {
             table: `${schema}.${table}`,
@@ -1032,6 +1031,8 @@ export function useLayerActions({
       clearRefreshStatusTimer,
       commitTableDrafts,
       mapControllerRef,
+      markMssqlRefreshRequired,
+      mssqlRefreshRequiredLayerIds,
       scheduleStatusClear,
       setRefreshStatuses,
       t,

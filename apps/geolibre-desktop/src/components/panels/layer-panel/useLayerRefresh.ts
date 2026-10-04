@@ -28,6 +28,13 @@ import {
   type LayerRefreshStatus,
   type LayerRefreshTimer,
 } from "./layer-panel-utils";
+import { readMssqlTable } from "@geolibre/processing";
+import { withMssqlSession } from "../../../lib/mssql-sessions";
+import {
+  clearMssqlWritebackRefresh,
+  reconcileMssqlWritebackMetadata,
+  requireMssqlWritebackRefresh,
+} from "../../../lib/mssql-writeback";
 
 interface UseLayerRefreshOptions {
   /** The project's layers, in store order. */
@@ -51,6 +58,28 @@ export function useLayerRefresh({ layers, isCollapsed }: UseLayerRefreshOptions)
   const projectGeneration = useAppStore((s) => s.projectGeneration);
   const updateLayer = useAppStore((s) => s.updateLayer);
   const [refreshStatuses, setRefreshStatuses] = useState<Record<string, LayerRefreshStatus>>({});
+  const [mssqlRefreshRequiredLayerIds, setMssqlRefreshRequiredLayerIds] = useState<
+    ReadonlySet<string>
+  >(() => new Set());
+  const markMssqlRefreshRequired = useCallback((layerId: string) => {
+    setMssqlRefreshRequiredLayerIds((current) => requireMssqlWritebackRefresh(current, layerId));
+  }, []);
+  const clearMssqlRefreshRequired = useCallback((layerId: string) => {
+    setMssqlRefreshRequiredLayerIds((current) => clearMssqlWritebackRefresh(current, layerId));
+  }, []);
+  const mssqlRecoveryGenerationRef = useRef(projectGeneration);
+  useEffect(() => {
+    const generationChanged = mssqlRecoveryGenerationRef.current !== projectGeneration;
+    mssqlRecoveryGenerationRef.current = projectGeneration;
+    const currentLayerIds = new Set(layers.map((layer) => layer.id));
+    setMssqlRefreshRequiredLayerIds((current) => {
+      const next = generationChanged
+        ? new Set<string>()
+        : new Set([...current].filter((id) => currentLayerIds.has(id)));
+      if (next.size === current.size && [...current].every((id) => next.has(id))) return current;
+      return next;
+    });
+  }, [layers, projectGeneration]);
   // "Last synced <relative time>" is derived from the clock, not from store
   // state, so without a tick the label would keep reading "a few seconds ago"
   // until an unrelated re-render happened to recompute it. Tick once a minute
@@ -134,6 +163,54 @@ export function useLayerRefresh({ layers, isCollapsed }: UseLayerRefreshOptions)
       }));
 
       try {
+        if (mssqlRefreshRequiredLayerIds.has(layer.id)) {
+          const connectionId =
+            typeof layer.metadata.mssqlConnectionId === "string"
+              ? layer.metadata.mssqlConnectionId
+              : "";
+          const table =
+            typeof layer.metadata.mssqlTable === "string" ? layer.metadata.mssqlTable : "";
+          if (!connectionId || !table) {
+            throw new Error(t("layers.saveEditsMssqlNoConnection"));
+          }
+          const schema =
+            typeof layer.metadata.mssqlSchema === "string" ? layer.metadata.mssqlSchema : "dbo";
+          const geometryColumn =
+            typeof layer.metadata.mssqlGeometryColumn === "string"
+              ? layer.metadata.mssqlGeometryColumn
+              : undefined;
+          const refreshed = await withMssqlSession(connectionId, (sessionId) =>
+            readMssqlTable({
+              session_id: sessionId,
+              schema_name: schema,
+              table,
+              geometry_column: geometryColumn,
+              excluded_fields: layer.fieldVisibility
+                ? Object.keys(layer.fieldVisibility).filter(
+                    (key) => layer.fieldVisibility![key] === "excluded",
+                  )
+                : undefined,
+            }),
+          );
+          const latest = getCurrentRequestLayer();
+          if (!latest) return;
+          updateLayer(layer.id, {
+            geojson: refreshed.geojson,
+            metadata: reconcileMssqlWritebackMetadata(latest.metadata, refreshed),
+          });
+          clearMssqlRefreshRequired(layer.id);
+          setRefreshStatuses((current) => ({
+            ...current,
+            [layer.id]: {
+              type: "success",
+              message: t("layers.refreshedCount", {
+                count: refreshed.feature_count.toLocaleString(),
+              }),
+            },
+          }));
+          scheduleStatusClear(layer.id);
+          return;
+        }
         if (isSqlQueryLayer(layer)) {
           // SQL query layers refresh by re-executing their stored DuckDB
           // statement against the current layers (the query layer itself is
@@ -358,7 +435,15 @@ export function useLayerRefresh({ layers, isCollapsed }: UseLayerRefreshOptions)
         refreshingLayerIdsRef.current.delete(requestKey);
       }
     },
-    [clearRefreshStatusTimer, projectGeneration, scheduleStatusClear, t, updateLayer],
+    [
+      clearMssqlRefreshRequired,
+      clearRefreshStatusTimer,
+      mssqlRefreshRequiredLayerIds,
+      projectGeneration,
+      scheduleStatusClear,
+      t,
+      updateLayer,
+    ],
   );
 
   // Read through a ref inside interval callbacks so long-lived timers never
@@ -656,6 +741,9 @@ export function useLayerRefresh({ layers, isCollapsed }: UseLayerRefreshOptions)
     setRefreshInterval,
     setRefreshFailurePolicy,
     toggleWatchLayer,
+    mssqlRefreshRequiredLayerIds,
+    markMssqlRefreshRequired,
+    clearMssqlRefreshRequired,
   };
 }
 

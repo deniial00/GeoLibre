@@ -317,6 +317,8 @@ export function LayerPanel({
     setRefreshStatuses: refresh.setRefreshStatuses,
     clearRefreshStatusTimer: refresh.clearRefreshStatusTimer,
     scheduleStatusClear: refresh.scheduleStatusClear,
+    mssqlRefreshRequiredLayerIds: refresh.mssqlRefreshRequiredLayerIds,
+    markMssqlRefreshRequired: refresh.markMssqlRefreshRequired,
     isPluginActive,
     togglePlugin,
   });
@@ -444,6 +446,7 @@ export function LayerPanel({
     canDrawOnMap: capabilities.onMapDrawing,
     selectedMoveIds: selection.selectedMoveIds,
     actions,
+    mssqlRefreshRequiredLayerIds: refresh.mssqlRefreshRequiredLayerIds,
     handleRefreshLayer: refresh.handleRefreshLayer,
     toggleWatchLayer: refresh.toggleWatchLayer,
     openBindTimeSliderDialog: binding.openBindTimeSliderDialog,
