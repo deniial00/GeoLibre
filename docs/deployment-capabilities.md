@@ -143,6 +143,8 @@ The embed origin allowlist (`GEOLIBRE_EMBED_ORIGINS`) and capabilities are
 independent: the allowlist decides *who* may send commands, capabilities decide
 *which* commands exist.
 
+## Related pages
+
 - [Deployment Policy](deployment-policy.md) — primary policy and Docker enforcement
 - [Self-Hosting](self-hosting.md#container-policy-enforcement) — exact Docker server-side route guards
 - [UI Profiles](ui-profiles.md) — non-destructive interface filtering

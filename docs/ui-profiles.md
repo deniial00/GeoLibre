@@ -50,6 +50,8 @@ Open **Settings → Interface** to:
 The **Settings** menu itself, and its Language / Layout / Interface entries, are
 always shown so the profile UI can never be hidden away.
 
+## For administrators
+
 Use the `interface` section in the primary deployment policy. For example:
 
 ```json

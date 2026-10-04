@@ -347,6 +347,7 @@ kepler.gl, see the [Comparison](comparison.md).
 - Install external plugins from uploaded zips and local development directories,
   subject to the client deployment plugin policy. Bundled drop-ins load
   automatically unless their ids are blocked by that policy.
+
 See the [Plugin API](plugin-api.md) to build your own.
 
 ## Deployment and platform builds
