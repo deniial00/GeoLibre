@@ -698,7 +698,7 @@ def _wkb_to_geojson(wkb: Optional[bytes], srid: int, column_type: str) -> Option
         from shapely.ops import transform
 
         geometry = shapely.from_wkb(bytes(wkb))
-        if column_type == "geometry" and srid not in (0, 4326):
+        if srid not in (0, 4326):
             transformer = _transformer(srid, 4326)
             with _TRANSFORM_LOCK:
                 geometry = transform(transformer.transform, geometry)
@@ -729,11 +729,13 @@ def _geojson_to_wkb(geometry: dict, srid: int, column_type: str) -> bytes:
         from shapely.ops import transform
 
         value = shape(geometry)
-        if column_type == "geometry" and srid not in (0, 4326):
+        # Both column types may carry a non-WGS84 SRID (geography allows other
+        # geodetic ones such as 4269), so reproject whenever the SRID differs.
+        if srid not in (0, 4326):
             transformer = _transformer(4326, srid)
             with _TRANSFORM_LOCK:
                 value = transform(transformer.transform, value)
-        elif column_type == "geography":
+        if column_type == "geography":
             value = _orient_for_geography(value)
         return shapely.to_wkb(value, output_dimension=2)
     except HTTPException:

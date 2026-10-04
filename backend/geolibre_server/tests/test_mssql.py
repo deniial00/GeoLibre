@@ -679,3 +679,14 @@ def test_live_geography_polygon_is_oriented(live_db):
     cur.execute("SELECT geog.STArea() FROM dbo.geolibre_writeback_geog WHERE name='Polygon'")
     assert cur.fetchone()[0] < 1e10
     conn.close()
+
+
+def test_geography_with_non_wgs84_srid_is_reprojected():
+    shapely = pytest.importorskip("shapely")
+    pytest.importorskip("pyproj")
+    point = {"type": "Point", "coordinates": [-83.9, 35.9]}
+    wkb = mssql._geojson_to_wkb(point, 3857, "geography")
+    # Written in the column's SRID units, not raw degrees.
+    assert abs(shapely.from_wkb(wkb).x) > 1000
+    back = mssql._wkb_to_geojson(wkb, 3857, "geography")
+    assert back["coordinates"] == pytest.approx([-83.9, 35.9], abs=1e-6)
