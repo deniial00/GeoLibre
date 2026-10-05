@@ -1,6 +1,7 @@
 import { useAppStore } from "@geolibre/core";
 import { MssqlSessionExpiredError, MssqlWriteRejectedError } from "@geolibre/processing";
 import type { Feature, FeatureCollection } from "geojson";
+import { databaseFeatureKeys } from "./database-tables";
 
 export class MssqlWriteUncertainError extends Error {
   override readonly name = "MssqlWriteUncertainError";
@@ -139,9 +140,7 @@ export function reconcileMssqlWritebackMetadata(
   return {
     ...metadata,
     featureCount: refreshed.feature_count,
-    mssqlBaselineKeys: refreshed.geojson.features
-      .map((feature) => feature.id)
-      .filter((id): id is string | number => typeof id === "string" || typeof id === "number"),
+    mssqlBaselineKeys: databaseFeatureKeys(refreshed.geojson),
   };
 }
 

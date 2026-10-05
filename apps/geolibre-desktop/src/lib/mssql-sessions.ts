@@ -1,4 +1,3 @@
-import type { GeoLibreLayer } from "@geolibre/core";
 import {
   connectMssql,
   disconnectMssql,
@@ -190,14 +189,6 @@ export function forgetMssqlProfile(
 ): MssqlConnectionProfile[] {
   discardMssqlProfileSession(profileId, client);
   return forgetMssqlConnection(profileId);
-}
-export function mssqlBaselineKeys(layer: GeoLibreLayer): Array<string | number> | undefined {
-  const keys = layer.metadata?.mssqlBaselineKeys;
-  return Array.isArray(keys)
-    ? keys.filter(
-        (key): key is string | number => typeof key === "string" || typeof key === "number",
-      )
-    : undefined;
 }
 export function resetMssqlSessions(): void {
   sessionByProfileId.clear();

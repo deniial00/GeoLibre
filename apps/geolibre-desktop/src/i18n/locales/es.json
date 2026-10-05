@@ -69,7 +69,6 @@
     "recent": "Recientes",
     "databases": "Bases de datos",
     "sqlServer": "SQL Server",
-    "newDatabaseConnection": "Nueva conexión de base de datos",
     "searchPlaceholder": "Buscar fuentes de datos",
     "empty": "Aún no hay servicios guardados ni proyectos recientes.",
     "emptyGroup": "Vacío",

@@ -74,14 +74,10 @@ import {
 } from "../../../lib/tauri-io";
 import { startGeoLibreSidecar } from "../../../lib/sidecar";
 import { importedStyleErrorMessage, importedStyleNote } from "../../../lib/style-import-note";
-import {
-  postgisBaselineKeys,
-  postgisFeatureKeys,
-  resolvePostgisConnection,
-} from "../../../lib/postgis-connections";
+import { resolvePostgisConnection } from "../../../lib/postgis-connections";
+import { databaseBaselineKeys, databaseFeatureKeys } from "../../../lib/database-tables";
 import {
   MssqlReconnectRequiredError,
-  mssqlBaselineKeys,
   withMssqlSession,
 } from "../../../lib/mssql-sessions";
 import {
@@ -789,7 +785,7 @@ export function useLayerActions({
       const isMssql = isMssqlEditableLayer(layer);
       // Captured once, from the click-time layer, before any await: retries and
       // store updates during the round trip must not change which rows may be deleted.
-      const mssqlBaseline = isMssql ? mssqlBaselineKeys(layer) : undefined;
+      const mssqlBaseline = isMssql ? databaseBaselineKeys(layer, "mssqlBaselineKeys") : undefined;
       const isCurrentMssqlRequest = () => {
         const state = useAppStore.getState();
         const current = state.layers.find((candidate) => candidate.id === layer.id);
@@ -1009,7 +1005,7 @@ export function useLayerActions({
             // save cannot sweep away rows inserted concurrently elsewhere.
             // The baseline lives on the layer metadata, so it survives a
             // project reload.
-            baseline_keys: postgisBaselineKeys(layer),
+            baseline_keys: databaseBaselineKeys(layer, "postgisBaselineKeys"),
             // Resolved, not `layer.capabilities`: the sidecar reads an omitted
             // flag as allowed, so a partial override has to be filled in from
             // the same inferred defaults the UI gated on, or the two can
@@ -1057,7 +1053,7 @@ export function useLayerActions({
             metadata: {
               ...currentMetadata,
               featureCount: fresh.feature_count,
-              postgisBaselineKeys: postgisFeatureKeys(fresh.geojson),
+              postgisBaselineKeys: databaseFeatureKeys(fresh.geojson),
             },
           });
           message = t("layers.saveEditsPostgisSuccess", {

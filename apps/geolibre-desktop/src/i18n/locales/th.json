@@ -67,7 +67,6 @@
     "recent": "ล่าสุด",
     "databases": "ฐานข้อมูล",
     "sqlServer": "SQL Server",
-    "newDatabaseConnection": "การเชื่อมต่อฐานข้อมูลใหม่",
     "searchPlaceholder": "ค้นหาแหล่งข้อมูล",
     "empty": "ยังไม่มีบริการที่บันทึกไว้หรือโปรเจกต์ล่าสุด",
     "emptyGroup": "ว่าง",

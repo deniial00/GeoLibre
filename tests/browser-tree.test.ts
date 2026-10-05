@@ -146,7 +146,7 @@ describe("buildBrowserTree", () => {
     );
   });
 
-  it("adds a Databases section with connection leaves + a postgres ＋", () => {
+  it("adds the PostgreSQL engine group under Databases", () => {
     const tree = buildBrowserTree({
       services: [],
       recentProjects: [],
@@ -154,9 +154,13 @@ describe("buildBrowserTree", () => {
     });
     const db = find(tree, "section:databases");
     assert.equal(db?.kind, "section");
-    // The section's ＋ opens the Add Data PostgreSQL source.
-    assert.equal(db?.newConnectionKind, "postgres");
+    assert.equal(db?.newConnectionKind, undefined);
     assert.equal(db?.count, 1);
+    const postgres = find(tree, "database-engine:postgres");
+    assert.equal(postgres?.kind, "category");
+    assert.equal(postgres?.label, "PostgreSQL");
+    assert.equal(postgres?.newConnectionKind, "postgres");
+    assert.equal(postgres?.count, 1);
     const conn = find(tree, "connection:postgres://u@h/db");
     assert.equal(conn?.kind, "connection");
     assert.equal(conn?.connectionString, "postgres://u@h/db");
@@ -612,13 +616,59 @@ describe("SQL Server Browser tree", () => {
       mssqlConnections: [{ id: ID, label: "sql.example/db" }],
     });
 
-  it("adds the SQL Server section only when the input is supplied", () => {
+  it("adds SQL Server under Databases only when its input is supplied", () => {
     const without = buildBrowserTree({ services: [], recentProjects: [] });
-    assert.equal(find(without, "section:sql-server"), undefined);
-    const section = find(baseTree(), "section:sql-server");
-    assert.equal(section?.newConnectionKind, "mssql");
-    assert.equal(section?.children?.[0].id, `mssql-connection:${ID}`);
-    assert.equal(section?.children?.[0].mssqlConnectionId, ID);
+    assert.equal(find(without, "section:databases"), undefined);
+    assert.equal(find(without, "database-engine:mssql"), undefined);
+
+    const tree = baseTree();
+    const section = find(tree, "section:databases");
+    assert.equal(section?.kind, "section");
+    assert.deepEqual(section?.children?.map((node) => node.id), ["database-engine:mssql"]);
+    const group = find(tree, "database-engine:mssql");
+    assert.equal(group?.newConnectionKind, "mssql");
+    assert.equal(group?.children?.[0].id, `mssql-connection:${ID}`);
+    assert.equal(group?.children?.[0].mssqlConnectionId, ID);
+  });
+
+  it("keeps an empty PostgreSQL group when both engine inputs are supplied", () => {
+    const tree = buildBrowserTree({
+      services: [],
+      recentProjects: [],
+      databaseConnections: [],
+      mssqlConnections: [{ id: ID, label: "sql.example/db" }],
+    });
+    const section = find(tree, "section:databases");
+    assert.deepEqual(section?.children?.map((node) => node.id), [
+      "database-engine:postgres",
+      "database-engine:mssql",
+    ]);
+    const postgres = find(tree, "database-engine:postgres");
+    assert.equal(postgres?.count, 0);
+    assert.deepEqual(postgres?.children, []);
+    assert.equal(section?.count, 1);
+  });
+
+  it("filters by engine and keeps table connections at the nested visible depth", () => {
+    const tree = buildBrowserTree({
+      services: [],
+      recentProjects: [],
+      databaseConnections: [{ connectionString: "postgres://u@db/postgres", label: "u@db" }],
+      mssqlConnections: [{ id: ID, label: "sql.example/db" }],
+    });
+    const filtered = filterBrowserTree(tree, "sql.example");
+    const databases = find(filtered, "section:databases");
+    assert.deepEqual(databases?.children?.map((node) => node.id), ["database-engine:mssql"]);
+    assert.equal(find(filtered, "database-engine:postgres"), undefined);
+    assert.equal(find(filtered, `mssql-connection:${ID}`)?.kind, "connection");
+
+    const rows = flattenVisibleTree(
+      tree,
+      new Set(["section:databases", "database-engine:mssql"]),
+    );
+    const connection = rows.find((row) => row.id === `mssql-connection:${ID}`);
+    assert.equal(connection?.depth, 2);
+    assert.equal(connection?.parentId, "database-engine:mssql");
   });
 
   it("groups sorted tables under schemas, deduplicating tables with multiple geometry columns", () => {

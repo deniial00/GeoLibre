@@ -65,6 +65,7 @@ export function useBrowserTree(): BrowserTreeState {
   const servicesLabel = t("browser.services");
   const recentLabel = t("browser.recent");
   const databasesLabel = t("browser.databases");
+  const postgresqlLabel = t("browser.postgresql");
   const filesLabel = t("browser.files");
   const favoritesLabel = t("browser.favorites");
   const myDataLabel = t("browser.myData");
@@ -99,20 +100,16 @@ export function useBrowserTree(): BrowserTreeState {
   return useMemo(() => {
     const services = listAllServices(readUserServices());
     const byId = new Map(services.map((entry) => [entry.id, entry]));
-    // Shown on every platform for discovery; the PostgreSQL add flow itself
-    // reports when it needs GeoLibre Desktop (Martin has no mobile build).
-    // Kept in the saved list's order (most-recently-used first), deliberately
-    // unlike the alphabetized Services list — this mirrors the Recent section.
-    // The Mac App Store build cannot run the sidecar/martin at all, so the
-    // whole Databases section is omitted there (undefined hides it).
+    // Keep both engine groups visible on supported builds, including when a
+    // saved list is empty so each group retains its own "New connection" (＋).
+    // The Mac App Store build cannot run the local processing sidecar, so it
+    // passes undefined for both inputs and omits the whole Databases section.
     const databaseConnections = IS_MAS_BUILD
       ? undefined
       : readSavedPostgresConnections().map((connectionString) => ({
           connectionString,
           label: savedPostgresConnectionLabel(connectionString),
         }));
-    // SQL Server uses the same desktop sidecar, so the Mac App Store build
-    // omits its section just like the PostGIS Databases section.
     const mssqlConnections = IS_MAS_BUILD
       ? undefined
       : readSavedMssqlConnections().map((profile) => ({
@@ -148,6 +145,7 @@ export function useBrowserTree(): BrowserTreeState {
         })),
         sectionLabels: {
           services: servicesLabel,
+          postgresql: postgresqlLabel,
           recent: recentLabel,
           databases: databasesLabel,
           sqlServer: sqlServerLabel,
@@ -166,6 +164,7 @@ export function useBrowserTree(): BrowserTreeState {
     servicesLabel,
     recentLabel,
     databasesLabel,
+    postgresqlLabel,
     filesLabel,
     favoritesLabel,
     myDataLabel,

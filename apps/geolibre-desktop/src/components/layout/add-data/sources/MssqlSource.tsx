@@ -32,8 +32,7 @@ import {
   withMssqlSession,
 } from "../../../../lib/mssql-sessions";
 import { rememberMssqlLoadedRows } from "../../../../lib/mssql-writeback";
-import { postgisFeatureKeys } from "../../../../lib/postgis-connections";
-import { postgisTableKey, postgisTableLabel } from "../../../../lib/postgis-table-selection";
+import { databaseFeatureKeys, databaseTableKey, databaseTableLabel, uniqueDatabaseTables } from "../../../../lib/database-tables";
 import { isDesktopRuntime, isWindows } from "../../../../lib/is-mobile";
 import { IS_MAS_BUILD } from "../../../../lib/build-flags";
 import { startGeoLibreSidecar } from "../../../../lib/sidecar";
@@ -292,13 +291,13 @@ export function MssqlSource({ initialMssql }: MssqlSourceProps) {
             (!desired.schema || table.schema === desired.schema),
         );
       const chosen = preferred ?? listed.find((table) => table.primary_key);
-      setSelectedTableKey(chosen ? postgisTableKey(chosen) : "");
+      setSelectedTableKey(chosen ? databaseTableKey(chosen) : "");
       setSelectedGeometryColumn(chosen?.geometry_column ?? "");
       desiredTableRef.current = null;
       setStatus(
         listed.length
           ? t("addData.mssql.statusTablesFound", {
-              count: new Set(listed.map(postgisTableKey)).size,
+              count: new Set(listed.map(databaseTableKey)).size,
             })
           : t("addData.mssql.statusNoTables"),
       );
@@ -315,21 +314,13 @@ export function MssqlSource({ initialMssql }: MssqlSourceProps) {
     }
   };
 
-  const uniqueTables = useMemo(() => {
-    const seen = new Set<string>();
-    return tables.filter((table) => {
-      const key = postgisTableKey(table);
-      if (seen.has(key)) return false;
-      seen.add(key);
-      return true;
-    });
-  }, [tables]);
-  const selectedGeometries = tables.filter((table) => postgisTableKey(table) === selectedTableKey);
+  const uniqueTables = useMemo(() => uniqueDatabaseTables(tables), [tables]);
+  const selectedGeometries = tables.filter((table) => databaseTableKey(table) === selectedTableKey);
 
   const handleSubmit = source.runSubmit(async () => {
     const table = tables.find(
       (item) =>
-        postgisTableKey(item) === selectedTableKey &&
+        databaseTableKey(item) === selectedTableKey &&
         item.geometry_column === selectedGeometryColumn,
     );
     if (!activeProfileId || !table) throw new Error(t("addData.mssql.errorConnectFirst"));
@@ -351,7 +342,7 @@ export function MssqlSource({ initialMssql }: MssqlSourceProps) {
       disconnectMssqlProfileSession(profileId);
       return;
     }
-    const baselineKeys = postgisFeatureKeys(result.geojson);
+    const baselineKeys = databaseFeatureKeys(result.geojson);
     const savedProfile = readSavedMssqlConnections().find((item) => item.id === activeProfileId);
     if (!savedProfile) throw new Error(t("addData.mssql.errorReconnectRequired"));
     // `createBaseLayer` uses the features only to pick the initial style; the
@@ -651,15 +642,15 @@ export function MssqlSource({ initialMssql }: MssqlSourceProps) {
               onChange={(event) => {
                 setSelectedTableKey(event.target.value);
                 const chosen = tables.find(
-                  (table) => postgisTableKey(table) === event.target.value,
+                  (table) => databaseTableKey(table) === event.target.value,
                 );
                 setSelectedGeometryColumn(chosen?.geometry_column ?? "");
               }}
             >
               <option value="">{label("errorSelectTable")}</option>
               {uniqueTables.map((table) => {
-                const key = postgisTableKey(table);
-                const title = postgisTableLabel(table);
+                const key = databaseTableKey(table);
+                const title = databaseTableLabel(table);
                 const optionLabel = `${title} — ${geometryLabel(table)}`;
                 const readOnlyLabel =
                   table.primary_key_columns.length > 1

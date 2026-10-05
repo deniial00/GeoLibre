@@ -8,9 +8,9 @@
  *
  * It covers three top-level sections — **Services** (grouped by service kind,
  * mirroring the Add Data web-service sources: XYZ, WMS, WFS, WMTS, ArcGIS),
- * **Recent** (recently opened projects), and **Databases** (saved PostGIS
- * connections that expand to their schemas and spatial tables). Local-file
- * sections come in a later phase.
+ * **Recent** (recently opened projects), and **Databases** (PostgreSQL and SQL
+ * Server connections, each grouped by engine and expandable to spatial tables).
+ * Local-file sections come in a later phase.
  */
 
 import {
@@ -22,10 +22,11 @@ import type { AddDataKind } from "../components/layout/add-data/types";
 import type { FavoriteKind } from "./browser-favorites";
 import type { RecentProjectEntry } from "@geolibre/core";
 
+import type { DatabaseTableIdentity } from "./database-tables";
 /** The kind of node, which determines its icon and click behavior. */
 export type BrowserNodeKind =
   | "section" // a static top-level group (Services, Recent, Databases)
-  | "category" // a service-kind grouping (XYZ, WMS, WFS, WMTS, ArcGIS)
+  | "category" // a service-kind grouping or database-engine group
   | "service" // a saved-service leaf that adds a layer when activated
   | "recent-project" // a recent project that opens when activated
   | "connection" // a saved database connection; expands to its schemas/tables
@@ -54,8 +55,7 @@ export interface BrowserNode {
   serviceKind?: ServiceLibraryKind;
   /**
    * The Add Data source this node's "New connection" (＋) action opens — set on
-   * service-kind category groups (their kind), the Databases section
-   * ("postgres") and the SQL Server section ("mssql"). Absent means the node
+   * service-kind categories and database-engine groups. Absent means the node
    * shows no ＋.
    */
   newConnectionKind?: AddDataKind;
@@ -122,13 +122,15 @@ export interface BrowserTreeInput {
   /** The recent-projects list from the store, most-recent first. */
   recentProjects: readonly RecentProjectEntry[];
   /**
-   * Saved database (PostGIS) connections to list under the Databases section.
-   * Omitted (undefined) hides the section entirely; an empty array still renders
-   * it (with its "New connection" action). The app always passes it — the
-   * PostgreSQL add flow itself reports when it needs GeoLibre Desktop.
+   * Saved PostgreSQL connections for the PostgreSQL engine group under
+   * Databases. Omitted (undefined) hides that group; an empty array keeps it
+   * visible with its own "New connection" action.
    */
   databaseConnections?: readonly { connectionString: string; label: string }[];
-  /** Saved SQL Server profiles listed under the SQL Server section; omitted hides the section. */
+  /**
+   * Saved SQL Server profiles for the SQL Server engine group under Databases.
+   * Omitted (undefined) hides that group; an empty array keeps it visible.
+   */
   mssqlConnections?: readonly { id: string; label: string }[];
   /**
    * The user's pinned folders to list under the Files section. Omitted
@@ -161,6 +163,7 @@ export interface BrowserTreeInput {
     services: string;
     recent: string;
     databases: string;
+    postgresql?: string;
     files?: string;
     favorites?: string;
     myData?: string;
@@ -243,7 +246,7 @@ function buildServiceKinds(services: readonly ServiceLibraryEntry[]): BrowserNod
  * @param input - The services, recent projects, saved layers, and database
  *   connections.
  * @returns The top-level section nodes (Services, Recent, and Databases when
- *   `databaseConnections` is provided).
+ *   either database engine input is provided).
  */
 export function buildBrowserTree(input: BrowserTreeInput): BrowserNode[] {
   const labels = input.sectionLabels ?? {
@@ -328,53 +331,60 @@ export function buildBrowserTree(input: BrowserTreeInput): BrowserNode[] {
 
   sections.push(servicesSection, recentSection);
 
-  // The Databases section is included whenever `databaseConnections` is
-  // provided (the app always provides it). It always shows its "New connection"
-  // (＋) action, even with no connections yet.
-  if (input.databaseConnections) {
+  // The Databases section is included when either engine input is provided.
+  // Each engine has its own group and its own "New connection" (＋) action.
+  if (input.databaseConnections || input.mssqlConnections) {
+    const engineGroups: BrowserNode[] = [];
+    if (input.databaseConnections) {
+      engineGroups.push({
+        id: "database-engine:postgres",
+        kind: "category",
+        label: labels.postgresql ?? "PostgreSQL",
+        addable: false,
+        newConnectionKind: "postgres",
+        count: input.databaseConnections.length,
+        children: input.databaseConnections.map(
+          (connection): BrowserNode => ({
+            id: `connection:${connection.connectionString}`,
+            kind: "connection",
+            label: connection.label,
+            addable: false,
+            connectionString: connection.connectionString,
+            // An empty child list marks it as an expandable group; the panel
+            // lazily fills it with schema/table nodes on first expand.
+            children: [],
+          }),
+        ),
+      });
+    }
+    if (input.mssqlConnections) {
+      engineGroups.push({
+        id: "database-engine:mssql",
+        kind: "category",
+        label: labels.sqlServer ?? "SQL Server",
+        addable: false,
+        newConnectionKind: "mssql",
+        count: input.mssqlConnections.length,
+        children: input.mssqlConnections.map(
+          (connection): BrowserNode => ({
+            id: `mssql-connection:${connection.id}`,
+            kind: "connection",
+            label: connection.label,
+            addable: false,
+            mssqlConnectionId: connection.id,
+            // Lazily filled with schema/table nodes on first expand.
+            children: [],
+          }),
+        ),
+      });
+    }
     sections.push({
       id: "section:databases",
       kind: "section",
       label: labels.databases,
       addable: false,
-      newConnectionKind: "postgres",
-      count: input.databaseConnections.length,
-      children: input.databaseConnections.map(
-        (connection): BrowserNode => ({
-          id: `connection:${connection.connectionString}`,
-          kind: "connection",
-          label: connection.label,
-          addable: false,
-          connectionString: connection.connectionString,
-          // An empty child list marks it as an expandable group; the panel
-          // lazily fills it with schema/table nodes on first expand.
-          children: [],
-        }),
-      ),
-    });
-  }
-
-  // Saved SQL Server profiles, keyed by profile id: the connection secret lives
-  // in the OS keychain, so nothing secret reaches the tree.
-  if (input.mssqlConnections) {
-    sections.push({
-      id: "section:sql-server",
-      kind: "section",
-      label: labels.sqlServer ?? "SQL Server",
-      addable: false,
-      newConnectionKind: "mssql",
-      count: input.mssqlConnections.length,
-      children: input.mssqlConnections.map(
-        (connection): BrowserNode => ({
-          id: `mssql-connection:${connection.id}`,
-          kind: "connection",
-          label: connection.label,
-          addable: false,
-          mssqlConnectionId: connection.id,
-          // Lazily filled with schema/table nodes on first expand.
-          children: [],
-        }),
-      ),
+      count: engineGroups.reduce((count, group) => count + (group.count ?? 0), 0),
+      children: engineGroups,
     });
   }
 
@@ -529,12 +539,6 @@ export function buildFavoriteNodes(
   });
 }
 
-/** A spatial table discovered under a database connection. */
-export interface PostgisTableRef {
-  schema: string;
-  table: string;
-}
-
 /**
  * Groups a connection's spatial tables into `schema` → `table` nodes, sorted by
  * name, for the panel to inject as a lazily-expanded connection's children.
@@ -547,9 +551,9 @@ export interface PostgisTableRef {
  */
 export function buildPostgisTableNodes(
   connectionString: string,
-  tables: readonly PostgisTableRef[],
+  tables: readonly DatabaseTableIdentity[],
 ): BrowserNode[] {
-  const bySchema = new Map<string, PostgisTableRef[]>();
+  const bySchema = new Map<string, DatabaseTableIdentity[]>();
   for (const entry of tables) {
     const bucket = bySchema.get(entry.schema);
     if (bucket) bucket.push(entry);
@@ -582,14 +586,14 @@ export function buildPostgisTableNodes(
 /** Async load state for one connection's spatial-table introspection. */
 export type ConnectionLoad =
   | { status: "loading" }
-  | { status: "loaded"; tables: readonly PostgisTableRef[] }
+  | { status: "loaded"; tables: readonly DatabaseTableIdentity[] }
   | { status: "error"; message: string };
 
-/** A SQL Server spatial table shown in the Browser tree. */
-export interface MssqlTableRef {
-  schema: string;
-  table: string;
-}
+export type ConnectionLoads = Record<string, ConnectionLoad>;
+export type SetConnectionLoads = (
+  update: (previous: ConnectionLoads) => ConnectionLoads,
+) => void;
+
 
 /**
  * Groups a saved SQL Server connection's spatial tables into `schema` → `table`
@@ -602,9 +606,9 @@ export interface MssqlTableRef {
  */
 export function buildMssqlTableNodes(
   connectionId: string,
-  tables: readonly MssqlTableRef[],
+  tables: readonly DatabaseTableIdentity[],
 ): BrowserNode[] {
-  const bySchema = new Map<string, Map<string, MssqlTableRef>>();
+  const bySchema = new Map<string, Map<string, DatabaseTableIdentity>>();
   for (const entry of tables) {
     let bucket = bySchema.get(entry.schema);
     if (!bucket) {

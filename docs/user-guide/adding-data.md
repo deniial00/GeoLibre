@@ -129,6 +129,7 @@ were rendered before the choice existed and cannot honor it.
 | --- | --- |
 | **DuckDB Layer** | Query a DuckDB or DuckDB Spatial source and add the result as a layer, with identify, selection, and attribute table support. |
 | **PostgreSQL Layer** | Add a layer from a PostgreSQL/PostGIS connection (desktop app, served through a local tile server). |
+| **SQL Server Layer** | Add a spatial table from SQL Server or Azure SQL (desktop app). |
 | **Apache Iceberg Layer** | Read an Iceberg table through DuckDB and add its spatial column as a layer. |
 
 ## Drag and drop
@@ -146,7 +147,7 @@ The **Browser** tab on the left edge of the window opens a QGIS-style Data Sourc
 | **My Data** | Your personal layer library. **Layer actions → Save to My Data** stores a fully configured layer — source, style, labels, filters, joins, virtual fields, and attribute form — and one click here re-adds it to any later project. Import and export the library with the buttons on the section header. |
 | **Services** | Saved map services, grouped by kind (XYZ, WMS, WFS, WMTS, ArcGIS). GeoLibre ships a starter set; the **+** on a group adds a new connection of that kind. Expand a service to browse its layers and add one. Self-hosted deployments can add read-only organization-wide services here, marked with a *config* badge (see [Getting Started](../getting-started.md#deployment-service-library)); they are shared with every user, cannot be edited or deleted, and are never stored in your own service library. |
 | **Recent** | The sources you added most recently, so a repeat is one click. |
-| **Databases** | PostGIS connections. Expand one to browse its schemas and tables; on a table that registers more than one geometry column, pick the column explicitly. |
+| **Databases** | PostgreSQL/PostGIS and SQL Server connections, each in its own engine group with a **+** for a new connection. Expand a connection to browse its schemas and spatial tables; the Add Data form retains each engine's table options. |
 
 Type in the search box to filter the whole tree, and navigate it entirely from the keyboard with the arrow keys.
 

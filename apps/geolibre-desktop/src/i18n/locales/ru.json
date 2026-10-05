@@ -73,7 +73,6 @@
     "recent": "Недавние",
     "databases": "Базы данных",
     "sqlServer": "SQL Server",
-    "newDatabaseConnection": "Новое подключение к базе данных",
     "searchPlaceholder": "Поиск источников данных",
     "empty": "Пока нет сохранённых сервисов или недавних проектов.",
     "emptyGroup": "Пусто",

@@ -8,12 +8,8 @@ import {
   withMssqlSession,
 } from "./mssql-sessions";
 import { errorMessage } from "../components/layout/add-data/helpers";
-import type { ConnectionLoad } from "./browser-tree";
-
-export type MssqlBrowserLoads = Record<string, ConnectionLoad>;
-export type SetMssqlBrowserLoads = (
-  update: (previous: MssqlBrowserLoads) => MssqlBrowserLoads,
-) => void;
+import type { ConnectionLoad, SetConnectionLoads } from "./browser-tree";
+import { uniqueDatabaseTables } from "./database-tables";
 
 export interface MssqlBrowserLoaderDependencies {
   isDesktop: () => boolean;
@@ -34,7 +30,7 @@ const defaultDependencies: MssqlBrowserLoaderDependencies = {
 export function fetchMssqlBrowserTables(
   connectionId: string,
   fetched: Set<string>,
-  setLoads: SetMssqlBrowserLoads,
+  setLoads: SetConnectionLoads,
   t: TFunction,
   dependencies: MssqlBrowserLoaderDependencies = defaultDependencies,
 ): void {
@@ -62,14 +58,7 @@ export function fetchMssqlBrowserTables(
       );
     })
     .then((tables) => {
-      const seen = new Set<string>();
-      const unique = tables.filter((table) => {
-        const tableKey = `${table.schema}.${table.table}`;
-        if (seen.has(tableKey)) return false;
-        seen.add(tableKey);
-        return true;
-      });
-      update({ status: "loaded", tables: unique });
+      update({ status: "loaded", tables: uniqueDatabaseTables(tables) });
     })
     .catch((error: unknown) => {
       fetched.delete(connectionId);
@@ -95,7 +84,7 @@ export function fetchMssqlBrowserTables(
 export function forgetMssqlBrowserConnection(
   connectionId: string,
   fetched: Set<string>,
-  setLoads: SetMssqlBrowserLoads,
+  setLoads: SetConnectionLoads,
   forget: (profileId: string) => unknown = forgetMssqlProfile,
 ): void {
   forget(connectionId);

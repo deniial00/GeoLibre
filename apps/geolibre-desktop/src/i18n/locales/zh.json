@@ -67,7 +67,6 @@
     "recent": "最近项目",
     "databases": "数据库",
     "sqlServer": "SQL Server",
-    "newDatabaseConnection": "新建数据库连接",
     "searchPlaceholder": "搜索数据源",
     "empty": "尚无已保存的服务或最近项目。",
     "emptyGroup": "空",

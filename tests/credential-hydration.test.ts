@@ -45,8 +45,12 @@ const { hydrateDesktopCredentials } =
   await import("../apps/geolibre-desktop/src/lib/credential-hydration");
 const { serializeDesktopSettingsForStorage, useDesktopSettingsStore } =
   await import("../apps/geolibre-desktop/src/hooks/useDesktopSettings");
-const { readSavedPostgresConnections, rememberPostgresConnection } =
-  await import("../apps/geolibre-desktop/src/lib/saved-postgres-connections");
+const {
+  forgetPostgresConnection,
+  PostgresConnectionForgetError,
+  readSavedPostgresConnections,
+  rememberPostgresConnection,
+} = await import("../apps/geolibre-desktop/src/lib/saved-postgres-connections");
 const { queueCredentialChanges, useCredentialStorageStatus } =
   await import("../apps/geolibre-desktop/src/lib/credential-store");
 
@@ -91,5 +95,43 @@ describe("desktop credential hydration", () => {
       "postgresql://b:pw@h/db",
     ]);
     assert.ok(![...storage.values()].some((value) => value.includes(":pw@")));
+  });
+
+  it("forgets a connection durably across a restart", async () => {
+    const [, bId] = connectionIds();
+
+    forgetPostgresConnection("postgresql://b:pw@h/db");
+    await queueCredentialChanges({}, {});
+
+    assert.deepEqual(readSavedPostgresConnections(), ["postgresql://a:pw@h/db"]);
+    assert.equal(connectionIds().includes(bId), false);
+    assert.equal(keychain.has(`postgres.connection.${bId}`), false);
+    await hydrateDesktopCredentials();
+    assert.deepEqual(readSavedPostgresConnections(), ["postgresql://a:pw@h/db"]);
+  });
+
+  it("refuses a forget whose index write fails and changes nothing", async () => {
+    rememberPostgresConnection("postgresql://b:pw@h/db");
+    await queueCredentialChanges({}, {});
+    const idsBefore = connectionIds();
+    const keychainBefore = new Map(keychain);
+    const originalSet = storage.set.bind(storage);
+    storage.set = (key, value) => {
+      if (key === "geolibre.postgres.connectionIds") throw new Error("storage unavailable");
+      return originalSet(key, value);
+    };
+    try {
+      assert.throws(
+        () => forgetPostgresConnection("postgresql://b:pw@h/db"),
+        PostgresConnectionForgetError,
+      );
+    } finally {
+      storage.set = originalSet;
+    }
+
+    assert.ok(readSavedPostgresConnections().includes("postgresql://b:pw@h/db"));
+    assert.deepEqual(connectionIds(), idsBefore);
+    assert.deepEqual(keychain, keychainBefore);
+    await hydrateDesktopCredentials();
   });
 });

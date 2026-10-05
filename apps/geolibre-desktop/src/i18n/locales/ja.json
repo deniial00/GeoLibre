@@ -67,7 +67,6 @@
     "recent": "最近使用したプロジェクト",
     "databases": "データベース",
     "sqlServer": "SQL Server",
-    "newDatabaseConnection": "新しいデータベース接続",
     "searchPlaceholder": "データソースを検索",
     "empty": "保存済みのサービスや最近使用したプロジェクトはまだありません。",
     "emptyGroup": "空",
