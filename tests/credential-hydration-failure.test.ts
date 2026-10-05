@@ -58,10 +58,8 @@ const { hydrateDesktopCredentials } =
   await import("../apps/geolibre-desktop/src/lib/credential-hydration");
 const { serializeDesktopSettingsForStorage, useDesktopSettingsStore } =
   await import("../apps/geolibre-desktop/src/hooks/useDesktopSettings");
-const {
-  readSavedPostgresConnections,
-  rememberPostgresConnection,
-} = await import("../apps/geolibre-desktop/src/lib/saved-postgres-connections");
+const { readSavedPostgresConnections, rememberPostgresConnection } =
+  await import("../apps/geolibre-desktop/src/lib/saved-postgres-connections");
 const { queueCredentialChanges, useCredentialStorageStatus } =
   await import("../apps/geolibre-desktop/src/lib/credential-store");
 
