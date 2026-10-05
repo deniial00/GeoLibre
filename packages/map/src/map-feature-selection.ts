@@ -329,10 +329,13 @@ export function attachFeatureSelection(
       () => window.removeEventListener("blur", onBlur),
     );
     // Publish only after every listener has its cleanup registered: a plugin
-    // reacting synchronously may switch tools and cancel this gesture.
+    // reacting synchronously may cancel or replace this gesture. A superseded
+    // gesture must not announce the replacement a second time.
+    const gestureCancel = state.cancel.current;
     const current = useAppStore.getState();
     if (!current.featureSelectionActive) current.setFeatureSelectionActive(true);
-    if (state.active.current) window.dispatchEvent(new Event(FEATURE_SELECTION_BEGIN_EVENT));
+    if (state.active.current && state.cancel.current === gestureCancel)
+      window.dispatchEvent(new Event(FEATURE_SELECTION_BEGIN_EVENT));
   };
   const onRequest = (event: Event) => begin((event as CustomEvent<FeatureSelectionRequest>).detail);
   window.addEventListener(FEATURE_SELECTION_EVENT, onRequest);

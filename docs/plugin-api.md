@@ -695,6 +695,8 @@ Changing the Identify target does not emit a tool change. Subscribers receive
 only changes after registration, not an initial callback; read the getter to
 initialize plugin state. Keep and call the returned unsubscribe function on
 deactivation.
+Replacing one active selection gesture with another keeps
+`"feature-selection"` active without an intermediate `null`.
 
 Both methods are optional so plugins remain compatible with older hosts.
 
