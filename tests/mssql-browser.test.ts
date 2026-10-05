@@ -4,6 +4,7 @@ import type { TFunction } from "i18next";
 import i18next from "i18next";
 import {
   fetchMssqlBrowserTables,
+  forgetMssqlBrowserConnection,
   type MssqlBrowserLoaderDependencies,
   type MssqlBrowserLoads,
 } from "../apps/geolibre-desktop/src/lib/mssql-browser";
@@ -185,5 +186,29 @@ describe("MSSQL Browser table loading", () => {
       status: "error",
       message: "SQL Server refused the connection",
     });
+  });
+
+  it("forgets a profile and drops its cached tables so it loads afresh", async () => {
+    const state = loadState();
+    const fetched = new Set<string>();
+    let listCalls = 0;
+    const deps = dependencies({
+      listTables: async () => {
+        listCalls += 1;
+        return [table];
+      },
+    });
+    fetchMssqlBrowserTables("profile", fetched, state.set, i18next.t, deps);
+    await nextTurn();
+    state.set((previous) => ({ ...previous, "mssql:other": { status: "loading" } }));
+    const forgotten: string[] = [];
+
+    forgetMssqlBrowserConnection("profile", fetched, state.set, (id) => forgotten.push(id));
+
+    assert.deepEqual(forgotten, ["profile"]);
+    assert.deepEqual(state.loads, { "mssql:other": { status: "loading" } });
+    fetchMssqlBrowserTables("profile", fetched, state.set, i18next.t, deps);
+    await nextTurn();
+    assert.equal(listCalls, 2);
   });
 });

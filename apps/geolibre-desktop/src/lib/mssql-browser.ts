@@ -2,7 +2,11 @@ import { fetchMssqlStatus, listMssqlTables } from "@geolibre/processing";
 import type { TFunction } from "i18next";
 import { isDesktopRuntime } from "./is-mobile";
 import { startGeoLibreSidecar } from "./sidecar";
-import { MssqlReconnectRequiredError, withMssqlSession } from "./mssql-sessions";
+import {
+  MssqlReconnectRequiredError,
+  forgetMssqlProfile,
+  withMssqlSession,
+} from "./mssql-sessions";
 import { errorMessage } from "../components/layout/add-data/helpers";
 import type { ConnectionLoad } from "./browser-tree";
 
@@ -81,4 +85,24 @@ export function fetchMssqlBrowserTables(
             : errorMessage(error, t("addData.mssql.errorConnect")),
       });
     });
+}
+
+/**
+ * Forget a saved SQL Server profile from the Browser: drop its saved profile,
+ * credential and session, and its cached table load so a profile saved again
+ * later under the same id is fetched afresh.
+ */
+export function forgetMssqlBrowserConnection(
+  connectionId: string,
+  fetched: Set<string>,
+  setLoads: SetMssqlBrowserLoads,
+  forget: (profileId: string) => unknown = forgetMssqlProfile,
+): void {
+  forget(connectionId);
+  fetched.delete(connectionId);
+  setLoads((previous) => {
+    const next = { ...previous };
+    delete next[`mssql:${connectionId}`];
+    return next;
+  });
 }
