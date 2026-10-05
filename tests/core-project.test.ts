@@ -714,7 +714,10 @@ describe("project parsing", () => {
       id: "wfs-reference",
       name: "WFS",
       geojson: featureCollection,
-      source: { type: "geojson", url: "https://example.test/wfs?request=GetFeature&bbox=1,2,3,4&count=25000" },
+      source: {
+        type: "geojson",
+        url: "https://example.test/wfs?request=GetFeature&bbox=1,2,3,4&count=25000",
+      },
       metadata: { sourceKind: "wfs-getfeature", featureCount: 1 },
       connection: {
         layerId: "wfs-reference",
