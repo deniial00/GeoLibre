@@ -209,6 +209,14 @@ const MARTIN_HEALTH_ATTEMPTS: usize = 30;
 const SIDECAR_HEALTH_ATTEMPTS: usize = 180;
 #[cfg(not(feature = "mas"))]
 const SIDECAR_PORT: u16 = 8765;
+// Returned when a sidecar from an earlier launch holds SIDECAR_PORT and could not
+// be reclaimed. The frontend (src/lib/sidecar.ts) recognizes it by the phrase
+// "does not accept this session's token" and shows it instead of the bare 401
+// the stale sidecar would answer later requests with (GeoLibre#2959).
+#[cfg(not(feature = "mas"))]
+const STALE_SIDECAR_ERROR: &str = "A GeoLibre processing server from a previous session is \
+     still running on port 8765 but does not accept this session's token. Quit any stray \
+     GeoLibre processes and try again.";
 // The sidecar's PostGIS endpoints refuse every destination until this variable
 // names the allowed hosts — the check that stops a *shared* deployment (the
 // Docker image, where the sidecar is reachable same-origin through the nginx
@@ -2664,14 +2672,7 @@ fn start_geolibre_sidecar_blocking(app: tauri::AppHandle) -> Result<SidecarServe
         // answering /health, and falling through to spawn would then surface as
         // an opaque uvicorn "address already in use" instead of this message.
         if !wait_for_port_free(SIDECAR_PORT) {
-            // The frontend (src/lib/sidecar.ts) matches "does not accept this
-            // session's token" to surface this instead of a later 401.
-            return Err(
-                "A GeoLibre processing server from a previous session is still \
-                 running on port 8765 but does not accept this session's token. \
-                 Quit any stray GeoLibre processes and try again."
-                    .to_string(),
-            );
+            return Err(STALE_SIDECAR_ERROR.to_string());
         }
     }
 
@@ -3932,7 +3933,7 @@ fn terminate_listeners_on_port(port: u16, is_ours: fn(i32) -> bool) -> Result<()
         }
     }
 
-    terminate_pids(&pids);
+    terminate_pids(&pids, is_ours);
     Ok(())
 }
 
@@ -3959,13 +3960,16 @@ fn terminate_sidecar_listeners_on_port(port: u16) -> Result<(), String> {
 fn terminate_sidecar_listeners_on_port(port: u16) -> Result<(), String> {
     let pids: HashSet<i32> = listening_tcp_pids_lsof(port)
         .into_iter()
-        .filter(|pid| {
-            process_command_line_ps(*pid)
-                .is_some_and(|command_line| is_geolibre_sidecar_command_line(&command_line))
-        })
+        .filter(|pid| is_geolibre_sidecar_pid(*pid))
         .collect();
-    terminate_pids(&pids);
+    terminate_pids(&pids, is_geolibre_sidecar_pid);
     Ok(())
+}
+
+#[cfg(all(target_os = "macos", not(feature = "mas")))]
+fn is_geolibre_sidecar_pid(pid: i32) -> bool {
+    process_command_line_ps(pid)
+        .is_some_and(|command_line| is_geolibre_sidecar_command_line(&command_line))
 }
 
 #[cfg(all(target_os = "macos", not(feature = "mas")))]
@@ -4006,18 +4010,25 @@ fn process_command_line_ps(pid: i32) -> Option<String> {
         .then(|| String::from_utf8_lossy(&output.stdout).into_owned())
 }
 
-// SIGTERM, a short grace, then SIGKILL for whatever is still alive.
+// SIGTERM, a short grace, then SIGKILL for whatever is still alive. `kill(2)`
+// cannot pin a process the way a Windows handle does, so `is_ours` is checked
+// again right before each signal: a sidecar that exited on SIGTERM frees its
+// PID, and the OS may hand it to an unrelated process during the grace period.
 #[cfg(all(any(target_os = "linux", target_os = "macos"), not(feature = "mas")))]
-fn terminate_pids(pids: &HashSet<i32>) {
+fn terminate_pids(pids: &HashSet<i32>, is_ours: fn(i32) -> bool) {
     if pids.is_empty() {
         return;
     }
     for pid in pids {
-        terminate_pid(*pid, SIGTERM);
+        if is_ours(*pid) {
+            terminate_pid(*pid, SIGTERM);
+        }
     }
     thread::sleep(Duration::from_millis(250));
     for pid in pids {
-        terminate_pid(*pid, SIGKILL);
+        if is_ours(*pid) {
+            terminate_pid(*pid, SIGKILL);
+        }
     }
 }
 
@@ -6383,5 +6394,13 @@ mod tests {
             "python -m uvicorn myapp.main:app --port 8765"
         ));
         assert!(!is_geolibre_sidecar_command_line(""));
+    }
+
+    // src/lib/sidecar.ts classifies the start failure by this phrase; if it
+    // drifts, a stale sidecar is ignored again and users get a bare 401.
+    #[cfg(not(feature = "mas"))]
+    #[test]
+    fn stale_sidecar_error_keeps_the_phrase_the_frontend_matches() {
+        assert!(super::STALE_SIDECAR_ERROR.contains("does not accept this session's token"));
     }
 }

@@ -20,7 +20,8 @@ export class StaleSidecarError extends Error {
   override name = "StaleSidecarError";
 }
 
-// Phrase from start_geolibre_sidecar_blocking's port-reclaim error (lib.rs).
+// Phrase from STALE_SIDECAR_ERROR (src-tauri/src/lib.rs); tests on both sides
+// pin it, so rewording the Rust message fails a test instead of reviving #2959.
 const STALE_SIDECAR_MARKER = "does not accept this session's token";
 
 export async function startGeoLibreSidecar(): Promise<SidecarServerInfo> {
