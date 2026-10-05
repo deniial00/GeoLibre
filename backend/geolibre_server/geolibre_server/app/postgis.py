@@ -641,12 +641,18 @@ def postgis_write(request: PostgisWriteRequest) -> dict[str, Any]:
                             else change.values[column]
                             for column in columns
                         ]
-                        geometry_value = json.dumps(change.geometry) if change.geometry else None
-                        assignments = [
-                            sql.SQL("{col} = ").format(col=geom_ident)
-                            + (geom_param if geometry_value is not None else sql.SQL("NULL"))
-                        ]
-                        params: list[Any] = [geometry_value] if geometry_value is not None else []
+                        assignments = []
+                        params: list[Any] = []
+                        if change.geometry_changed:
+                            geometry_value = (
+                                json.dumps(change.geometry) if change.geometry else None
+                            )
+                            assignments.append(
+                                sql.SQL("{col} = ").format(col=geom_ident)
+                                + (geom_param if geometry_value is not None else sql.SQL("NULL"))
+                            )
+                            if geometry_value is not None:
+                                params.append(geometry_value)
                         for column, value in zip(columns, values):
                             assignments.append(
                                 sql.SQL("{col} = %s").format(col=sql.Identifier(column))

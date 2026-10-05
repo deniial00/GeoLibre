@@ -283,6 +283,7 @@ export {
   type WriteMssqlTableRequest,
   type WriteMssqlTableResult,
   MssqlSessionExpiredError,
+  MssqlWriteRejectedError,
   type WhiteboxJob,
   type WhiteboxLayerInput,
   type WhiteboxParameterKind,

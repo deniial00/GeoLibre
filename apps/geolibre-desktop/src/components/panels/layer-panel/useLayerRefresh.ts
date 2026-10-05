@@ -31,7 +31,10 @@ import {
 } from "./layer-panel-utils";
 import { readMssqlTable } from "@geolibre/processing";
 import { MssqlReconnectRequiredError, withMssqlSession } from "../../../lib/mssql-sessions";
-import { reconcileMssqlWritebackMetadata } from "../../../lib/mssql-writeback";
+import {
+  reconcileMssqlWritebackMetadata,
+  rememberMssqlLoadedRows,
+} from "../../../lib/mssql-writeback";
 
 interface UseLayerRefreshOptions {
   /** The project's layers, in store order. */
@@ -185,6 +188,10 @@ export function useLayerRefresh({ layers, isCollapsed }: UseLayerRefreshOptions)
             }),
             metadata: reconcileMssqlWritebackMetadata(latest.metadata, refreshed),
           });
+          const primaryKey = latest.metadata.mssqlPrimaryKey;
+          if (typeof primaryKey === "string") {
+            rememberMssqlLoadedRows(layer.id, requestGeneration, primaryKey, refreshed.geojson);
+          }
           setRefreshStatuses((current) => ({
             ...current,
             [layer.id]: {

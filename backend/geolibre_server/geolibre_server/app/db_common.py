@@ -157,11 +157,12 @@ def require_features(geojson: Optional[dict]) -> list[dict]:
 
 @dataclass(frozen=True)
 class RowChange:
-    """One planned insert or update: its key, geometry, and column values."""
+    """One planned insert or update, including which stored values need writing."""
 
     key: Any
     geometry: Optional[dict]
     values: dict[str, Any]
+    geometry_changed: bool = True
 
 
 @dataclass(frozen=True)
@@ -185,18 +186,27 @@ def plan_feature_diff(
     baseline_keys: Optional[list],
     capabilities: Optional[dict[str, bool]],
     table_label: str,
+    unchanged_geometry_keys: Optional[list] = None,
+    changed_columns: Optional[dict[Any, list[str]]] = None,
 ) -> FeatureDiff:
     """Plan row-level changes without executing database-specific SQL.
 
     A feature's key is its primary-key property, falling back to ``feature.id``
     when an editor cleared the property; that key both matches existing rows and
     is inserted explicitly when ``insert_explicit_key`` allows. Deletes are
-    scoped to the supplied baseline so concurrent inserts survive. Capabilities
-    are caller-provided consistency hints, not authorization; database grants
-    remain the access-control boundary.
+    scoped to the supplied baseline so concurrent inserts survive. Updates carry
+    only changed writable columns and omit geometry when it is unchanged or its
+    key is listed in ``unchanged_geometry_keys``. When ``changed_columns`` names
+    a key, its update is further limited to those client-edited columns, so a
+    stale loaded value cannot overwrite a newer stored one; inserts still use
+    every submitted writable property. Capabilities are caller-provided
+    consistency hints, not authorization; database grants remain the access-control
+    boundary.
     """
     writable = set(writable_columns)
     existing = set(existing_rows)
+    unchanged = set(unchanged_geometry_keys or [])
+    edited_columns = {key: set(columns) for key, columns in (changed_columns or {}).items()}
     kept: set[Any] = set()
     updates: list[RowChange] = []
     inserts: list[RowChange] = []
@@ -208,7 +218,6 @@ def plan_feature_diff(
         properties = feature.get("properties") or {}
         skipped.update(key for key in properties if key not in writable and key != primary_key)
         columns = [column for column in writable_columns if column in properties]
-        values = {column: properties[column] for column in columns}
         geometry = feature.get("geometry")
         # Editors may clear a key property while preserving feature.id for
         # matching an existing row.
@@ -217,9 +226,15 @@ def plan_feature_diff(
         if key is not None and key in existing:
             kept.add(key)
             stored_geometry, stored_values = existing_rows[key]
-            if geometry == stored_geometry and all(
-                properties[column] == stored_values.get(column) for column in columns
-            ):
+            geometry_changed = key not in unchanged and geometry != stored_geometry
+            edited = edited_columns.get(key)
+            values = {
+                column: properties[column]
+                for column in columns
+                if (edited is None or column in edited)
+                and properties[column] != stored_values.get(column)
+            }
+            if not geometry_changed and not values:
                 # The client submits the whole layer; skipping unchanged rows
                 # avoids needless UPDATE triggers and MVCC churn.
                 continue
@@ -227,11 +242,12 @@ def plan_feature_diff(
                 raise HTTPException(
                     status_code=403, detail="Layer capability excludes feature updates."
                 )
-            updates.append(RowChange(key, geometry, values))
+            updates.append(RowChange(key, geometry, values, geometry_changed))
         else:
             # A non-null key that is absent from the table is inserted
             # explicitly so client-assigned keys survive; identity/default
             # columns are left to the database when the key is dropped.
+            values = {column: properties[column] for column in columns}
             explicit_key = key if key is not None and insert_explicit_key else None
             if explicit_key is None and not pk_is_generated:
                 raise HTTPException(
