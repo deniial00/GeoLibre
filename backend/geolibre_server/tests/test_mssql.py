@@ -9,7 +9,6 @@ import time
 
 import pytest
 from fastapi import HTTPException
-from fastapi.testclient import TestClient
 
 from geolibre_server.app import mssql
 
@@ -322,6 +321,22 @@ def _install_session(monkeypatch, connection):
     return mssql.MssqlSessionRequest(session_id="sid")
 
 
+def _sidecar_client():
+    """The sidecar app under Starlette's test client.
+
+    The SQL Server integration job installs only the `dev,mssql` extras, which
+    lack the HTTP client Starlette's test client needs; route-level tests skip
+    there and run in the backend job, which installs the `test` extra.
+    """
+    try:
+        from fastapi.testclient import TestClient
+    except (ImportError, RuntimeError) as exc:
+        pytest.skip(f"Starlette test client unavailable: {exc}")
+    from geolibre_server.app.main import app
+
+    return TestClient(app)
+
+
 def test_tables_closes_connection_and_tolerates_probe_error(monkeypatch):
     conn = FakeConnection()
     conn.fetchall_results = [
@@ -377,9 +392,7 @@ def test_write_http_response_marks_confirmed_rollback(monkeypatch):
     conn = FakeConnection()
     _install_session(monkeypatch, conn)
     conn.execute_hook = _fail
-    from geolibre_server.app.main import app
-
-    response = TestClient(app).post(
+    response = _sidecar_client().post(
         "/mssql/write",
         json={
             "session_id": "sid",
@@ -404,9 +417,7 @@ def test_write_http_response_omits_rollback_marker_when_rollback_fails(monkeypat
         raise FakePyodbcError("rollback failed")
 
     conn.rollback = fail_rollback
-    from geolibre_server.app.main import app
-
-    response = TestClient(app).post(
+    response = _sidecar_client().post(
         "/mssql/write",
         json={
             "session_id": "sid",
@@ -449,9 +460,7 @@ def test_write_http_response_omits_rollback_marker_when_commit_fails(monkeypatch
         raise FakePyodbcError("commit response lost")
 
     conn.commit = fail_commit
-    from geolibre_server.app.main import app
-
-    response = TestClient(app).post(
+    response = _sidecar_client().post(
         "/mssql/write",
         json={
             "session_id": "sid",
