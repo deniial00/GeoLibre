@@ -21,6 +21,44 @@ const PROJECT = {
   preferences: {
     map: { mapboxStyleUrl: "https://tiles.openfreemap.org/styles/liberty" },
   },
+  layers: [
+    {
+      id: "editable-point-layer",
+      name: "Editable points",
+      type: "geojson",
+      source: { type: "geojson" },
+      visible: true,
+      opacity: 1,
+      style: {
+        minZoom: 0,
+        maxZoom: 24,
+        fillColor: "#3b82f6",
+        strokeColor: "#1e40af",
+        strokeWidth: 2,
+        strokeWidthUnit: "pixels",
+        fillOpacity: 0.6,
+        circleRadius: 6,
+        rasterBrightnessMin: 0,
+        rasterBrightnessMax: 1,
+        rasterSaturation: 0,
+        rasterContrast: 0,
+        rasterHueRotate: 0,
+      },
+      metadata: {},
+      geojson: {
+        type: "FeatureCollection",
+        features: [
+          {
+            type: "Feature",
+            id: "existing-point",
+            properties: { name: "Existing" },
+            geometry: { type: "Point", coordinates: [-122.42, 37.78] },
+          },
+        ],
+      },
+      capabilities: { query: true, create: true, update: true, delete: true, export: true },
+    },
+  ],
 };
 
 test.use({ actionTimeout: 30_000 });
@@ -228,6 +266,23 @@ for (const theme of ["light", "dark"] as const) {
       await expect(rotatePopup).toBeHidden();
 
       await page.screenshot({ path: info.outputPath(`mapbox-geo-editor-${theme}.png`) });
+
+      // In-place geometry editing has no attribute schema for a newly drawn
+      // point. GeoEditor opens an empty form after the callback returns; the
+      // plugin must close it without changing the normal Sketches behavior above.
+      const editableRow = layerRow(page, "Editable points");
+      await editableRow.getByRole("button", { name: "Layer actions" }).click();
+      await page.getByRole("menuitem", { name: "Edit geometry", exact: true }).click();
+      const expandToolbar = toolbar.locator('button[title="Expand toolbar"]');
+      if (await expandToolbar.isVisible()) await expandToolbar.click();
+      await toolbar.locator('button[data-mode="marker"]').click();
+      const newPoint = await canvasPoint(page, 0.85, 0.5);
+      await page.mouse.click(newPoint.x, newPoint.y);
+      const attributePanel = page.locator(".geo-editor-attribute-panel");
+      await expect(attributePanel).toHaveClass(/attribute-panel--hidden/);
+
+      await editableRow.getByRole("button", { name: "Layer actions" }).click();
+      await page.getByRole("menuitem", { name: "Finish editing geometry", exact: true }).click();
 
       // The plugin declares both 2D engines, so the manager re-activates it on
       // each swap and the sketch persists through the store.

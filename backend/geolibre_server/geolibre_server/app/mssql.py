@@ -8,6 +8,7 @@ import logging
 import os
 import re
 import secrets
+import socket
 import struct
 import sys
 import threading
@@ -17,7 +18,8 @@ from dataclasses import dataclass
 from functools import lru_cache
 from typing import Any, Iterator, Literal, Optional
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
 from .db_common import (
@@ -42,6 +44,8 @@ _ALLOW_MSI_ENV = "GEOLIBRE_MSSQL_ALLOW_MANAGED_IDENTITY"
 _DEFAULT_PORT = 1433
 _LOGIN_TIMEOUT_S = 10
 _QUERY_TIMEOUT_S = 60
+_REACHABILITY_TIMEOUT_S = 3
+_GEOMETRY_SAMPLE_ROWS = 1000
 _INTERACTIVE_TIMEOUT_S = 300
 _SESSION_IDLE_S = 8 * 3600
 _MAX_SESSIONS = 32
@@ -218,6 +222,7 @@ class MssqlWriteRequest(BaseModel):
     geojson: dict
     baseline_keys: Optional[list] = None
     capabilities: Optional[dict[str, bool]] = None
+    unchanged_geometry_keys: Optional[list] = None
 
 
 def _build_connection_string(
@@ -265,6 +270,9 @@ class _Session:
     # Most recent access token fetched for this session, so later error
     # scrubbers cover it too (connect-time secrets alone would not).
     live_token: Optional[str] = None
+    host: str = ""
+    instance: Optional[str] = None
+    port: int = _DEFAULT_PORT
 
     def sensitive(self) -> tuple[str, ...]:
         """Session secrets plus the most recently fetched access token."""
@@ -311,6 +319,20 @@ def _trim_fraction(value: str) -> str:
     return re.sub(r"(\.\d{6})\d+", r"\1", value)
 
 
+def _unreachable_reason(host: str, instance: Optional[str], port: int) -> Optional[str]:
+    try:
+        socket.getaddrinfo(host, port, type=socket.SOCK_STREAM)
+    except socket.gaierror:
+        return f"The host name '{host}' could not be resolved"
+    if instance is not None:
+        return None
+    try:
+        with socket.create_connection((host, port), timeout=_REACHABILITY_TIMEOUT_S):
+            return None
+    except OSError:
+        return f"Nothing is accepting connections at {host}:{port}"
+
+
 def _open_connection(session: _Session) -> Any:
     pyodbc = _import_pyodbc()
     attrs = None
@@ -325,6 +347,7 @@ def _open_connection(session: _Session) -> Any:
                 400,
                 f"Microsoft Entra sign-in failed: {scrub_secrets(str(exc), session.sensitive())}",
             ) from exc
+    connected = False
     try:
         conn = pyodbc.connect(
             session.connection_string,
@@ -332,18 +355,44 @@ def _open_connection(session: _Session) -> Any:
             autocommit=False,
             **({"attrs_before": attrs} if attrs is not None else {}),
         )
+        connected = True
         conn.timeout = _QUERY_TIMEOUT_S
         conn.add_output_converter(_SQL_SS_TIMESTAMPOFFSET, _datetimeoffset_to_str)
         conn.add_output_converter(_SQL_SS_TIME2, _time2_to_str)
         conn.add_output_converter(_SQL_TYPE_TIMESTAMP, _timestamp_to_str)
         return conn
     except Exception as exc:
-        raise HTTPException(
-            400, f"Could not connect to SQL Server: {scrub_secrets(str(exc), session.sensitive())}"
-        ) from exc
+        driver_message = scrub_secrets(str(exc), session.sensitive())
+        reason = (
+            _unreachable_reason(session.host, session.instance, session.port)
+            if session.host and not connected
+            else None
+        )
+        detail = (
+            f"Could not connect to SQL Server: {reason}. Driver message: {driver_message}"
+            if reason
+            else f"Could not connect to SQL Server: {driver_message}"
+        )
+        raise HTTPException(400, detail) from exc
 
 
-def _safe_rollback(conn: Any, secrets: tuple[str, ...]) -> None:
+class MssqlWriteRolledBack(HTTPException):
+    """Write-back failed before commit and rollback succeeded; the table is unchanged."""
+
+    def __init__(self, status_code: int, detail: Any):
+        super().__init__(status_code=status_code, detail=detail)
+
+
+async def mssql_write_rolled_back_handler(
+    request: Request, exc: MssqlWriteRolledBack
+) -> JSONResponse:
+    return JSONResponse(
+        status_code=exc.status_code,
+        content={"detail": exc.detail, "rolled_back": True},
+    )
+
+
+def _safe_rollback(conn: Any, secrets: tuple[str, ...]) -> bool:
     """Roll back without masking the write error that triggered the rollback.
 
     A broken connection (lost network, query timeout) raises from rollback()
@@ -351,8 +400,10 @@ def _safe_rollback(conn: Any, secrets: tuple[str, ...]) -> None:
     """
     try:
         conn.rollback()
+        return True
     except Exception as exc:
         logger.warning("SQL Server rollback failed: %s", scrub_secrets(str(exc), secrets))
+        return False
 
 
 @contextmanager
@@ -476,7 +527,16 @@ def mssql_connect(request: MssqlConnectRequest) -> dict[str, str]:
         for x in (request.auth.password, request.auth.client_secret, request.auth.access_token)
         if x
     )
-    session = _Session(cs, credential, static_token, secret_values, time.monotonic())
+    session = _Session(
+        connection_string=cs,
+        credential=credential,
+        static_token=static_token,
+        secrets=secret_values,
+        last_used=time.monotonic(),
+        host=host,
+        instance=instance,
+        port=request.port,
+    )
     # The token is fetched once, inside the probe below: _open_connection signs
     # in and surfaces any credential error with the same scrubbed message.
     with _connection(session) as conn:
@@ -565,6 +625,25 @@ def _bind_value(value: Any, sql_type: str) -> Any:
     return value
 
 
+def _probe_geometry(
+    cur: Any, schema: str, table: str, geometry_column: str
+) -> tuple[Optional[int], list[str], bool]:
+    geom = _q(geometry_column)
+    cur.execute(
+        f"SELECT sampled.srid, sampled.geometry_type, COUNT(*) FROM "
+        f"(SELECT TOP ({_GEOMETRY_SAMPLE_ROWS}) {geom}.STSrid AS srid, "
+        f"{geom}.STGeometryType() AS geometry_type FROM {_q(schema)}.{_q(table)} "
+        f"WHERE {geom} IS NOT NULL) AS sampled "
+        "GROUP BY sampled.srid, sampled.geometry_type ORDER BY COUNT(*) DESC"
+    )
+    rows = cur.fetchall()
+    if not rows:
+        return None, [], False
+    srids = {int(row[0]) for row in rows}
+    geometry_types = list(dict.fromkeys(row[1] for row in rows))
+    return int(rows[0][0]), geometry_types, len(srids) > 1
+
+
 def _table_info(
     cur: Any, schema: str, table: str, geometry_column: Optional[str] = None
 ) -> dict[str, Any]:
@@ -603,37 +682,26 @@ def _table_info(
         (r for r in spatial if r[0] == geometry_column), sorted(spatial, key=lambda r: r[0])[0]
     )
     geom, column_type = selected[0], selected[1]
-    # SQL Server does not constrain a spatial column to one SRID per table, so
-    # the first non-null row is taken as representative for the whole layer.
-    cur.execute(
-        "SELECT TOP (1) "
-        + _q(geom)
-        + ".STSrid, "
-        + _q(geom)
-        + ".STGeometryType() FROM "
-        + _q(schema)
-        + "."
-        + _q(table)
-        + " WHERE "
-        + _q(geom)
-        + " IS NOT NULL"
-    )
-    probe = cur.fetchone()
-    srid = int(probe[0]) if probe else (4326 if column_type == "geography" else 0)
+    # A spatial column can contain several SRIDs and geometry types. Keep a
+    # representative SRID for the layer while exposing mixed data explicitly.
+    # Probe a bounded sample; empty spatial columns have no native SRID yet.
+    probed_srid, geometry_types, mixed_srid = _probe_geometry(cur, schema, table, geom)
+    srid = probed_srid if probed_srid is not None else 4326
     cur.execute(
         """
-        SELECT MIN(c.name), COUNT(*)
+        SELECT c.name
         FROM sys.indexes i
         JOIN sys.index_columns ic
           ON ic.object_id = i.object_id AND ic.index_id = i.index_id
         JOIN sys.columns c
           ON c.object_id = ic.object_id AND c.column_id = ic.column_id
-        WHERE i.is_primary_key = 1 AND i.object_id = ?
+        WHERE i.is_primary_key = 1 AND i.object_id = ? AND ic.key_ordinal > 0
+        ORDER BY ic.key_ordinal
         """,
         (object_id,),
     )
-    pkr = cur.fetchone()
-    pk = pkr[0] if pkr and pkr[1] == 1 else None
+    primary_key_columns = [row[0] for row in cur.fetchall()]
+    pk = primary_key_columns[0] if len(primary_key_columns) == 1 else None
     columns = [
         r[0]
         for r in rows
@@ -646,8 +714,12 @@ def _table_info(
         "geometry_column": geom,
         "column_type": column_type,
         "srid": srid,
-        "geometry_type": probe[1] if probe else "Unknown",
+        "geometry_type": geometry_types[0] if geometry_types else "Unknown",
+        "geometry_types": geometry_types,
+        "mixed_geometry": len(geometry_types) > 1,
+        "mixed_srid": mixed_srid,
         "primary_key": pk,
+        "primary_key_columns": primary_key_columns,
         "pk_is_generated": bool(pkrow and (pkrow[2] or pkrow[3] != 0)),
         "pk_is_identity": bool(pkrow and pkrow[2]),
         "columns": columns,
@@ -678,7 +750,7 @@ def mssql_tables(request: MssqlSessionRequest) -> dict[str, Any]:
             rows = cur.fetchall()
             cur.execute(
                 """
-                SELECT s.name, t.name, MIN(c.name), COUNT(*)
+                SELECT s.name, t.name, c.name, ic.key_ordinal
                 FROM sys.indexes i
                 JOIN sys.index_columns ic
                   ON ic.object_id = i.object_id AND ic.index_id = i.index_id
@@ -686,47 +758,45 @@ def mssql_tables(request: MssqlSessionRequest) -> dict[str, Any]:
                   ON c.object_id = ic.object_id AND c.column_id = ic.column_id
                 JOIN sys.tables t ON t.object_id = i.object_id
                 JOIN sys.schemas s ON s.schema_id = t.schema_id
-                WHERE i.is_primary_key = 1
-                GROUP BY s.name, t.name
+                WHERE i.is_primary_key = 1 AND ic.key_ordinal > 0
+                ORDER BY s.name, t.name, ic.key_ordinal
                 """
             )
-            pks = {(row[0], row[1]): row[2] if row[3] == 1 else None for row in cur.fetchall()}
+            pks: dict[tuple[str, str], list[str]] = {}
+            for row in cur.fetchall():
+                pks.setdefault((row[0], row[1]), []).append(row[2])
             tables = []
             for schema, table, geom, coltype in rows:
                 # A table the login cannot SELECT from must not hide the rest
-                # of the catalog; list it with default SRID/type instead.
+                # of the catalog; its SRID and geometry type remain unknown.
                 try:
-                    cur.execute(
-                        "SELECT TOP (1) "
-                        + _q(geom)
-                        + ".STSrid, "
-                        + _q(geom)
-                        + ".STGeometryType() FROM "
-                        + _q(schema)
-                        + "."
-                        + _q(table)
-                        + " WHERE "
-                        + _q(geom)
-                        + " IS NOT NULL"
+                    probed_srid, geometry_types, mixed_srid = _probe_geometry(
+                        cur, schema, table, geom
                     )
-                    probe = cur.fetchone()
                 except pyodbc.Error as exc:
                     logger.info(
-                        "SQL Server SRID probe of %s.%s failed: %s",
+                        "SQL Server geometry probe of %s.%s failed: %s",
                         schema,
                         table,
                         scrub_secrets(str(exc), session.sensitive()),
                     )
-                    probe = None
+                    probed_srid, geometry_types, mixed_srid = 0, [], False
+                primary_key_columns = pks.get((schema, table), [])
                 tables.append(
                     {
                         "schema": schema,
                         "table": table,
                         "geometry_column": geom,
                         "column_type": coltype,
-                        "srid": int(probe[0]) if probe else (4326 if coltype == "geography" else 0),
-                        "geometry_type": probe[1] if probe else "Unknown",
-                        "primary_key": pks.get((schema, table)),
+                        "srid": probed_srid if probed_srid is not None else 4326,
+                        "geometry_type": geometry_types[0] if geometry_types else "Unknown",
+                        "geometry_types": geometry_types,
+                        "mixed_geometry": len(geometry_types) > 1,
+                        "mixed_srid": mixed_srid,
+                        "primary_key": (
+                            primary_key_columns[0] if len(primary_key_columns) == 1 else None
+                        ),
+                        "primary_key_columns": primary_key_columns,
                     }
                 )
             return {"tables": tables}
@@ -830,8 +900,9 @@ def mssql_read(request: MssqlReadRequest) -> dict[str, Any]:
             selected_columns = (
                 (", " + ", ".join(_q(c) for c in read_columns)) if read_columns else ""
             )
+            geom = _q(info["geometry_column"])
             sql = (
-                f"SELECT TOP (?) {_q(info['geometry_column'])}.STAsBinary()"
+                f"SELECT TOP (?) {geom}.STAsBinary(), {geom}.STSrid"
                 f"{selected_columns} FROM {_q(request.schema_name)}.{_q(request.table)}"
             )
             cur.execute(sql, (vector_ops.MAX_FEATURES + 1,))
@@ -840,11 +911,13 @@ def mssql_read(request: MssqlReadRequest) -> dict[str, Any]:
             raise _features_limit_error()
         features = []
         for row in rows:
-            raw = {col: json_safe(val) for col, val in zip(read_columns, row[1:], strict=True)}
+            raw = {col: json_safe(val) for col, val in zip(read_columns, row[2:], strict=True)}
             props = {k: v for k, v in raw.items() if k not in request.excluded_fields}
             feature = {
                 "type": "Feature",
-                "geometry": _wkb_to_geojson(row[0], info["srid"], info["column_type"]),
+                "geometry": _wkb_to_geojson(
+                    row[0], int(row[1]) if row[1] is not None else 0, info["column_type"]
+                ),
                 "properties": props,
             }
             if pk is not None and raw.get(pk) is not None:
@@ -858,6 +931,9 @@ def mssql_read(request: MssqlReadRequest) -> dict[str, Any]:
             "column_type": info["column_type"],
             "srid": info["srid"],
             "primary_key": pk,
+            "primary_key_columns": info.get("primary_key_columns", []),
+            "mixed_geometry": info.get("mixed_geometry", False),
+            "mixed_srid": info.get("mixed_srid", False),
             "feature_count": len(features),
         }
     except HTTPException:
@@ -883,15 +959,21 @@ def mssql_write(request: MssqlWriteRequest) -> dict[str, Any]:
     session = _get_session(request.session_id)
     inserted = updated = deleted = 0
     with _connection(session) as conn:
+        commit_attempted = False
         try:
             cur = conn.cursor()
             info = _table_info(cur, request.schema_name, request.table, request.geometry_column)
             pk = info["primary_key"]
             if pk is None:
+                primary_key_columns = info.get("primary_key_columns", [])
+                reason = (
+                    f"composite primary key ({', '.join(primary_key_columns)})"
+                    if len(primary_key_columns) > 1
+                    else "no single-column primary key"
+                )
                 raise HTTPException(
                     400,
-                    f"{request.schema_name}.{request.table} has no single-column "
-                    "primary key; write-back requires one.",
+                    f"{request.schema_name}.{request.table} has {reason}; write-back requires one.",
                 )
             table_sql = f"{_q(request.schema_name)}.{_q(request.table)}"
             cur.execute(f"SELECT COUNT_BIG(*) FROM {table_sql}")
@@ -900,14 +982,17 @@ def mssql_write(request: MssqlWriteRequest) -> dict[str, Any]:
             cols = info["columns"]
             query = (
                 f"SELECT {_q(pk)}, {_q(info['geometry_column'])}.STAsBinary(), "
+                f"{_q(info['geometry_column'])}.STSrid, "
                 f"{', '.join(_q(column) for column in cols)} FROM {table_sql}"
             )
             cur.execute(query)
             existing = {}
             for row in cur.fetchall():
-                values = {c: json_safe(v) for c, v in zip(cols, row[2:], strict=True)}
+                values = {c: json_safe(v) for c, v in zip(cols, row[3:], strict=True)}
                 existing[json_safe(row[0])] = (
-                    _wkb_to_geojson(row[1], info["srid"], info["column_type"]),
+                    _wkb_to_geojson(
+                        row[1], int(row[2]) if row[2] is not None else 0, info["column_type"]
+                    ),
                     values,
                 )
             diff = plan_feature_diff(
@@ -920,18 +1005,37 @@ def mssql_write(request: MssqlWriteRequest) -> dict[str, Any]:
                 baseline_keys=request.baseline_keys,
                 capabilities=request.capabilities,
                 table_label=f"{request.schema_name}.{request.table}",
+                unchanged_geometry_keys=request.unchanged_geometry_keys,
             )
+            needs_geometry_write = any(
+                change.geometry_changed and change.geometry is not None for change in diff.updates
+            ) or any(change.geometry is not None for change in diff.inserts)
+            if needs_geometry_write and info.get("mixed_srid", False):
+                raise HTTPException(
+                    400,
+                    f"Cannot write geometry to {request.schema_name}.{request.table}: "
+                    "rows use mixed SRIDs.",
+                )
+            if needs_geometry_write and info["srid"] == 0:
+                raise HTTPException(
+                    400,
+                    f"Cannot write geometry to {request.schema_name}.{request.table}: "
+                    "the native SRID is unknown (0). Set a known SRID before inserting "
+                    "or editing geometries.",
+                )
             geom = _q(info["geometry_column"])
             table = f"{_q(request.schema_name)}.{_q(request.table)}"
             expr = f"{info['column_type']}::STGeomFromWKB(?, {int(info['srid'])})"
             types = info["column_types"]
             for change in diff.updates:
-                sets = [f"{geom} = " + (expr if change.geometry is not None else "NULL")]
+                sets = []
                 params = []
-                if change.geometry is not None:
-                    params.append(
-                        _geojson_to_wkb(change.geometry, info["srid"], info["column_type"])
-                    )
+                if change.geometry_changed:
+                    sets.append(f"{geom} = " + (expr if change.geometry is not None else "NULL"))
+                    if change.geometry is not None:
+                        params.append(
+                            _geojson_to_wkb(change.geometry, info["srid"], info["column_type"])
+                        )
                 for c, v in change.values.items():
                     sets.append(f"{_q(c)} = ?")
                     params.append(_bind_value(v, types[c]))
@@ -962,14 +1066,19 @@ def mssql_write(request: MssqlWriteRequest) -> dict[str, Any]:
                     f"DELETE FROM {table} WHERE {_q(pk)} IN ({','.join('?' for _ in keys)})", keys
                 )
                 deleted += max(cur.rowcount, 0)
+            commit_attempted = True
             conn.commit()
-        except HTTPException:
-            _safe_rollback(conn, session.sensitive())
+        except HTTPException as exc:
+            rolled_back = _safe_rollback(conn, session.sensitive())
+            if rolled_back and not commit_attempted:
+                raise MssqlWriteRolledBack(exc.status_code, exc.detail) from exc
             raise
         except Exception as exc:
-            _safe_rollback(conn, session.sensitive())
+            rolled_back = _safe_rollback(conn, session.sensitive())
             msg = scrub_secrets(str(exc), session.sensitive())
             logger.error("SQL Server write-back failed: %s", msg)
+            if rolled_back and not commit_attempted:
+                raise MssqlWriteRolledBack(400, f"Write-back failed: {msg}") from exc
             raise HTTPException(400, f"Write-back failed: {msg}") from exc
     messages = [
         f"Saved {len(features)} feature(s) to {request.schema_name}.{request.table} "

@@ -183,3 +183,46 @@ def test_plan_feature_diff_baseline_protects_concurrent_rows() -> None:
         table_label="dbo.t",
     )
     assert diff.deletes == []
+
+
+def test_plan_feature_diff_updates_only_changed_columns_and_geometry() -> None:
+    geometry = {"type": "Point", "coordinates": [0, 0]}
+    options = dict(
+        primary_key="id",
+        writable_columns=["name", "pop"],
+        existing_rows={1: (geometry, {"name": "a", "pop": 1})},
+        pk_is_generated=False,
+        insert_explicit_key=True,
+        baseline_keys=None,
+        capabilities=None,
+        table_label="dbo.t",
+    )
+
+    diff = plan_feature_diff(
+        [
+            {
+                "id": 1,
+                "properties": {"id": 1, "name": "a", "pop": 2},
+                "geometry": geometry,
+            }
+        ],
+        **options,
+    )
+
+    assert [(row.key, row.values, row.geometry_changed) for row in diff.updates] == [
+        (1, {"pop": 2}, False)
+    ]
+
+    moved_geometry = {"type": "Point", "coordinates": [1, 1]}
+    diff = plan_feature_diff(
+        [
+            {
+                "id": 1,
+                "properties": {"id": 1, "name": "a", "pop": 1},
+                "geometry": moved_geometry,
+            }
+        ],
+        unchanged_geometry_keys=[1],
+        **options,
+    )
+    assert diff.updates == []

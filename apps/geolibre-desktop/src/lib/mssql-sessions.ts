@@ -12,11 +12,18 @@ import {
   savedMssqlSecret,
   type MssqlConnectionProfile,
   type MssqlStoredSecret,
+  forgetMssqlConnection,
 } from "./saved-mssql-connections";
 
 export type MssqlSessionSecret = MssqlStoredSecret & { accessToken?: string };
 export class MssqlReconnectRequiredError extends Error {
   override readonly name = "MssqlReconnectRequiredError";
+  constructor(
+    message: string,
+    readonly reason: "profile-missing" | "secret-missing" = "profile-missing",
+  ) {
+    super(message);
+  }
 }
 export interface MssqlSessionClient {
   connect: typeof connectMssql;
@@ -102,9 +109,15 @@ async function restoreSession(profileId: string, client: MssqlSessionClient): Pr
   if (!profile) throw new MssqlReconnectRequiredError("Reconnect to SQL Server in Add Data.");
   const secret = resolveMssqlSecret(profileId, {});
   const required = requiredMssqlSecret(profile.authMethod);
-  if (required && !secret[required])
+  if (required && !secret[required]) {
+    throw new MssqlReconnectRequiredError("Reconnect to SQL Server in Add Data.", "secret-missing");
+  }
+  const sessionId = await openMssqlSession(profile, secret, client);
+  if (!readSavedMssqlConnections().some((item) => item.id === profileId)) {
+    releaseMssqlSession(profileId, sessionId, client);
     throw new MssqlReconnectRequiredError("Reconnect to SQL Server in Add Data.");
-  return openMssqlSession(profile, secret, client);
+  }
+  return sessionId;
 }
 function restoreSessionOnce(profileId: string, client: MssqlSessionClient): Promise<string> {
   let pending = restoringByProfileId.get(profileId);
@@ -156,6 +169,27 @@ export function disconnectMssqlProfileSession(
   if (!sessionId) return;
   sessionByProfileId.delete(profileId);
   void client.disconnect(sessionId).catch(() => {});
+}
+
+/** Disconnect and clear secrets for a removed or evicted saved profile. */
+export function discardMssqlProfileSession(
+  profileId: string,
+  client = defaultMssqlSessionClient,
+): void {
+  const sessionId = sessionByProfileId.get(profileId);
+  sessionByProfileId.delete(profileId);
+  memorySecrets.delete(profileId);
+  restoringByProfileId.delete(profileId);
+  if (sessionId) void client.disconnect(sessionId).catch(() => {});
+}
+
+/** Forget a profile, its live session, and all session-only credentials. */
+export function forgetMssqlProfile(
+  profileId: string,
+  client = defaultMssqlSessionClient,
+): MssqlConnectionProfile[] {
+  discardMssqlProfileSession(profileId, client);
+  return forgetMssqlConnection(profileId);
 }
 export function mssqlBaselineKeys(layer: GeoLibreLayer): Array<string | number> | undefined {
   const keys = layer.metadata?.mssqlBaselineKeys;

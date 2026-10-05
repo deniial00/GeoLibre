@@ -136,6 +136,89 @@ describe("MssqlSource", () => {
     assert.equal((screen.getByLabelText("Access token") as HTMLInputElement).value, "");
   });
 
+  it("prompts for a password and sends it when the keychain cannot restore a saved secret", async () => {
+    const tauriWindow = window as Window & {
+      __TAURI_INTERNALS__?: { invoke: (command: string) => Promise<unknown> };
+    };
+    const previous = tauriWindow.__TAURI_INTERNALS__;
+    const previousProfiles = window.localStorage.getItem(MSSQL_CONNECTIONS_STORAGE_KEY);
+    const profile = {
+      id: "00000000-0000-4000-8000-000000000001",
+      server: "saved.example",
+      port: 1433,
+      database: "gis",
+      encrypt: true,
+      trustServerCertificate: false,
+      authMethod: "sql" as const,
+      username: "sa",
+    };
+    Object.defineProperty(tauriWindow, "__TAURI_INTERNALS__", {
+      configurable: true,
+      value: {
+        invoke: async (command: string) => {
+          assert.equal(command, "start_geolibre_sidecar");
+          return { baseUrl: "http://127.0.0.1:8765", port: 8765, token: "test-token" };
+        },
+      },
+    });
+    resetMssqlSessions();
+    window.localStorage.setItem(MSSQL_CONNECTIONS_STORAGE_KEY, JSON.stringify([profile]));
+    setKeychainMssqlSecrets({});
+    setMssqlKeychainWritable(false);
+    let connectBody: { auth?: { password?: string } } | undefined;
+    mockFetch(async (input, init) => {
+      const url = new URL(String(input));
+      if (url.pathname.endsWith("/mssql/status")) {
+        return new Response(
+          JSON.stringify({ available: true, auth_methods: ["sql"], message: "" }),
+          { status: 200 },
+        );
+      }
+      if (url.pathname.endsWith("/mssql/connect")) {
+        connectBody = JSON.parse(String(init?.body)) as { auth?: { password?: string } };
+        return new Response(JSON.stringify({ session_id: "session-1" }), { status: 200 });
+      }
+      if (url.pathname.endsWith("/mssql/tables")) {
+        return new Response(JSON.stringify({ tables: [] }), { status: 200 });
+      }
+      if (url.pathname.endsWith("/mssql/disconnect")) {
+        return new Response("{}", { status: 200 });
+      }
+      throw new Error(`Unexpected request: ${url.pathname}`);
+    });
+
+    try {
+      renderMssqlSource();
+      const password = screen.getByLabelText("Password") as HTMLInputElement;
+      assert.notEqual(password.placeholder, "Saved securely on this device");
+      fireEvent.change(password, { target: { value: "typed-after-keychain-denied" } });
+      fireEvent.click(screen.getByRole("button", { name: "Connect" }));
+
+      await waitFor(() => {
+        assert.ok(screen.getByText("No spatial tables were found in this database."));
+      });
+      assert.equal(connectBody?.auth?.password, "typed-after-keychain-denied");
+    } finally {
+      resetMssqlSessions();
+      setSidecarAuthToken(null);
+      setKeychainMssqlSecrets({});
+      setMssqlKeychainWritable(true);
+      if (previousProfiles === null) {
+        window.localStorage.removeItem(MSSQL_CONNECTIONS_STORAGE_KEY);
+      } else {
+        window.localStorage.setItem(MSSQL_CONNECTIONS_STORAGE_KEY, previousProfiles);
+      }
+      if (previous === undefined) {
+        delete tauriWindow.__TAURI_INTERNALS__;
+      } else {
+        Object.defineProperty(tauriWindow, "__TAURI_INTERNALS__", {
+          configurable: true,
+          value: previous,
+        });
+      }
+    }
+  });
+
   it("disconnects a session when table discovery fails after connect", async () => {
     const tauriWindow = window as Window & {
       __TAURI_INTERNALS__?: { invoke: (command: string) => Promise<unknown> };
@@ -297,7 +380,24 @@ describe("MssqlSource", () => {
       column_type: "geometry",
       srid: 4326,
       geometry_type: "POINT",
+      geometry_types: ["Point", "MultiPoint"],
+      mixed_geometry: true,
+      mixed_srid: true,
       primary_key: "id",
+      primary_key_columns: ["id"],
+    };
+    const compositeTable = {
+      schema: "dbo",
+      table: "archive",
+      geometry_column: "shape",
+      column_type: "geometry",
+      srid: 0,
+      geometry_type: "Unknown",
+      geometry_types: ["Polygon"],
+      mixed_geometry: false,
+      mixed_srid: false,
+      primary_key: null,
+      primary_key_columns: ["tenant_id", "parcel_id"],
     };
     let releaseRead: () => void = () => {};
     const readGate = new Promise<void>((resolve) => {
@@ -323,7 +423,7 @@ describe("MssqlSource", () => {
         return new Response(JSON.stringify({ session_id: "session-1" }), { status: 200 });
       }
       if (url.pathname.endsWith("/mssql/tables")) {
-        return new Response(JSON.stringify({ tables: [table] }), { status: 200 });
+        return new Response(JSON.stringify({ tables: [table, compositeTable] }), { status: 200 });
       }
       if (url.pathname.endsWith("/mssql/read")) {
         await readGate;
@@ -352,6 +452,16 @@ describe("MssqlSource", () => {
       fireEvent.click(screen.getByRole("button", { name: "Connect" }));
       const submit = () => container.querySelector<HTMLButtonElement>('button[type="submit"]');
       await waitFor(() => assert.equal(submit()?.disabled, false));
+
+      const options = Array.from(
+        container.querySelectorAll<HTMLOptionElement>("#mssql-table option"),
+      );
+      assert.ok(options.some((option) => option.textContent?.includes("Point / MultiPoint")));
+      assert.ok(options.some((option) => option.textContent?.includes("mixed SRIDs")));
+      const compositeOption = options.find((option) =>
+        option.textContent?.includes("composite primary key tenant_id, parcel_id"),
+      );
+      assert.equal(compositeOption?.disabled, true);
 
       fireEvent.submit(container.querySelector("form")!);
       await waitFor(() => assert.ok(requests.some((request) => request.endsWith("/mssql/read"))));
@@ -392,6 +502,9 @@ describe("MssqlSource", () => {
     const { added, feature } = await importTable(false);
     assert.deepEqual(added[0].geojson?.features, [feature]);
     assert.deepEqual(added[0].metadata.mssqlBaselineKeys, [1]);
+    assert.equal(added[0].metadata.mssqlMixedGeometry, true);
+    assert.equal(added[0].metadata.mssqlMixedSrid, true);
+    assert.deepEqual(added[0].metadata.mssqlPrimaryKeyColumns, ["id"]);
   });
 
   it("discards a table read whose connection changed while it was loading", async () => {

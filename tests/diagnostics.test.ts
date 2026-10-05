@@ -27,6 +27,7 @@ let clearDiagnostics: DiagnosticsModule["clearDiagnostics"];
 let getDiagnosticsSnapshot: DiagnosticsModule["getDiagnosticsSnapshot"];
 let setCaptureNetworkInfo: DiagnosticsModule["setCaptureNetworkInfo"];
 let installDiagnosticsCapture: DiagnosticsModule["installDiagnosticsCapture"];
+let EXPECTED_STATUS_HEADER: DiagnosticsModule["EXPECTED_STATUS_HEADER"];
 let OPTIONAL_RESOURCE_HEADER: DiagnosticsModule["OPTIONAL_RESOURCE_HEADER"];
 
 before(async () => {
@@ -37,6 +38,7 @@ before(async () => {
     setCaptureNetworkInfo,
     installDiagnosticsCapture,
     OPTIONAL_RESOURCE_HEADER,
+    EXPECTED_STATUS_HEADER,
   } = await import("../apps/geolibre-desktop/src/lib/diagnostics"));
 });
 
@@ -466,6 +468,39 @@ describe("diagnostics startup transient suppression", () => {
       // Marked optional, so the 404 is informational rather than an error.
       assert.equal(record.level, "info");
       assert.equal(getDiagnosticsSnapshot().errorCount, 0);
+    } finally {
+      setCaptureNetworkInfo(false);
+    }
+  });
+
+  it("logs listed HTTP statuses as info and strips the expected-status marker", async () => {
+    setCaptureNetworkInfo(true);
+    try {
+      const statuses = [410, 500];
+      const forwardedHeaders: Headers[] = [];
+      win.fetch = ((_input: RequestInfo | URL, init?: RequestInit) => {
+        forwardedHeaders.push(new Headers(init?.headers));
+        const status = statuses.shift()!;
+        return Promise.resolve(new Response(null, { status }));
+      }) as typeof fetch;
+      install();
+      for (let index = 0; index < 2; index += 1) {
+        await (win.fetch as typeof fetch)("/mssql/write", {
+          method: "POST",
+          headers: { [EXPECTED_STATUS_HEADER]: "410" },
+        });
+      }
+
+      const records = getDiagnosticsSnapshot().records;
+      assert.deepEqual(
+        records.map((record) => [record.status, record.level]),
+        [
+          [500, "error"],
+          [410, "info"],
+        ],
+      );
+      assert.equal(getDiagnosticsSnapshot().errorCount, 1);
+      assert.ok(forwardedHeaders.every((headers) => !headers.has(EXPECTED_STATUS_HEADER)));
     } finally {
       setCaptureNetworkInfo(false);
     }

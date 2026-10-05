@@ -8,10 +8,16 @@ import {
   projectFromStore,
   serializeProject,
 } from "@geolibre/core";
+import { MssqlWriteRejectedError } from "@geolibre/processing";
 import { geojsonLayer } from "./helpers/layer-fixtures";
 import type { Feature, FeatureCollection } from "geojson";
 import {
+  MssqlWriteUncertainError,
+  mssqlWritePayload,
   reconcileMssqlWritebackMetadata,
+  rememberMssqlLoadedRows,
+  resetMssqlLoadedRows,
+  runMssqlWriteRequest,
   writeMssqlAndRefresh,
 } from "../apps/geolibre-desktop/src/lib/mssql-writeback";
 import {
@@ -250,7 +256,7 @@ describe("SQL Server write-back refresh recovery", () => {
     let writeCalls = 0;
     let writebackPending = false;
     const inFlightLayerIds = new Set<string>();
-    const failure = new Error("write response lost");
+    const failure = new MssqlWriteUncertainError("write response lost");
     const refreshTable = async () => ({
       geojson: tableFeatures(rows),
       feature_count: rows.size,
@@ -354,5 +360,81 @@ describe("SQL Server write-back refresh recovery", () => {
     request.baselineKeys = [];
     assert.equal((await writeMssqlAndRefresh(request, write, refresh)).kind, "reconciled");
     assert.equal(writeCalls, 1);
+  });
+});
+
+describe("SQL Server write payload baselines", () => {
+  it("sends only changed values and marks unchanged geometry for omission", () => {
+    resetMssqlLoadedRows();
+    const loaded: FeatureCollection = {
+      type: "FeatureCollection",
+      features: [
+        {
+          type: "Feature",
+          id: 1,
+          geometry: { type: "Point", coordinates: [0, 0] },
+          properties: { id: 1, name: "North", pop: 10 },
+        },
+      ],
+    };
+    rememberMssqlLoadedRows("layer", 4, "id", loaded);
+    loaded.features[0].properties!.name = "mutated after remember";
+    const edited: FeatureCollection = {
+      type: "FeatureCollection",
+      features: [
+        {
+          ...loaded.features[0],
+          geometry: { type: "Point", coordinates: [0, 0] },
+          properties: { id: 1, name: "North", pop: 11 },
+        },
+      ],
+    };
+
+    const payload = mssqlWritePayload("layer", 4, edited);
+
+    assert.deepEqual(payload.geojson.features[0].properties, { id: 1, pop: 11 });
+    assert.deepEqual(payload.unchangedGeometryKeys, [1]);
+
+    const reopenedProjectPayload = mssqlWritePayload("layer", 5, edited);
+    assert.equal(reopenedProjectPayload.geojson, edited);
+    assert.equal(reopenedProjectPayload.unchangedGeometryKeys, undefined);
+    resetMssqlLoadedRows();
+  });
+});
+describe("SQL Server write failure certainty", () => {
+  it("keeps a confirmed rejection separate from an uncertain write", async () => {
+    const request = {
+      layerId: "layer",
+      inFlightLayerIds: new Set<string>(),
+      refreshRequired: false,
+      baselineKeys: [] as Array<string | number>,
+      isCurrent: () => true,
+    };
+    const refresh = async () => ({ geojson: tableFeatures(new Map()), feature_count: 0 });
+    const rejected = new MssqlWriteRejectedError("write was rolled back");
+    const rejectedOutcome = await writeMssqlAndRefresh(
+      request,
+      () =>
+        runMssqlWriteRequest(async () => {
+          throw rejected;
+        }),
+      refresh,
+    );
+    assert.equal(rejectedOutcome.kind, "write-rejected");
+    if (rejectedOutcome.kind !== "write-rejected") return;
+    assert.equal(rejectedOutcome.error, rejected);
+
+    const uncertainOutcome = await writeMssqlAndRefresh(
+      request,
+      () =>
+        runMssqlWriteRequest(async () => {
+          throw new TypeError("connection dropped");
+        }),
+      refresh,
+    );
+    assert.equal(uncertainOutcome.kind, "write-failed");
+    if (uncertainOutcome.kind !== "write-failed") return;
+    assert.ok(uncertainOutcome.error instanceof MssqlWriteUncertainError);
+    assert.equal(uncertainOutcome.error.message, "connection dropped");
   });
 });

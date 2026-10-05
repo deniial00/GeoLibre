@@ -5,8 +5,10 @@ import {
   type MssqlAuthMethod,
   type MssqlTableInfo,
 } from "@geolibre/processing";
+import { useAppStore } from "@geolibre/core";
 import type en from "../../../../i18n/locales/en.json";
 import { Button, Input, Label, Select } from "@geolibre/ui";
+import { Trash2 } from "lucide-react";
 import { useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
@@ -23,10 +25,13 @@ import {
   disconnectMssqlProfileSession,
   openMssqlSession,
   releaseMssqlSession,
+  forgetMssqlProfile,
+  discardMssqlProfileSession,
   requiredMssqlSecret,
   resolveMssqlSecret,
   withMssqlSession,
 } from "../../../../lib/mssql-sessions";
+import { rememberMssqlLoadedRows } from "../../../../lib/mssql-writeback";
 import { postgisFeatureKeys } from "../../../../lib/postgis-connections";
 import { postgisTableKey, postgisTableLabel } from "../../../../lib/postgis-table-selection";
 import { isDesktopRuntime, isWindows } from "../../../../lib/is-mobile";
@@ -84,6 +89,7 @@ export function MssqlSource({ initialMssql }: MssqlSourceProps) {
   const [tables, setTables] = useState<MssqlTableInfo[]>([]);
   const [selectedTableKey, setSelectedTableKey] = useState("");
   const [selectedGeometryColumn, setSelectedGeometryColumn] = useState("");
+  const [profileEvictionNotice, setProfileEvictionNotice] = useState<string | null>(null);
   const [status, setStatus] = useState<string | null>(null);
   const [activeProfileId, setActiveProfileId] = useState("");
   const listRequestRef = useRef(0);
@@ -151,6 +157,14 @@ export function MssqlSource({ initialMssql }: MssqlSourceProps) {
       setAccessToken("");
     });
   };
+  const forgetSelectedProfile = () => {
+    if (!selectedSaved) return;
+    const name = mssqlConnectionLabel(selectedSaved, t);
+    if (!window.confirm(t("addData.mssql.forgetConnectionConfirm", { name }))) return;
+    setSavedProfiles(forgetMssqlProfile(selectedSaved.id));
+    setProfileEvictionNotice(null);
+    changeSavedProfile("");
+  };
 
   const handleConnect = async () => {
     const requestToken = ++listRequestRef.current;
@@ -160,6 +174,7 @@ export function MssqlSource({ initialMssql }: MssqlSourceProps) {
     }
     source.setError(null);
     setStatus(null);
+    setProfileEvictionNotice(null);
     setTables([]);
     setSelectedTableKey("");
     setSelectedGeometryColumn("");
@@ -244,14 +259,26 @@ export function MssqlSource({ initialMssql }: MssqlSourceProps) {
         releaseMssqlSession(id, openedSessionId);
         return;
       }
-      setSavedProfiles(
-        rememberMssqlConnection(
-          profile,
-          resolved.password || resolved.clientSecret
-            ? { password: resolved.password, clientSecret: resolved.clientSecret }
-            : null,
-        ),
+      const remembered = rememberMssqlConnection(
+        profile,
+        resolved.password || resolved.clientSecret
+          ? { password: resolved.password, clientSecret: resolved.clientSecret }
+          : null,
       );
+      for (const evicted of remembered.evictedProfiles) {
+        discardMssqlProfileSession(evicted.id);
+      }
+      setSavedProfiles(remembered.profiles);
+      if (remembered.evictedProfiles.length > 0) {
+        setProfileEvictionNotice(
+          t("addData.mssql.profileEvicted", {
+            count: remembered.evictedProfiles.length,
+            names: remembered.evictedProfiles
+              .map((item) => mssqlConnectionLabel(item, t))
+              .join(", "),
+          }),
+        );
+      }
       setSelectedSavedId(id);
       setActiveProfileId(id);
       setTables(listed);
@@ -343,24 +370,45 @@ export function MssqlSource({ initialMssql }: MssqlSourceProps) {
           featureCount: result.feature_count,
           sourceKind: "mssql-table",
           mssqlConnectionId: activeProfileId,
-          mssqlConnectionLabel: mssqlConnectionLabel(savedProfile),
+          mssqlConnectionLabel: mssqlConnectionLabel(savedProfile, t),
           mssqlSchema: result.schema,
           mssqlTable: result.table,
           mssqlPrimaryKey: result.primary_key,
           mssqlGeometryColumn: result.geometry_column,
           mssqlColumnType: result.column_type,
           mssqlSrid: result.srid,
+          mssqlPrimaryKeyColumns: result.primary_key_columns,
+          mssqlMixedGeometry: result.mixed_geometry,
+          mssqlMixedSrid: result.mixed_srid,
           mssqlBaselineKeys: baselineKeys,
         },
         { geojson: result.geojson },
       ),
       geojson: result.geojson,
     };
+    if (result.primary_key) {
+      rememberMssqlLoadedRows(
+        layer.id,
+        useAppStore.getState().projectGeneration,
+        result.primary_key,
+        result.geojson,
+      );
+    }
     source.addAndClose(layer, { fit: true });
   });
 
   const savedSecret = selectedSavedId ? savedMssqlSecret(selectedSavedId) : undefined;
   const label = (key: MssqlLabelKey): string => t(`addData.mssql.${key}`);
+  const geometryLabel = (table: MssqlTableInfo): string => {
+    const geometryType =
+      table.geometry_types.length > 1 ? table.geometry_types.join(" / ") : table.geometry_type;
+    const srid = table.mixed_srid
+      ? label("mixedSrids")
+      : table.srid === 0
+        ? label("sridUnknown")
+        : `EPSG:${table.srid}`;
+    return `${table.geometry_column} (${geometryType}, ${table.column_type}, ${srid})`;
+  };
   return (
     <AddDataSourceForm
       layerName={source.layerName}
@@ -378,20 +426,35 @@ export function MssqlSource({ initialMssql }: MssqlSourceProps) {
           </p>
         ) : null}
         <p className="text-xs text-muted-foreground">{t("addData.mssql.editableNotice")}</p>
-        <div className="space-y-1.5">
-          <Label htmlFor="mssql-saved">{label("savedConnection")}</Label>
-          <Select
-            id="mssql-saved"
-            value={selectedSavedId}
-            onChange={(event) => changeSavedProfile(event.target.value)}
-          >
-            <option value="">{label("selectSavedConnection")}</option>
-            {savedProfiles.map((item) => (
-              <option key={item.id} value={item.id}>
-                {mssqlConnectionLabel(item)}
-              </option>
-            ))}
-          </Select>
+        <div className="flex items-end gap-2">
+          <div className="min-w-0 flex-1 space-y-1.5">
+            <Label htmlFor="mssql-saved">{label("savedConnection")}</Label>
+            <Select
+              id="mssql-saved"
+              value={selectedSavedId}
+              onChange={(event) => changeSavedProfile(event.target.value)}
+            >
+              <option value="">{label("selectSavedConnection")}</option>
+              {savedProfiles.map((item) => (
+                <option key={item.id} value={item.id}>
+                  {mssqlConnectionLabel(item, t)}
+                </option>
+              ))}
+            </Select>
+          </div>
+          {selectedSaved ? (
+            <Button
+              type="button"
+              variant="outline"
+              size="icon"
+              title={label("forgetConnection")}
+              aria-label={label("forgetConnection")}
+              disabled={source.isSubmitting}
+              onClick={forgetSelectedProfile}
+            >
+              <Trash2 className="h-4 w-4" aria-hidden="true" />
+            </Button>
+          ) : null}
         </div>
         <div className="grid gap-3 sm:grid-cols-2">
           <div className="space-y-1.5">
@@ -412,7 +475,7 @@ export function MssqlSource({ initialMssql }: MssqlSourceProps) {
               onChange={(event) => changeField(() => setPort(event.target.value))}
             />
           </div>
-          <div className="space-y-1.5">
+          <div className="space-y-1.5 sm:col-span-2">
             <Label htmlFor="mssql-database">{label("database")}</Label>
             <Input
               id="mssql-database"
@@ -420,7 +483,7 @@ export function MssqlSource({ initialMssql }: MssqlSourceProps) {
               onChange={(event) => changeField(() => setDatabase(event.target.value))}
             />
           </div>
-          <div className="space-y-1.5">
+          <div className="space-y-1.5 sm:col-span-2">
             <Label htmlFor="mssql-auth">{label("authMethod")}</Label>
             <Select
               id="mssql-auth"
@@ -574,6 +637,11 @@ export function MssqlSource({ initialMssql }: MssqlSourceProps) {
           {label("connect")}
         </Button>
         {status ? <p className="text-xs text-muted-foreground">{status}</p> : null}
+        {profileEvictionNotice ? (
+          <p role="status" className="text-xs text-amber-700 dark:text-amber-300">
+            {profileEvictionNotice}
+          </p>
+        ) : null}
         {tables.length > 0 ? (
           <div className="space-y-1.5">
             <Label htmlFor="mssql-table">{label("editableTable")}</Label>
@@ -592,12 +660,17 @@ export function MssqlSource({ initialMssql }: MssqlSourceProps) {
               {uniqueTables.map((table) => {
                 const key = postgisTableKey(table);
                 const title = postgisTableLabel(table);
-                const optionLabel = `${title} — ${table.geometry_column} (${table.geometry_type}, ${table.column_type}, EPSG:${table.srid})`;
+                const optionLabel = `${title} — ${geometryLabel(table)}`;
+                const readOnlyLabel =
+                  table.primary_key_columns.length > 1
+                    ? t("addData.mssql.tableReadOnlyComposite", {
+                        table: title,
+                        columns: table.primary_key_columns.join(", "),
+                      })
+                    : t("addData.mssql.tableReadOnly", { table: title });
                 return (
                   <option key={key} value={key} disabled={!table.primary_key}>
-                    {table.primary_key
-                      ? optionLabel
-                      : t("addData.mssql.tableReadOnly", { table: title })}
+                    {table.primary_key ? optionLabel : `${readOnlyLabel} — ${geometryLabel(table)}`}
                   </option>
                 );
               })}
@@ -614,8 +687,7 @@ export function MssqlSource({ initialMssql }: MssqlSourceProps) {
             >
               {selectedGeometries.map((table) => (
                 <option key={table.geometry_column} value={table.geometry_column}>
-                  {table.geometry_column} ({table.geometry_type}, {table.column_type}, EPSG:
-                  {table.srid})
+                  {geometryLabel(table)}
                 </option>
               ))}
             </Select>
