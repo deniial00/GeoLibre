@@ -714,7 +714,7 @@ describe("project parsing", () => {
       id: "wfs-reference",
       name: "WFS",
       geojson: featureCollection,
-      source: { type: "geojson", url: "https://example.test/wfs?request=GetFeature&bbox=1,2,3,4" },
+      source: { type: "geojson", url: "https://example.test/wfs?request=GetFeature&bbox=1,2,3,4&count=25000" },
       metadata: { sourceKind: "wfs-getfeature", featureCount: 1 },
       connection: {
         layerId: "wfs-reference",
@@ -741,7 +741,9 @@ describe("project parsing", () => {
     assert.equal(project.layers[0].source.url, layer.source.url);
     assert.deepEqual(project.layers[0].style, layer.style);
     assert.deepEqual(project.layers[0].connection, layer.connection);
-    assert.equal(parseProject(serializeProject(project)).layers[0].geojson, undefined);
+    const reopened = parseProject(serializeProject(project)).layers[0];
+    assert.equal(reopened.geojson, undefined);
+    assert.equal(new URL(String(reopened.source.url)).searchParams.get("count"), "25000");
     const embeddedEdit = projectFromStore({
       ...state,
       layers: [{ ...layer, source: { type: "geojson" } }],

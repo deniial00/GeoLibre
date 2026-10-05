@@ -47,6 +47,11 @@ export async function addPluginWfsLayer(
         : "";
   if (!version) throw new Error("addWfsLayer: options.version must be a non-empty string.");
   validateBbox(options?.bbox);
+
+  const maxFeatures = options?.maxFeatures === undefined ? 1000 : options.maxFeatures;
+  if (typeof maxFeatures !== "number" || !Number.isSafeInteger(maxFeatures) || maxFeatures < 1) {
+    throw new Error("addWfsLayer: options.maxFeatures must be a positive integer.");
+  }
   const metadata = pluginLayerMetadata("addWfsLayer", options?.metadata);
 
   const projectGeneration = useAppStore.getState().projectGeneration;
@@ -61,7 +66,7 @@ export async function addPluginWfsLayer(
       version,
       outputFormat: "application/json",
       srsName: "EPSG:4326",
-      maxFeatures: "1000",
+      maxFeatures: String(maxFeatures),
       bbox: options?.bbox,
     },
     { useWfsProxy: true },

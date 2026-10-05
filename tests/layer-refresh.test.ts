@@ -435,12 +435,13 @@ describe("WFS bounding-box requests", () => {
     const layer = makeLayer({
       source: {
         type: "geojson",
-        url: "https://geo.example.com/WFSServer?service=WFS&request=GetFeature&bbox=40%2C10%2C42%2C12%2Curn%3Aogc%3Adef%3Acrs%3AEPSG%3A%3A4326&count=1000",
+        url: "https://geo.example.com/WFSServer?service=WFS&request=GetFeature&bbox=40%2C10%2C42%2C12%2Curn%3Aogc%3Adef%3Acrs%3AEPSG%3A%3A4326&count=25000",
       },
       metadata: { sourceKind: "wfs-getfeature" },
     });
     const result = await refreshGeoJsonLayer(layer);
     assert.equal(requested?.searchParams.get("bbox"), "40,10,42,12,urn:ogc:def:crs:EPSG::4326");
+    assert.equal(requested?.searchParams.get("count"), "25000");
     assert.equal(result.geojson.features[0].properties?.revision, 2);
   });
 });

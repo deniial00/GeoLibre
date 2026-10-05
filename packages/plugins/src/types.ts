@@ -171,6 +171,13 @@ export interface GeoLibreWfsLayerOptions {
    * `east` throws instead of being read as a Pacific-spanning box.
    */
   bbox?: [number, number, number, number];
+
+  /**
+   * Maximum number of features to request, sent as `count` (WFS 2.x) or
+   * `maxFeatures` (earlier versions). A positive integer; defaults to 1000.
+   * Stored in the layer's request URL, so refresh and reopened projects use it.
+   */
+  maxFeatures?: number;
   /**
    * Provenance fields merged into the new layer's `metadata`, as for
    * {@link GeoLibreTileLayerOptions.metadata}. GeoLibre's own WFS request keys

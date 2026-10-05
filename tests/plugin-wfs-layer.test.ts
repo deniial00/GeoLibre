@@ -49,6 +49,29 @@ describe("addPluginWfsLayer", () => {
     assert.equal(request.searchParams.get("typeNames"), "ns:roads");
   });
 
+  it("sends and keeps a plugin-chosen maxFeatures (#2951)", async () => {
+    globalThis.fetch = (async () => new Response(JSON.stringify(JSON_FEATURES))) as typeof fetch;
+    const v2Id = await addPluginWfsLayer("Limited WFS 2", {
+      url: "https://8.8.8.8/wfs",
+      typeName: "ns:roads",
+      maxFeatures: 25000,
+    });
+    const v2Layer = useAppStore.getState().layers.find((candidate) => candidate.id === v2Id)!;
+    const v2Request = new URL(String(v2Layer.source.url));
+    assert.equal(v2Request.searchParams.get("count"), "25000");
+
+    const olderId = await addPluginWfsLayer("Limited WFS 1", {
+      url: "https://8.8.8.8/wfs",
+      typeName: "ns:roads",
+      version: "1.1.0",
+      maxFeatures: 7,
+    });
+    const olderLayer = useAppStore.getState().layers.find((candidate) => candidate.id === olderId)!;
+    const olderRequest = new URL(String(olderLayer.source.url));
+    assert.equal(olderRequest.searchParams.get("maxFeatures"), "7");
+    assert.equal(olderRequest.searchParams.has("count"), false);
+  });
+
   it("merges plugin metadata under GeoLibre's own keys (#2855)", async () => {
     globalThis.fetch = (async () => new Response(JSON.stringify(JSON_FEATURES))) as typeof fetch;
     const id = await addPluginWfsLayer("Catalogued", {
@@ -92,6 +115,10 @@ describe("addPluginWfsLayer", () => {
       [{ url: "file:///x", typeName: "x" }, /absolute HTTP\(S\) URL/],
       [{ url: "https://8.8.8.8", typeName: " " }, /options.typeName must be a non-empty string/],
       [{ url: "https://8.8.8.8", typeName: "x", bbox: [10, 40, 12, 91] }, /options.bbox/],
+      [{ url: "https://8.8.8.8", typeName: "x", maxFeatures: 0 }, /options.maxFeatures must be a positive integer/],
+      [{ url: "https://8.8.8.8", typeName: "x", maxFeatures: -5 }, /options.maxFeatures must be a positive integer/],
+      [{ url: "https://8.8.8.8", typeName: "x", maxFeatures: 1.5 }, /options.maxFeatures must be a positive integer/],
+      [{ url: "https://8.8.8.8", typeName: "x", maxFeatures: "500" }, /options.maxFeatures must be a positive integer/],
     ] as const) {
       await assert.rejects(addPluginWfsLayer("invalid", options as never), message);
     }
