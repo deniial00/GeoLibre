@@ -324,10 +324,23 @@ def _install_session(monkeypatch, connection):
 def test_tables_closes_connection_and_tolerates_probe_error(monkeypatch):
     conn = FakeConnection()
     conn.fetchall_results = [
-        [("dbo", "listed", "geom", "geometry"), ("dbo", "blocked", "geom", "geometry")],
-        [("dbo", "listed", "gid", 1)],
+        [
+            ("dbo", "listed", "geom", "geometry"),
+            ("dbo", "composite", "geom", "geometry"),
+            ("dbo", "blocked", "geom", "geometry"),
+            ("dbo", "empty", "geog", "geography"),
+            ("dbo", "srid_zero", "geom", "geometry"),
+        ],
+        [
+            ("dbo", "listed", "gid", 1),
+            ("dbo", "composite", "tenant_id", 1),
+            ("dbo", "composite", "parcel_id", 2),
+        ],
+        [(3857, "Point", 2), (4326, "MultiPolygon", 1), (3857, "Point", 1)],
+        [(4326, "MultiPolygon", 1)],
+        [],
+        [(0, "Point", 1)],
     ]
-    conn.fetchone_results = [(3857, "Point")]
 
     def hook(sql, params):
         if "[blocked]" in sql:
@@ -335,11 +348,79 @@ def test_tables_closes_connection_and_tolerates_probe_error(monkeypatch):
 
     conn.execute_hook = hook
     tables = mssql.mssql_tables(_install_session(monkeypatch, conn))["tables"]
+    by_table = {table["table"]: table for table in tables}
     assert conn.closed
-    assert [t["table"] for t in tables] == ["listed", "blocked"]
-    assert tables[0]["primary_key"] == "gid" and tables[0]["srid"] == 3857
-    # A denied probe still lists the table, with the default SRID and type.
-    assert (tables[1]["srid"], tables[1]["geometry_type"]) == (0, "Unknown")
+    assert by_table["listed"]["primary_key"] == "gid"
+    assert by_table["listed"]["primary_key_columns"] == ["gid"]
+    assert by_table["listed"]["srid"] == 3857
+    assert by_table["listed"]["mixed_srid"] is True
+    assert by_table["listed"]["mixed_geometry"] is True
+    assert by_table["listed"]["geometry_types"] == ["Point", "MultiPolygon"]
+    assert by_table["composite"]["primary_key"] is None
+    assert by_table["composite"]["primary_key_columns"] == ["tenant_id", "parcel_id"]
+    assert by_table["composite"]["geometry_types"] == ["MultiPolygon"]
+    # Failed probes stay unknown; successful empty probes default to WGS84.
+    assert (by_table["blocked"]["srid"], by_table["blocked"]["geometry_type"]) == (0, "Unknown")
+    assert (by_table["empty"]["srid"], by_table["empty"]["geometry_type"]) == (4326, "Unknown")
+    assert by_table["srid_zero"]["srid"] == 0
+
+
+def test_table_info_reports_composite_key_and_defaults_empty_srid():
+    conn = FakeConnection()
+    conn.fetchone_results = [(41,)]
+    conn.fetchall_results = [
+        [
+            ("tenant_id", "int", False, 0, False),
+            ("parcel_id", "int", False, 0, False),
+            ("shape", "geometry", False, 0, False),
+        ],
+        [],
+        [("tenant_id",), ("parcel_id",)],
+    ]
+
+    info = mssql._table_info(conn.cursor(), "dbo", "parcels")
+
+    assert info["primary_key"] is None
+    assert info["primary_key_columns"] == ["tenant_id", "parcel_id"]
+    assert info["srid"] == 4326
+    assert info["geometry_type"] == "Unknown"
+    assert info["geometry_types"] == []
+
+
+def test_read_decodes_each_geometry_with_its_own_srid(monkeypatch):
+    conn = FakeConnection()
+    request = _install_session(monkeypatch, conn)
+    conn.fetchall_results = [[(b"first", 4326, 1), (b"second", 3857, 2)]]
+    decoded_srids = []
+    monkeypatch.setattr(
+        mssql,
+        "_table_info",
+        lambda *args: {
+            "primary_key": "id",
+            "primary_key_columns": ["id"],
+            "geometry_column": "geom",
+            "column_type": "geometry",
+            "srid": 4326,
+            "mixed_geometry": False,
+            "mixed_srid": True,
+            "columns": ["id"],
+        },
+    )
+    monkeypatch.setattr(
+        mssql,
+        "_wkb_to_geojson",
+        lambda _wkb, srid, _column_type: (
+            decoded_srids.append(srid) or {"type": "Point", "coordinates": [0, 0]}
+        ),
+    )
+
+    result = mssql.mssql_read(
+        mssql.MssqlReadRequest(session_id=request.session_id, table="parcels")
+    )
+
+    assert decoded_srids == [4326, 3857]
+    assert result["mixed_srid"] is True
+    assert [feature["id"] for feature in result["geojson"]["features"]] == [1, 2]
 
 
 def test_read_closes_connection_on_error(monkeypatch):
@@ -371,6 +452,145 @@ def test_write_rolls_back_and_closes_on_error(monkeypatch):
     assert conn.rolled_back and conn.closed
 
 
+def test_write_allows_attribute_edit_on_srid_zero_table(monkeypatch):
+    conn = FakeConnection()
+    request = _install_session(monkeypatch, conn)
+    geometry = {"type": "Point", "coordinates": [0, 0]}
+    conn.fetchone_results = [(1,)]
+    conn.fetchall_results = [[(1, b"wkb", 0, 1, "North", 10)]]
+    statements = []
+    conn.execute_hook = lambda sql, params: statements.append(sql)
+    monkeypatch.setattr(mssql, "_wkb_to_geojson", lambda *args: geometry)
+    monkeypatch.setattr(
+        mssql,
+        "_table_info",
+        lambda *args: {
+            "primary_key": "gid",
+            "primary_key_columns": ["gid"],
+            "geometry_column": "geom",
+            "column_type": "geometry",
+            "srid": 0,
+            "mixed_srid": False,
+            "pk_is_generated": True,
+            "pk_is_identity": True,
+            "columns": ["gid", "name", "population"],
+            "writable": ["name", "population"],
+            "column_types": {"gid": "int", "name": "nvarchar", "population": "int"},
+        },
+    )
+
+    result = mssql.mssql_write(
+        mssql.MssqlWriteRequest(
+            session_id=request.session_id,
+            table="parcels",
+            baseline_keys=[1],
+            geojson={
+                "type": "FeatureCollection",
+                "features": [
+                    {
+                        "type": "Feature",
+                        "id": 1,
+                        "geometry": geometry,
+                        "properties": {"gid": 1, "name": "North", "population": 11},
+                    }
+                ],
+            },
+        )
+    )
+
+    assert result["updated"] == 1
+    assert conn.committed
+    assert any(sql.startswith("UPDATE") for sql in statements)
+
+
+@pytest.mark.parametrize(
+    ("srid", "mixed_srid", "detail"),
+    [
+        (0, False, "native SRID is unknown"),
+        (4326, True, "rows use mixed SRIDs"),
+    ],
+)
+def test_write_rejects_geometry_insert_with_unsafe_srid(monkeypatch, srid, mixed_srid, detail):
+    conn = FakeConnection()
+    request = _install_session(monkeypatch, conn)
+    conn.fetchone_results = [(0,)]
+    conn.fetchall_results = [[]]
+    statements = []
+    conn.execute_hook = lambda sql, params: statements.append(sql)
+    monkeypatch.setattr(
+        mssql,
+        "_table_info",
+        lambda *args: {
+            "primary_key": "gid",
+            "primary_key_columns": ["gid"],
+            "geometry_column": "geom",
+            "column_type": "geometry",
+            "srid": srid,
+            "mixed_srid": mixed_srid,
+            "pk_is_generated": False,
+            "pk_is_identity": False,
+            "columns": ["gid"],
+            "writable": [],
+            "column_types": {"gid": "int"},
+        },
+    )
+
+    with pytest.raises(HTTPException) as exc:
+        mssql.mssql_write(
+            mssql.MssqlWriteRequest(
+                session_id=request.session_id,
+                schema_name="dbo",
+                table="parcels",
+                geojson={
+                    "type": "FeatureCollection",
+                    "features": [
+                        {
+                            "type": "Feature",
+                            "id": 1,
+                            "geometry": {"type": "Point", "coordinates": [0, 0]},
+                            "properties": {"gid": 1},
+                        }
+                    ],
+                },
+            )
+        )
+
+    assert exc.value.status_code == 400
+    assert detail in exc.value.detail
+    assert conn.rolled_back and not conn.committed and conn.closed
+    assert not any(sql.startswith("INSERT") for sql in statements)
+
+
+def test_write_rejects_composite_primary_key(monkeypatch):
+    conn = FakeConnection()
+    request = _install_session(monkeypatch, conn)
+    monkeypatch.setattr(
+        mssql,
+        "_table_info",
+        lambda *args: {
+            "primary_key": None,
+            "primary_key_columns": ["tenant_id", "parcel_id"],
+        },
+    )
+
+    with pytest.raises(HTTPException) as exc:
+        mssql.mssql_write(
+            mssql.MssqlWriteRequest(
+                session_id=request.session_id,
+                schema_name="dbo",
+                table="parcels",
+                geojson={
+                    "type": "FeatureCollection",
+                    "features": [{"type": "Feature", "properties": {}, "geometry": None}],
+                },
+            )
+        )
+
+    assert exc.value.status_code == 400
+    assert "composite primary key (tenant_id, parcel_id)" in exc.value.detail
+    assert conn.rolled_back and not conn.committed and conn.closed
+
+
 def test_connect_closes_connection_when_probe_fails(monkeypatch):
     conn = FakeConnection()
     conn.execute_hook = _fail
@@ -389,6 +609,78 @@ def test_connect_closes_connection_when_probe_fails(monkeypatch):
         mssql.mssql_connect(req)
     assert exc.value.status_code == 400
     assert conn.closed
+
+
+@pytest.mark.parametrize(
+    ("failure", "host", "expected"),
+    [
+        (
+            "dns",
+            "no-such-host.invalid",
+            "The host name 'no-such-host.invalid' could not be resolved",
+        ),
+        ("port", "127.0.0.1", "Nothing is accepting connections at 127.0.0.1:1433"),
+    ],
+)
+def test_open_connection_distinguishes_dns_and_port_failures(monkeypatch, failure, host, expected):
+    class FailedDriver:
+        @staticmethod
+        def connect(*args, **kwargs):
+            raise RuntimeError("ODBC driver connect failed")
+
+    monkeypatch.setattr(mssql, "_import_pyodbc", lambda: FailedDriver)
+    if failure == "dns":
+
+        def fail_resolution(*args, **kwargs):
+            raise mssql.socket.gaierror("name not found")
+
+        monkeypatch.setattr(mssql.socket, "getaddrinfo", fail_resolution)
+        monkeypatch.setattr(
+            mssql.socket,
+            "create_connection",
+            lambda *args, **kwargs: pytest.fail("TCP probe must not follow a DNS failure"),
+        )
+    else:
+        monkeypatch.setattr(mssql.socket, "getaddrinfo", lambda *args, **kwargs: [])
+
+        def refuse_connection(*args, **kwargs):
+            raise ConnectionRefusedError("connection refused")
+
+        monkeypatch.setattr(mssql.socket, "create_connection", refuse_connection)
+
+    session = mssql._Session("cs", None, None, (), time.monotonic(), host=host, port=1433)
+    with pytest.raises(HTTPException) as exc:
+        mssql._open_connection(session)
+    assert expected in exc.value.detail
+    assert "Driver message: ODBC driver connect failed" in exc.value.detail
+
+
+def test_open_connection_reports_malformed_host_label_as_unresolvable(monkeypatch):
+    class FailedDriver:
+        @staticmethod
+        def connect(*args, **kwargs):
+            raise RuntimeError("ODBC driver connect failed")
+
+    monkeypatch.setattr(mssql, "_import_pyodbc", lambda: FailedDriver)
+    # Real IDNA encoding rejects the empty label before any DNS traffic.
+    session = mssql._Session(
+        "cs", None, None, (), time.monotonic(), host="db..example.com", port=1433
+    )
+    with pytest.raises(HTTPException) as exc:
+        mssql._open_connection(session)
+    assert exc.value.status_code == 400
+    assert "The host name 'db..example.com' could not be resolved" in exc.value.detail
+
+
+def test_named_instance_skips_fixed_tcp_port_probe(monkeypatch):
+    monkeypatch.setattr(mssql.socket, "getaddrinfo", lambda *args, **kwargs: [])
+    monkeypatch.setattr(
+        mssql.socket,
+        "create_connection",
+        lambda *args, **kwargs: pytest.fail("named instances use SQL Browser port discovery"),
+    )
+
+    assert mssql._unreachable_reason("db.example", "SQLEXPRESS", 1433) is None
 
 
 def test_write_rollback_failure_keeps_original_error(monkeypatch):
@@ -540,6 +832,12 @@ def live_db(monkeypatch):
         "IF OBJECT_ID('dbo.geolibre_writeback_nopk','U') IS NOT NULL "
         "DROP TABLE dbo.geolibre_writeback_nopk"
     )
+    for name in (
+        "geolibre_writeback_composite",
+        "geolibre_writeback_mixed",
+        "geolibre_writeback_empty",
+    ):
+        cur.execute(f"IF OBJECT_ID('dbo.{name}','U') IS NOT NULL DROP TABLE dbo.{name}")
     # `seen`/`blob` guard the write path against re-binding json_safe strings:
     # SQL Server rejects a hex string into varbinary (257) and a six-digit
     # microsecond string into datetime2 (241), so an unchanged save must fail
@@ -568,6 +866,25 @@ def live_db(monkeypatch):
         "('Knoxville',geography::Point(35.9606,-83.9207,4326))"
     )
     cur.execute("CREATE TABLE dbo.geolibre_writeback_nopk (name nvarchar(20), geom geometry)")
+    cur.execute(
+        "CREATE TABLE dbo.geolibre_writeback_composite (tenant_id int, parcel_id int, "
+        "geom geometry, PRIMARY KEY (tenant_id, parcel_id))"
+    )
+    cur.execute(
+        "INSERT INTO dbo.geolibre_writeback_composite VALUES (1, 7, geometry::Point(1, 2, 4326))"
+    )
+    cur.execute(
+        "CREATE TABLE dbo.geolibre_writeback_mixed (id int IDENTITY PRIMARY KEY, geom geometry)"
+    )
+    cur.execute(
+        "INSERT INTO dbo.geolibre_writeback_mixed(geom) VALUES "
+        "(geometry::Point(-83, 35, 4326)), "
+        "(geometry::Point(-7000000, 4000000, 3857)), "
+        "(geometry::STGeomFromText('POLYGON ((0 0, 0 1, 1 1, 0 0))', 4326))"
+    )
+    cur.execute(
+        "CREATE TABLE dbo.geolibre_writeback_empty (id int IDENTITY PRIMARY KEY, geom geometry)"
+    )
     conn.commit()
     conn.close()
     try:
@@ -579,6 +896,9 @@ def live_db(monkeypatch):
             "geolibre_writeback_test",
             "geolibre_writeback_geog",
             "geolibre_writeback_nopk",
+            "geolibre_writeback_composite",
+            "geolibre_writeback_mixed",
+            "geolibre_writeback_empty",
         ):
             cur.execute(f"DROP TABLE dbo.{name}")
         conn.commit()
@@ -591,7 +911,42 @@ def test_live_tables_read_and_geography_axis_order(live_db):
     tables = mssql.mssql_tables(mssql.MssqlSessionRequest(session_id=live_db))["tables"]
     table = next(t for t in tables if t["table"] == "geolibre_writeback_test")
     assert (table["primary_key"], table["srid"], table["column_type"]) == ("gid", 3857, "geometry")
-    assert next(t for t in tables if t["table"] == "geolibre_writeback_nopk")["primary_key"] is None
+    assert table["primary_key_columns"] == ["gid"]
+    no_pk = next(t for t in tables if t["table"] == "geolibre_writeback_nopk")
+    assert no_pk["primary_key"] is None and no_pk["primary_key_columns"] == []
+    composite = next(t for t in tables if t["table"] == "geolibre_writeback_composite")
+    assert composite["primary_key"] is None
+    assert composite["primary_key_columns"] == ["tenant_id", "parcel_id"]
+    mixed = next(t for t in tables if t["table"] == "geolibre_writeback_mixed")
+    assert mixed["mixed_srid"] is True and mixed["mixed_geometry"] is True
+    mixed_read = mssql.mssql_read(
+        mssql.MssqlReadRequest(session_id=live_db, table="geolibre_writeback_mixed")
+    )
+    assert mixed_read["mixed_srid"] is True and mixed_read["mixed_geometry"] is True
+    empty = next(t for t in tables if t["table"] == "geolibre_writeback_empty")
+    assert (empty["srid"], empty["geometry_type"]) == (4326, "Unknown")
+    result = mssql.mssql_write(
+        mssql.MssqlWriteRequest(
+            session_id=live_db,
+            table="geolibre_writeback_empty",
+            geojson={
+                "type": "FeatureCollection",
+                "features": [
+                    {
+                        "type": "Feature",
+                        "geometry": {"type": "Point", "coordinates": [0, 0]},
+                        "properties": {},
+                    }
+                ],
+            },
+        )
+    )
+    assert result["inserted"] == 1
+    conn = mssql._open_connection(mssql._get_session(live_db))
+    cur = conn.cursor()
+    cur.execute("SELECT geom.STSrid FROM dbo.geolibre_writeback_empty")
+    assert cur.fetchone()[0] == 4326
+    conn.close()
     result = mssql.mssql_read(
         mssql.MssqlReadRequest(session_id=live_db, table="geolibre_writeback_test")
     )

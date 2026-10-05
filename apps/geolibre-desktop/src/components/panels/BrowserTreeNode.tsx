@@ -62,6 +62,8 @@ interface BrowserTreeNodeProps {
   onCancelRename: (id: string) => void;
   /** Delete a saved Layer Library entry (its trash icon). */
   onDeleteLibraryLayer: (node: BrowserNode) => void;
+  /** Forget a saved SQL Server profile (its trash icon). */
+  onForgetMssqlConnection: (node: BrowserNode) => void;
   /** Import a Layer Library JSON bundle (the My Data section's ⬆). */
   onImportLibrary: () => void;
   /** Export the Layer Library as a JSON bundle (the My Data section's ⬇). */
@@ -174,6 +176,7 @@ export function BrowserTreeNode({
   onCommitRename,
   onCancelRename,
   onDeleteLibraryLayer,
+  onForgetMssqlConnection,
   onImportLibrary,
   onExportLibrary,
 }: BrowserTreeNodeProps) {
@@ -331,6 +334,18 @@ export function BrowserTreeNode({
             <Trash2 className="h-3.5 w-3.5" />
           </button>
         ) : null}
+        {node.kind === "connection" && node.mssqlConnectionId ? (
+          <button
+            type="button"
+            className="me-1 shrink-0 rounded p-1 text-muted-foreground opacity-0 hover:bg-accent hover:text-accent-foreground focus:opacity-100 group-hover:opacity-100"
+            title={t("browser.forgetMssqlConnection", { name: node.label })}
+            aria-label={t("browser.forgetMssqlConnection", { name: node.label })}
+            tabIndex={node.id === activeRowId ? 0 : -1}
+            onClick={() => onForgetMssqlConnection(node)}
+          >
+            <Trash2 className="h-3.5 w-3.5" />
+          </button>
+        ) : null}
         {node.libraryImportExport ? (
           <>
             <button
@@ -434,6 +449,7 @@ export function BrowserTreeNode({
                 onCommitRename={onCommitRename}
                 onCancelRename={onCancelRename}
                 onDeleteLibraryLayer={onDeleteLibraryLayer}
+                onForgetMssqlConnection={onForgetMssqlConnection}
                 onImportLibrary={onImportLibrary}
                 onExportLibrary={onExportLibrary}
               />

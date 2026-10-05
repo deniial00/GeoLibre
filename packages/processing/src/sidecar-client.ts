@@ -1073,8 +1073,16 @@ export interface MssqlTableInfo {
   geometry_column: string;
   column_type: "geometry" | "geography";
   srid: number;
+  /** First geometry type in the bounded sample, or `Unknown`. */
   geometry_type: string;
+  /** Distinct sample types in probe order. */
+  geometry_types: string[];
+  mixed_geometry: boolean;
+  mixed_srid: boolean;
+  /** Single-column primary key; null when absent or composite. */
   primary_key: string | null;
+  /** Primary-key columns in key order; empty when the table has none. */
+  primary_key_columns: string[];
 }
 
 export interface ReadMssqlTableRequest {
@@ -1093,6 +1101,9 @@ export interface ReadMssqlTableResult {
   column_type: "geometry" | "geography";
   srid: number;
   primary_key: string | null;
+  primary_key_columns: string[];
+  mixed_geometry: boolean;
+  mixed_srid: boolean;
   feature_count: number;
 }
 

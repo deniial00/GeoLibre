@@ -73,7 +73,11 @@ export function fetchMssqlBrowserTables(
         status: "error",
         message:
           error instanceof MssqlReconnectRequiredError
-            ? t("addData.mssql.errorReconnectRequired")
+            ? t(
+                error.reason === "secret-missing"
+                  ? "addData.mssql.errorBrowserMissingSecret"
+                  : "addData.mssql.errorReconnectRequired",
+              )
             : errorMessage(error, t("addData.mssql.errorConnect")),
       });
     });

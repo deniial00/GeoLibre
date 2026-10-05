@@ -170,6 +170,10 @@ kepler.gl, see the [Comparison](comparison.md).
     - An in-browser PostGIS SQL engine via PGlite and an Apache Sedona spatial SQL engine
 - Multiple DuckDB SQL query-result layers with identify, selection, and attribute table support
 - **SQL Server write-back** in GeoLibre Desktop: save attribute and geometry edits, inserts, and deletions to the loaded table, scoped by its read baseline. Deleting every loaded feature preserves rows added outside that baseline.
+    - Geometry type and SRID metadata use a sample of at most 1,000 rows; a failed probe remains
+      unknown. Composite-primary-key tables are read-only. Non-null geometry inserts or changes
+      are refused when the sample shows mixed SRIDs or SRID 0; attribute-only edits remain
+      available. A successfully probed empty geometry table defaults new geometries to EPSG:4326.
     - Saves for one layer cannot overlap. A committed write with a failed reread, or a write whose result cannot be confirmed, blocks another save until manual Refresh restores database-assigned keys and the baseline. This recovery requirement survives project save and reopen.
     - Failed recovery reads retain local features, including when the saved refresh-failure policy says to clear them. A layer without a read baseline must be loaded again before saving.
     - Saved project metadata is not authenticated write authority: review the connection, table, and edits before saving a shared or hand-edited project; database permissions remain the authorization boundary.

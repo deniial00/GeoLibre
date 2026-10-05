@@ -4,6 +4,8 @@ import { MssqlSessionExpiredError, type ConnectMssqlRequest } from "@geolibre/pr
 import {
   MssqlReconnectRequiredError,
   disconnectMssqlProfileSession,
+  discardMssqlProfileSession,
+  forgetMssqlProfile,
   openMssqlSession,
   releaseMssqlSession,
   requiredMssqlSecret,
@@ -14,6 +16,7 @@ import {
 } from "../apps/geolibre-desktop/src/lib/mssql-sessions";
 import {
   MSSQL_CONNECTIONS_STORAGE_KEY,
+  readSavedMssqlConnections,
   rememberMssqlConnection,
   setKeychainMssqlSecrets,
   type MssqlConnectionProfile,
@@ -108,6 +111,131 @@ describe("MSSQL sessions", () => {
       resetMssqlSessions();
     }
   });
+  it("forgets saved credentials and disconnects the profile session", async () => {
+    const env = installStorage();
+    resetMssqlSessions();
+    setKeychainMssqlSecrets({ [profile.id]: { password: "saved" } });
+    rememberMssqlConnection(profile, null);
+    const disconnected: string[] = [];
+    const client = {
+      connect: async () => ({ session_id: "session-forgotten" }),
+      disconnect: async (sessionId: string) => {
+        disconnected.push(sessionId);
+      },
+      startSidecar: async () => {},
+    } as unknown as MssqlSessionClient;
+    try {
+      await openMssqlSession(profile, { password: "memory" }, client);
+      assert.deepEqual(
+        readSavedMssqlConnections().map((item) => item.id),
+        [profile.id],
+      );
+      assert.deepEqual(forgetMssqlProfile(profile.id, client), []);
+      assert.deepEqual(disconnected, ["session-forgotten"]);
+      assert.deepEqual(resolveMssqlSecret(profile.id, {}), {});
+      assert.deepEqual(readSavedMssqlConnections(), []);
+      let runCalled = false;
+      await assert.rejects(
+        withMssqlSession(
+          profile.id,
+          async () => {
+            runCalled = true;
+            return "unexpected";
+          },
+          client,
+        ),
+        (error: unknown) => {
+          assert.ok(error instanceof MssqlReconnectRequiredError);
+          assert.equal(error.reason, "profile-missing");
+          return true;
+        },
+      );
+      assert.equal(runCalled, false);
+    } finally {
+      resetMssqlSessions();
+      setKeychainMssqlSecrets({});
+      env.restore();
+    }
+  });
+  it("does not restore a session after the profile is forgotten mid-connect", async () => {
+    const env = installStorage();
+    resetMssqlSessions();
+    setKeychainMssqlSecrets({ [profile.id]: { password: "saved" } });
+    rememberMssqlConnection(profile, null);
+    let resolveConnect!: (result: { session_id: string }) => void;
+    let signalConnectStarted!: () => void;
+    const started = new Promise<void>((resolve) => {
+      signalConnectStarted = resolve;
+    });
+    const connectResult = new Promise<{ session_id: string }>((resolve) => {
+      resolveConnect = resolve;
+    });
+    const disconnected: string[] = [];
+    const client = {
+      connect: async () => {
+        signalConnectStarted();
+        return connectResult;
+      },
+      disconnect: async (sessionId: string) => {
+        disconnected.push(sessionId);
+      },
+      startSidecar: async () => {},
+    } as unknown as MssqlSessionClient;
+    try {
+      const pending = withMssqlSession(profile.id, async (sessionId) => sessionId, client);
+      await started;
+      forgetMssqlProfile(profile.id, client);
+      resolveConnect({ session_id: "forgotten-session" });
+      await assert.rejects(pending, MssqlReconnectRequiredError);
+      assert.deepEqual(disconnected, ["forgotten-session"]);
+      assert.deepEqual(readSavedMssqlConnections(), []);
+    } finally {
+      resetMssqlSessions();
+      setKeychainMssqlSecrets({});
+      env.restore();
+    }
+  });
+  it("disconnects and clears an evicted profile session", async () => {
+    const env = installStorage();
+    resetMssqlSessions();
+    setKeychainMssqlSecrets({});
+    const savedProfiles = Array.from({ length: 10 }, (_, index) => ({
+      ...profile,
+      id: `00000000-0000-4000-8000-${String(index + 1).padStart(12, "0")}`,
+    }));
+    for (const saved of savedProfiles) rememberMssqlConnection(saved, null);
+    const evicted = savedProfiles[0];
+    const disconnected: string[] = [];
+    const client = {
+      connect: async () => ({ session_id: "evicted-session" }),
+      disconnect: async (sessionId: string) => {
+        disconnected.push(sessionId);
+      },
+      startSidecar: async () => {},
+    } as unknown as MssqlSessionClient;
+    try {
+      await openMssqlSession(evicted, { password: "memory" }, client);
+      const remembered = rememberMssqlConnection(
+        { ...profile, id: "00000000-0000-4000-8000-000000000011" },
+        null,
+      );
+      assert.deepEqual(
+        remembered.evictedProfiles.map((item) => item.id),
+        [evicted.id],
+      );
+      discardMssqlProfileSession(evicted.id, client);
+      assert.deepEqual(disconnected, ["evicted-session"]);
+      assert.deepEqual(resolveMssqlSecret(evicted.id, {}), {});
+      assert.equal(
+        readSavedMssqlConnections().some((item) => item.id === evicted.id),
+        false,
+      );
+    } finally {
+      resetMssqlSessions();
+      setKeychainMssqlSecrets({});
+      env.restore();
+    }
+  });
 
   it("restores a saved credential and retries an expired session exactly once", async () => {
     const env = installStorage();
@@ -168,7 +296,11 @@ describe("MSSQL sessions", () => {
     try {
       await assert.rejects(
         withMssqlSession(profile.id, async () => "unused", client),
-        MssqlReconnectRequiredError,
+        (error: unknown) => {
+          assert.ok(error instanceof MssqlReconnectRequiredError);
+          assert.equal(error.reason, "secret-missing");
+          return true;
+        },
       );
       assert.equal(connections, 0);
     } finally {

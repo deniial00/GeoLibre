@@ -1,11 +1,13 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
+import type { TFunction } from "i18next";
 import i18next from "i18next";
 import {
   fetchMssqlBrowserTables,
   type MssqlBrowserLoaderDependencies,
   type MssqlBrowserLoads,
 } from "../apps/geolibre-desktop/src/lib/mssql-browser";
+import { MssqlReconnectRequiredError } from "../apps/geolibre-desktop/src/lib/mssql-sessions";
 
 const table = {
   schema: "dbo",
@@ -14,7 +16,11 @@ const table = {
   column_type: "geometry" as const,
   srid: 4326,
   geometry_type: "POLYGON",
+  geometry_types: ["POLYGON"],
+  mixed_geometry: false,
+  mixed_srid: false,
   primary_key: "id",
+  primary_key_columns: ["id"],
 };
 function dependencies(
   overrides: Partial<MssqlBrowserLoaderDependencies> = {},
@@ -102,5 +108,82 @@ describe("MSSQL Browser table loading", () => {
 
     assert.equal(fetched.has("profile"), false);
     assert.equal(state.loads["mssql:profile"]?.status, "error");
+  });
+  it("explains when a saved profile has no restorable credential", async () => {
+    const state = loadState();
+    const fetched = new Set<string>();
+    const translate = ((key: string) => key) as unknown as TFunction;
+    fetchMssqlBrowserTables(
+      "profile",
+      fetched,
+      state.set,
+      translate,
+      dependencies({
+        withSession: async () => {
+          throw new MssqlReconnectRequiredError(
+            "Reconnect to SQL Server in Add Data.",
+            "secret-missing",
+          );
+        },
+      }),
+    );
+    await nextTurn();
+
+    assert.equal(fetched.has("profile"), false);
+    const load = state.loads["mssql:profile"];
+    assert.ok(load?.status === "error");
+    assert.equal(load.message, "addData.mssql.errorBrowserMissingSecret");
+  });
+
+  for (const { scenario, message } of [
+    { scenario: "login", message: "Login failed for user 'sa'. (18456)" },
+    {
+      scenario: "reachability",
+      message:
+        "Could not connect to SQL Server: Nothing is accepting connections at h:1433. Driver message: connection timed out",
+    },
+  ]) {
+    it(`preserves SQL Server ${scenario} errors`, async () => {
+      const state = loadState();
+      const fetched = new Set<string>();
+      fetchMssqlBrowserTables(
+        "profile",
+        fetched,
+        state.set,
+        i18next.t,
+        dependencies({
+          withSession: async () => {
+            throw new Error(message);
+          },
+        }),
+      );
+      await nextTurn();
+
+      assert.equal(fetched.has("profile"), false);
+      assert.deepEqual(state.loads["mssql:profile"], { status: "error", message });
+    });
+  }
+
+  it("surfaces the SQL Server connection error and permits retry", async () => {
+    const state = loadState();
+    const fetched = new Set<string>();
+    fetchMssqlBrowserTables(
+      "profile",
+      fetched,
+      state.set,
+      i18next.t,
+      dependencies({
+        withSession: async () => {
+          throw new Error("SQL Server refused the connection");
+        },
+      }),
+    );
+    await nextTurn();
+
+    assert.equal(fetched.has("profile"), false);
+    assert.deepEqual(state.loads["mssql:profile"], {
+      status: "error",
+      message: "SQL Server refused the connection",
+    });
   });
 });

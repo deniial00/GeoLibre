@@ -1,4 +1,5 @@
 import type { MssqlAuthMethod } from "@geolibre/processing";
+import type { TFunction } from "i18next";
 import { credentialStorageLocation, queueCredentialChanges } from "./credential-store";
 
 export const MSSQL_CONNECTIONS_STORAGE_KEY = "geolibre.mssql.connections";
@@ -114,47 +115,96 @@ export function setMssqlKeychainWritable(value: boolean): void {
 export function savedMssqlSecret(id: string): MssqlStoredSecret | undefined {
   return secrets[id] ? { ...secrets[id] } : undefined;
 }
+export interface RememberedMssqlConnections {
+  profiles: MssqlConnectionProfile[];
+  evictedProfiles: MssqlConnectionProfile[];
+}
+
 export function rememberMssqlConnection(
   profile: MssqlConnectionProfile,
   secret: MssqlStoredSecret | null,
-): MssqlConnectionProfile[] {
-  if (typeof window === "undefined") return [];
+): RememberedMssqlConnections {
+  if (typeof window === "undefined") return { profiles: [], evictedProfiles: [] };
   const previousProfiles = readSavedMssqlConnections();
   const profiles = [
     persistedProfile(profile),
     ...previousProfiles.filter((p) => p.id !== profile.id),
   ].slice(0, MAX_SAVED_MSSQL_CONNECTIONS);
+  const retainedIds = new Set(profiles.map((item) => item.id));
+  const evictedProfiles = previousProfiles.filter((item) => !retainedIds.has(item.id));
   try {
     window.localStorage.setItem(MSSQL_CONNECTIONS_STORAGE_KEY, JSON.stringify(profiles));
   } catch {
     /* best effort */
   }
-  if (credentialStorageLocation() === "keychain" && writable) {
-    const previous = Object.fromEntries(
-      Object.entries(secrets).map(([id, value]) => [
-        mssqlConnectionAccount(id),
-        JSON.stringify(value),
-      ]),
-    );
-    const nextSecrets: Record<string, MssqlStoredSecret> = {};
-    for (const p of profiles) {
-      const selected = p.id === profile.id && secret ? secret : secrets[p.id];
-      if (selected) nextSecrets[p.id] = selected;
+  if (credentialStorageLocation() === "keychain") {
+    if (writable) {
+      const previous = Object.fromEntries(
+        Object.entries(secrets).map(([id, value]) => [
+          mssqlConnectionAccount(id),
+          JSON.stringify(value),
+        ]),
+      );
+      for (const item of evictedProfiles) {
+        const account = mssqlConnectionAccount(item.id);
+        previous[account] ??= JSON.stringify(secrets[item.id] ?? {});
+      }
+      const nextSecrets: Record<string, MssqlStoredSecret> = {};
+      for (const p of profiles) {
+        const selected = p.id === profile.id && secret ? secret : secrets[p.id];
+        if (selected) nextSecrets[p.id] = selected;
+      }
+      const next = Object.fromEntries(
+        Object.entries(nextSecrets).map(([id, value]) => [
+          mssqlConnectionAccount(id),
+          JSON.stringify(value),
+        ]),
+      );
+      secrets = nextSecrets;
+      void queueCredentialChanges(previous, next);
+    } else if (evictedProfiles.length > 0) {
+      const previous: Record<string, string> = {};
+      for (const item of evictedProfiles) {
+        const account = mssqlConnectionAccount(item.id);
+        previous[account] = JSON.stringify(secrets[item.id] ?? {});
+        delete secrets[item.id];
+      }
+      void queueCredentialChanges(previous, {});
     }
-    const next = Object.fromEntries(
-      Object.entries(nextSecrets).map(([id, value]) => [
-        mssqlConnectionAccount(id),
-        JSON.stringify(value),
-      ]),
-    );
-    secrets = nextSecrets;
-    void queueCredentialChanges(previous, next);
   }
   window.dispatchEvent(new Event(MSSQL_CONNECTIONS_CHANGED_EVENT));
+  return { profiles, evictedProfiles };
+}
+
+export function forgetMssqlConnection(id: string): MssqlConnectionProfile[] {
+  const profiles = readSavedMssqlConnections().filter((profile) => profile.id !== id);
+  if (typeof window !== "undefined") {
+    try {
+      window.localStorage.setItem(MSSQL_CONNECTIONS_STORAGE_KEY, JSON.stringify(profiles));
+    } catch {
+      /* best effort */
+    }
+    window.dispatchEvent(new Event(MSSQL_CONNECTIONS_CHANGED_EVENT));
+  }
+  if (credentialStorageLocation() === "keychain") {
+    const account = mssqlConnectionAccount(id);
+    // The empty-object sentinel queues deletion even when startup hydration did
+    // not expose the keychain value (e.g. a locked or unreadable keychain).
+    void queueCredentialChanges({ [account]: JSON.stringify(secrets[id] ?? {}) }, {});
+  }
+  delete secrets[id];
   return profiles;
 }
+
 export function mssqlConnectionLabel(
-  profile: Pick<MssqlConnectionProfile, "server" | "port" | "database" | "username">,
+  profile: Omit<MssqlConnectionProfile, "id">,
+  t: TFunction,
 ): string {
-  return `${profile.username ? `${profile.username}@` : ""}${profile.server}${profile.port === 1433 ? "" : `:${profile.port}`}/${profile.database}`;
+  const base = `${profile.username ? `${profile.username}@` : ""}${profile.server}${profile.port === 1433 ? "" : `:${profile.port}`}/${profile.database}`;
+  const details = [
+    profile.authMethod === "sql" ? "" : t(`addData.mssql.auth.${profile.authMethod}`),
+    profile.encrypt ? "" : t("addData.mssql.labelEncryptionDisabled"),
+    profile.trustServerCertificate ? t("addData.mssql.labelTrustCertificate") : "",
+  ].filter(Boolean);
+  return details.length ? `${base} — ${details.join(", ")}` : base;
 }

@@ -117,7 +117,7 @@ export function useBrowserTree(): BrowserTreeState {
       ? undefined
       : readSavedMssqlConnections().map((profile) => ({
           id: profile.id,
-          label: mssqlConnectionLabel(profile),
+          label: mssqlConnectionLabel(profile, t),
         }));
     // The Files section is desktop-only: directory reading uses the fs plugin's
     // readDir, which only works within the scope the OS folder dialog grants, so
