@@ -1070,6 +1070,7 @@ export function useLayerActions({
           // (no matching table column); surface that so the drop is not
           // silent behind a plain success toast.
           if (result.skipped_fields?.length) {
+            statusType = "warning";
             message = `${message} ${t("layers.saveEditsPostgisSkippedFields", {
               fields: result.skipped_fields.join(", "),
             })}`;

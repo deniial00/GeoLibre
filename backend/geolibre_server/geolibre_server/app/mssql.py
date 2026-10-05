@@ -356,9 +356,6 @@ def _open_connection(session: _Session) -> Any:
 class MssqlWriteRolledBack(HTTPException):
     """Write-back failed before commit and rollback succeeded; the table is unchanged."""
 
-    def __init__(self, status_code: int, detail: Any):
-        super().__init__(status_code=status_code, detail=detail)
-
 
 async def mssql_write_rolled_back_handler(
     request: Request, exc: MssqlWriteRolledBack
