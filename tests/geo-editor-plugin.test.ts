@@ -1,11 +1,14 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
+import type { Feature, FeatureCollection } from "geojson";
 import {
   GEO_EDITOR_PLUGIN_ID,
   hasMassingFeatures,
   isGeomanCommittedDisplayLayer,
   maplibreGeoEditorPlugin as plugin,
   sketchesStyleForMassing,
+  withCreatedSketch,
+  withoutSupersededSketchCopies,
 } from "../packages/plugins/src/plugins/maplibre-geo-editor";
 import { DEFAULT_LAYER_STYLE, type GeoLibreLayer } from "../packages/core/src";
 import { NULL_GEOMETRY } from "./helpers/null-geometry";
@@ -187,5 +190,68 @@ describe("maplibreGeoEditorPlugin", () => {
     layer.style = sketchesStyleForMassing(layer, massing);
     layer.style = sketchesStyleForMassing(layer, flat);
     assert.deepEqual(layer.style, original);
+  });
+
+  // The create callback's copy can lack the id Geoman gives the imported
+  // feature; storing both would duplicate the new sketch, while a separate
+  // sketch drawn on an existing one's coordinates must still be kept.
+  it("adds a created sketch only when the editor read does not already hold it", () => {
+    const geometry = { type: "Point" as const, coordinates: [1, 2] };
+    const created = { type: "Feature" as const, properties: {}, geometry };
+    const editorCopy = { ...created, id: "feature-1" };
+    const other = {
+      type: "Feature" as const,
+      id: "feature-0",
+      properties: {},
+      geometry: { type: "Point" as const, coordinates: [5, 5] },
+    };
+    const collection = (...features: Feature[]): FeatureCollection => ({
+      type: "FeatureCollection",
+      features,
+    });
+    const stored = collection(other);
+
+    // The read already has Geoman's copy: nothing to add.
+    assert.deepEqual(withCreatedSketch(collection(other, editorCopy), created, stored).features, [
+      other,
+      editorCopy,
+    ]);
+    // The read lags behind the create: add the callback copy.
+    assert.deepEqual(withCreatedSketch(collection(other), created, stored).features, [
+      other,
+      created,
+    ]);
+    // An older sketch already sits on the same coordinates and the read lags:
+    // the new one is still added rather than mistaken for the old one.
+    const older = { ...created, id: "feature-0" };
+    assert.deepEqual(withCreatedSketch(collection(older), created, collection(older)).features, [
+      older,
+      created,
+    ]);
+  });
+
+  // A sketch stored from the id-less callback copy while the read lagged must
+  // give way to Geoman's id-bearing copy on the next merge, without dropping a
+  // different sketch that sits on the same coordinates.
+  it("drops a stored callback copy once the editor holds it under an id", () => {
+    const collection = (...features: Feature[]): FeatureCollection => ({
+      type: "FeatureCollection",
+      features,
+    });
+    const geometry = { type: "Point" as const, coordinates: [1, 2] };
+    const callbackCopy: Feature = { type: "Feature", properties: {}, geometry };
+    const editorCopy: Feature = { ...callbackCopy, id: "feature-1" };
+    const older: Feature = { ...callbackCopy, id: "feature-0" };
+
+    assert.deepEqual(
+      withoutSupersededSketchCopies(collection(older, callbackCopy), collection(older, editorCopy))
+        .features,
+      [older],
+    );
+    // The editor has not caught up yet: the stored copy stays.
+    assert.deepEqual(
+      withoutSupersededSketchCopies(collection(older, callbackCopy), collection(older)).features,
+      [older, callbackCopy],
+    );
   });
 });

@@ -8129,6 +8129,7 @@
     "saveEditsMssqlRefreshRequired": "Refresh the layer successfully before saving edits again.",
     "saveEditsMssqlMissingBaseline": "This layer has no table-read baseline. Load the table again from Add Data > SQL Server before saving edits.",
     "saveEditsMssqlWriteUncertain": "The save outcome could not be confirmed. Use Refresh before saving again. {{error}}",
+    "saveEditsMssqlWriteRejected": "The table was not changed. Your edits are kept; fix the problem and save again. {{error}}",
     "typeBasemap": "basemap",
     "searchPlaces": "Search places",
     "searchPlacesPlaceholder": "Search layers, places, lat, lon, or H3 cell...",

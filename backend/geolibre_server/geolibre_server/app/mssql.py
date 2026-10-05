@@ -18,9 +18,10 @@ from concurrent.futures import TimeoutError as FutureTimeoutError
 from contextlib import contextmanager
 from dataclasses import dataclass
 from functools import lru_cache
-from typing import Any, Iterator, Literal, Optional
+from typing import Any, Iterator, Literal, Optional, Union
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
 from .db_common import (
@@ -219,6 +220,13 @@ class MssqlReadRequest(BaseModel):
     excluded_fields: list[str] = []
 
 
+class MssqlChangedColumns(BaseModel):
+    """Columns the client edited since load for one existing row."""
+
+    key: Union[int, str]
+    columns: list[str]
+
+
 class MssqlWriteRequest(BaseModel):
     session_id: str
     schema_name: str = "dbo"
@@ -227,6 +235,8 @@ class MssqlWriteRequest(BaseModel):
     geojson: dict
     baseline_keys: Optional[list] = None
     capabilities: Optional[dict[str, bool]] = None
+    unchanged_geometry_keys: Optional[list] = None
+    changed_columns: Optional[list[MssqlChangedColumns]] = None
 
 
 def _build_connection_string(
@@ -387,7 +397,20 @@ def _open_connection(session: _Session) -> Any:
         raise HTTPException(400, detail) from exc
 
 
-def _safe_rollback(conn: Any, secrets: tuple[str, ...]) -> None:
+class MssqlWriteRolledBack(HTTPException):
+    """Write-back failed before commit and rollback succeeded; the table is unchanged."""
+
+
+async def mssql_write_rolled_back_handler(
+    request: Request, exc: MssqlWriteRolledBack
+) -> JSONResponse:
+    return JSONResponse(
+        status_code=exc.status_code,
+        content={"detail": exc.detail, "rolled_back": True},
+    )
+
+
+def _safe_rollback(conn: Any, secrets: tuple[str, ...]) -> bool:
     """Roll back without masking the write error that triggered the rollback.
 
     A broken connection (lost network, query timeout) raises from rollback()
@@ -395,8 +418,10 @@ def _safe_rollback(conn: Any, secrets: tuple[str, ...]) -> None:
     """
     try:
         conn.rollback()
+        return True
     except Exception as exc:
         logger.warning("SQL Server rollback failed: %s", scrub_secrets(str(exc), secrets))
+        return False
 
 
 @contextmanager
@@ -952,6 +977,7 @@ def mssql_write(request: MssqlWriteRequest) -> dict[str, Any]:
     session = _get_session(request.session_id)
     inserted = updated = deleted = 0
     with _connection(session) as conn:
+        commit_attempted = False
         try:
             cur = conn.cursor()
             info = _table_info(cur, request.schema_name, request.table, request.geometry_column)
@@ -997,12 +1023,18 @@ def mssql_write(request: MssqlWriteRequest) -> dict[str, Any]:
                 baseline_keys=request.baseline_keys,
                 capabilities=request.capabilities,
                 table_label=f"{request.schema_name}.{request.table}",
+                unchanged_geometry_keys=request.unchanged_geometry_keys,
+                changed_columns=(
+                    {item.key: item.columns for item in request.changed_columns}
+                    if request.changed_columns is not None
+                    else None
+                ),
             )
-            # Updates always rewrite geometry here, so compare against the stored
-            # row to know whether the client actually changed it.
+            # Only updates that actually write geometry, and inserts, can store
+            # coordinates under an unsafe SRID; the UPDATE below emits the
+            # geometry SET under the same `geometry_changed` condition.
             needs_geometry_write = any(
-                change.geometry is not None and change.geometry != existing[change.key][0]
-                for change in diff.updates
+                change.geometry_changed and change.geometry is not None for change in diff.updates
             ) or any(change.geometry is not None for change in diff.inserts)
             if needs_geometry_write and info.get("mixed_srid", False):
                 raise HTTPException(
@@ -1022,12 +1054,14 @@ def mssql_write(request: MssqlWriteRequest) -> dict[str, Any]:
             expr = f"{info['column_type']}::STGeomFromWKB(?, {int(info['srid'])})"
             types = info["column_types"]
             for change in diff.updates:
-                sets = [f"{geom} = " + (expr if change.geometry is not None else "NULL")]
+                sets = []
                 params = []
-                if change.geometry is not None:
-                    params.append(
-                        _geojson_to_wkb(change.geometry, info["srid"], info["column_type"])
-                    )
+                if change.geometry_changed:
+                    sets.append(f"{geom} = " + (expr if change.geometry is not None else "NULL"))
+                    if change.geometry is not None:
+                        params.append(
+                            _geojson_to_wkb(change.geometry, info["srid"], info["column_type"])
+                        )
                 for c, v in change.values.items():
                     sets.append(f"{_q(c)} = ?")
                     params.append(_bind_value(v, types[c]))
@@ -1058,14 +1092,19 @@ def mssql_write(request: MssqlWriteRequest) -> dict[str, Any]:
                     f"DELETE FROM {table} WHERE {_q(pk)} IN ({','.join('?' for _ in keys)})", keys
                 )
                 deleted += max(cur.rowcount, 0)
+            commit_attempted = True
             conn.commit()
-        except HTTPException:
-            _safe_rollback(conn, session.sensitive())
+        except HTTPException as exc:
+            rolled_back = _safe_rollback(conn, session.sensitive())
+            if rolled_back and not commit_attempted:
+                raise MssqlWriteRolledBack(exc.status_code, exc.detail) from exc
             raise
         except Exception as exc:
-            _safe_rollback(conn, session.sensitive())
+            rolled_back = _safe_rollback(conn, session.sensitive())
             msg = scrub_secrets(str(exc), session.sensitive())
             logger.error("SQL Server write-back failed: %s", msg)
+            if rolled_back and not commit_attempted:
+                raise MssqlWriteRolledBack(400, f"Write-back failed: {msg}") from exc
             raise HTTPException(400, f"Write-back failed: {msg}") from exc
     messages = [
         f"Saved {len(features)} feature(s) to {request.schema_name}.{request.table} "

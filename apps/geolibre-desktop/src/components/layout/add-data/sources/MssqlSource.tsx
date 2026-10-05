@@ -5,6 +5,7 @@ import {
   type MssqlAuthMethod,
   type MssqlTableInfo,
 } from "@geolibre/processing";
+import { useAppStore } from "@geolibre/core";
 import type en from "../../../../i18n/locales/en.json";
 import { Button, Input, Label, Select } from "@geolibre/ui";
 import { Trash2 } from "lucide-react";
@@ -30,6 +31,7 @@ import {
   resolveMssqlSecret,
   withMssqlSession,
 } from "../../../../lib/mssql-sessions";
+import { rememberMssqlLoadedRows } from "../../../../lib/mssql-writeback";
 import { postgisFeatureKeys } from "../../../../lib/postgis-connections";
 import { postgisTableKey, postgisTableLabel } from "../../../../lib/postgis-table-selection";
 import { isDesktopRuntime, isWindows } from "../../../../lib/is-mobile";
@@ -384,6 +386,14 @@ export function MssqlSource({ initialMssql }: MssqlSourceProps) {
       ),
       geojson: result.geojson,
     };
+    if (result.primary_key) {
+      rememberMssqlLoadedRows(
+        layer.id,
+        useAppStore.getState().projectGeneration,
+        result.primary_key,
+        result.geojson,
+      );
+    }
     source.addAndClose(layer, { fit: true });
   });
 

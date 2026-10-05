@@ -1115,9 +1115,16 @@ export interface WriteMssqlTableRequest {
   geojson: FeatureCollection;
   baseline_keys?: Array<string | number>;
   capabilities?: LayerCapabilities;
+  unchanged_geometry_keys?: Array<string | number>;
+  /** Per loaded row, the columns edited since load; limits that row's update. */
+  changed_columns?: Array<{ key: string | number; columns: string[] }>;
 }
 
 export type WriteMssqlTableResult = WritePostgisTableResult;
+
+export class MssqlWriteRejectedError extends Error {
+  override readonly name = "MssqlWriteRejectedError";
+}
 
 export class MssqlSessionExpiredError extends Error {
   override readonly name = "MssqlSessionExpiredError";
@@ -1146,19 +1153,34 @@ async function postMssql(
   try {
     res = await sidecarFetch(`${baseUrl}/mssql/${path}`, {
       method: "POST",
-      headers: { "content-type": "application/json" },
+      headers: {
+        "content-type": "application/json",
+        // The desktop diagnostics wrapper reads and strips this literal; packages cannot import from the app.
+        "x-geolibre-expected-status": "410",
+      },
       body: JSON.stringify(body),
     });
   } catch (error) {
     throw sidecarConnectionError(baseUrl, error);
   }
+
   if (res.status === 410) {
     throw new MssqlSessionExpiredError(
       await responseErrorMessage(res, "SQL Server session expired"),
     );
   }
   if (!res.ok) {
-    throw new Error(await responseErrorMessage(res, fallback));
+    const data = await responseErrorData(res);
+    const message = detailMessage(data, res.status, fallback);
+    if (
+      data !== null &&
+      typeof data === "object" &&
+      "rolled_back" in data &&
+      data.rolled_back === true
+    ) {
+      throw new MssqlWriteRejectedError(message);
+    }
+    throw new Error(message);
   }
   return res;
 }
@@ -1383,15 +1405,24 @@ export async function runSedonaSql(
   return (await res.json()) as SedonaSqlResult;
 }
 
-async function responseErrorMessage(response: Response, fallback: string): Promise<string> {
+async function responseErrorData(response: Response): Promise<unknown> {
   try {
-    const data = (await response.json()) as { detail?: unknown };
-    if (typeof data.detail === "string") return data.detail;
-    if (data.detail) return JSON.stringify(data.detail);
+    return await response.json();
   } catch {
-    // Use the fallback below when the response is not JSON.
+    return undefined;
   }
-  return `${fallback}: HTTP ${response.status}`;
+}
+
+function detailMessage(data: unknown, status: number, fallback: string): string {
+  const detail =
+    data !== null && typeof data === "object" && "detail" in data ? data.detail : undefined;
+  if (typeof detail === "string") return detail;
+  if (detail) return JSON.stringify(detail);
+  return `${fallback}: HTTP ${status}`;
+}
+
+async function responseErrorMessage(response: Response, fallback: string): Promise<string> {
+  return detailMessage(await responseErrorData(response), response.status, fallback);
 }
 
 function sidecarConnectionError(baseUrl: string, error: unknown): Error {

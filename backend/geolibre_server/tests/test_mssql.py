@@ -322,6 +322,22 @@ def _install_session(monkeypatch, connection):
     return mssql.MssqlSessionRequest(session_id="sid")
 
 
+def _sidecar_client():
+    """The sidecar app under Starlette's test client.
+
+    The SQL Server integration job installs only the `dev,mssql` extras, which
+    lack the HTTP client Starlette's test client needs; route-level tests skip
+    there and run in the backend job, which installs the `test` extra.
+    """
+    try:
+        from fastapi.testclient import TestClient
+    except (ImportError, RuntimeError) as exc:
+        pytest.skip(f"Starlette test client unavailable: {exc}")
+    from geolibre_server.app.main import app
+
+    return TestClient(app)
+
+
 def test_tables_closes_connection_and_tolerates_probe_error(monkeypatch):
     conn = FakeConnection()
     conn.fetchall_results = [
@@ -450,6 +466,7 @@ def test_write_rolls_back_and_closes_on_error(monkeypatch):
             )
         )
     assert exc.value.status_code == 400
+    assert isinstance(exc.value, mssql.MssqlWriteRolledBack)
     assert conn.rolled_back and conn.closed
 
 
@@ -501,7 +518,159 @@ def test_write_allows_attribute_edit_on_srid_zero_table(monkeypatch):
 
     assert result["updated"] == 1
     assert conn.committed
-    assert any(sql.startswith("UPDATE") for sql in statements)
+    update_sql = next(sql for sql in statements if sql.startswith("UPDATE"))
+    # The unchanged geometry is left alone, so its stored SRID is not rewritten.
+    assert "[geom] =" not in update_sql
+
+
+def test_write_http_response_marks_confirmed_rollback(monkeypatch):
+    conn = FakeConnection()
+    _install_session(monkeypatch, conn)
+    conn.execute_hook = _fail
+    response = _sidecar_client().post(
+        "/mssql/write",
+        json={
+            "session_id": "sid",
+            "table": "t",
+            "geojson": {
+                "type": "FeatureCollection",
+                "features": [{"type": "Feature", "properties": {}, "geometry": None}],
+            },
+        },
+    )
+
+    assert response.status_code == 400
+    assert response.json() == {"detail": "Write-back failed: boom", "rolled_back": True}
+
+
+def test_write_http_response_omits_rollback_marker_when_rollback_fails(monkeypatch):
+    conn = FakeConnection()
+    _install_session(monkeypatch, conn)
+    conn.execute_hook = _fail
+
+    def fail_rollback():
+        raise FakePyodbcError("rollback failed")
+
+    conn.rollback = fail_rollback
+    response = _sidecar_client().post(
+        "/mssql/write",
+        json={
+            "session_id": "sid",
+            "table": "t",
+            "geojson": {
+                "type": "FeatureCollection",
+                "features": [{"type": "Feature", "properties": {}, "geometry": None}],
+            },
+        },
+    )
+
+    assert response.status_code == 400
+    assert response.json() == {"detail": "Write-back failed: boom"}
+
+
+def test_write_http_response_omits_rollback_marker_when_commit_fails(monkeypatch):
+    conn = FakeConnection()
+    _install_session(monkeypatch, conn)
+    geometry = {"type": "Point", "coordinates": [0, 0]}
+    conn.fetchone_results = [(1,)]
+    conn.fetchall_results = [[(1, b"wkb", 3857, 1, "North", 10)]]
+    monkeypatch.setattr(mssql, "_wkb_to_geojson", lambda *args: geometry)
+    monkeypatch.setattr(
+        mssql,
+        "_table_info",
+        lambda *args: {
+            "primary_key": "gid",
+            "geometry_column": "geom",
+            "column_type": "geometry",
+            "srid": 3857,
+            "pk_is_generated": True,
+            "pk_is_identity": True,
+            "columns": ["gid", "name", "population"],
+            "writable": ["name", "population"],
+            "column_types": {"gid": "int", "name": "nvarchar", "population": "int"},
+        },
+    )
+
+    def fail_commit():
+        raise FakePyodbcError("commit response lost")
+
+    conn.commit = fail_commit
+    response = _sidecar_client().post(
+        "/mssql/write",
+        json={
+            "session_id": "sid",
+            "table": "parcels",
+            "baseline_keys": [1],
+            "geojson": {
+                "type": "FeatureCollection",
+                "features": [
+                    {
+                        "type": "Feature",
+                        "id": 1,
+                        "geometry": geometry,
+                        "properties": {"gid": 1, "name": "North", "population": 10},
+                    }
+                ],
+            },
+        },
+    )
+    assert response.status_code == 400
+    assert response.json() == {"detail": "Write-back failed: commit response lost"}
+
+
+def test_write_updates_only_changed_values_without_rewriting_geometry(monkeypatch):
+    conn = FakeConnection()
+    request = _install_session(monkeypatch, conn)
+    geometry = {"type": "Point", "coordinates": [0, 0]}
+    conn.fetchone_results = [(1,)]
+    # Another client renamed the row after load; the app only edited population.
+    conn.fetchall_results = [[(1, b"wkb", 3857, 1, "North (changed externally)", 10)]]
+    statements = []
+    conn.execute_hook = lambda sql, params: statements.append((sql, params))
+    monkeypatch.setattr(mssql, "_wkb_to_geojson", lambda *args: geometry)
+    monkeypatch.setattr(
+        mssql,
+        "_table_info",
+        lambda *args: {
+            "primary_key": "gid",
+            "geometry_column": "geom",
+            "column_type": "geometry",
+            "srid": 3857,
+            "pk_is_generated": True,
+            "pk_is_identity": True,
+            "columns": ["gid", "name", "population"],
+            "writable": ["name", "population"],
+            "column_types": {"gid": "int", "name": "nvarchar", "population": "int"},
+        },
+    )
+
+    result = mssql.mssql_write(
+        mssql.MssqlWriteRequest(
+            session_id=request.session_id,
+            table="parcels",
+            baseline_keys=[1],
+            changed_columns=[{"key": 1, "columns": ["population"]}],
+            geojson={
+                "type": "FeatureCollection",
+                "features": [
+                    {
+                        "type": "Feature",
+                        "id": 1,
+                        "geometry": geometry,
+                        "properties": {"gid": 1, "name": "North", "population": 11},
+                    }
+                ],
+            },
+        )
+    )
+
+    update_sql, update_params = next(
+        (sql, params) for sql, params in statements if sql.startswith("UPDATE")
+    )
+    assert "SET [population] = ?" in update_sql
+    assert "[geom] =" not in update_sql and "[name] =" not in update_sql
+    assert update_params == ([11, 1],)
+    assert result["updated"] == 1
 
 
 @pytest.mark.parametrize(

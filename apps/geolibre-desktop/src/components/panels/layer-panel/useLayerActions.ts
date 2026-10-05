@@ -37,6 +37,7 @@ import {
 } from "@geolibre/map";
 import { importStyleText } from "@geolibre/map/style-import";
 import {
+  fetchMssqlStatus,
   readMssqlTable,
   readPostgisTable,
   writeMssqlTable,
@@ -84,7 +85,10 @@ import {
   withMssqlSession,
 } from "../../../lib/mssql-sessions";
 import {
+  mssqlWritePayload,
   reconcileMssqlWritebackMetadata,
+  rememberMssqlLoadedRows,
+  runMssqlWriteRequest,
   writeMssqlAndRefresh,
 } from "../../../lib/mssql-writeback";
 import {
@@ -836,6 +840,7 @@ export function useLayerActions({
           return;
         }
         let message: string;
+        let statusType: "success" | "warning" = "success";
         if (isMssql) {
           const connectionId = layer.metadata.mssqlConnectionId as string;
           const schema =
@@ -845,6 +850,7 @@ export function useLayerActions({
             typeof layer.metadata.mssqlGeometryColumn === "string"
               ? layer.metadata.mssqlGeometryColumn
               : undefined;
+          const payload = mssqlWritePayload(layer.id, requestProjectGeneration, geojson);
           const outcome = await writeMssqlAndRefresh(
             {
               layerId: layer.id,
@@ -856,17 +862,22 @@ export function useLayerActions({
               isCurrent: isCurrentMssqlRequest,
             },
             () =>
-              withMssqlSession(connectionId, (sessionId) =>
-                writeMssqlTable({
-                  session_id: sessionId,
-                  schema_name: schema,
-                  table,
-                  geometry_column: geometryColumn,
-                  geojson,
-                  baseline_keys: mssqlBaseline,
-                  capabilities: resolveLayerCapabilities(layer),
-                }),
-              ),
+              withMssqlSession(connectionId, async (sessionId) => {
+                await fetchMssqlStatus();
+                return runMssqlWriteRequest(() =>
+                  writeMssqlTable({
+                    session_id: sessionId,
+                    schema_name: schema,
+                    table,
+                    geometry_column: geometryColumn,
+                    geojson,
+                    baseline_keys: mssqlBaseline,
+                    unchanged_geometry_keys: payload.unchangedGeometryKeys,
+                    changed_columns: payload.changedColumns,
+                    capabilities: resolveLayerCapabilities(layer),
+                  }),
+                );
+              }),
             () =>
               withMssqlSession(connectionId, (sessionId) =>
                 readMssqlTable({
@@ -895,9 +906,25 @@ export function useLayerActions({
             scheduleStatusClear(layer.id);
             return;
           }
-          if (outcome.kind === "write-failed") {
+          if (outcome.kind === "write-rejected") {
             if (outcome.error instanceof MssqlReconnectRequiredError) throw outcome.error;
-            // A rejected response can follow a committed transaction. Reread before retrying.
+            setRefreshStatuses((current) => ({
+              ...current,
+              [layer.id]: {
+                type: "error",
+                message: t("layers.saveEditsMssqlWriteRejected", {
+                  error:
+                    outcome.error instanceof Error
+                      ? outcome.error.message
+                      : t("layers.saveEditsError"),
+                }),
+              },
+            }));
+            scheduleStatusClear(layer.id);
+            return;
+          }
+          if (outcome.kind === "write-failed") {
+            // The sidecar may have committed before its response was lost.
             markMssqlRefreshRequired(layer.id);
             setRefreshStatuses((current) => ({
               ...current,
@@ -934,6 +961,10 @@ export function useLayerActions({
             geojson: fresh.geojson,
             metadata: reconcileMssqlWritebackMetadata(currentMetadata, fresh),
           });
+          const primaryKey = layer.metadata.mssqlPrimaryKey;
+          if (typeof primaryKey === "string") {
+            rememberMssqlLoadedRows(layer.id, requestProjectGeneration, primaryKey, fresh.geojson);
+          }
           message = t("layers.saveEditsMssqlSuccess", {
             table: `${schema}.${table}`,
             inserted: result.inserted,
@@ -941,6 +972,7 @@ export function useLayerActions({
             deleted: result.deleted,
           });
           if (result.skipped_fields?.length) {
+            statusType = "warning";
             message = `${message} ${t("layers.saveEditsMssqlSkippedFields", {
               fields: result.skipped_fields.join(", "),
             })}`;
@@ -1038,6 +1070,7 @@ export function useLayerActions({
           // (no matching table column); surface that so the drop is not
           // silent behind a plain success toast.
           if (result.skipped_fields?.length) {
+            statusType = "warning";
             message = `${message} ${t("layers.saveEditsPostgisSkippedFields", {
               fields: result.skipped_fields.join(", "),
             })}`;
@@ -1060,7 +1093,7 @@ export function useLayerActions({
         }
         setRefreshStatuses((current) => ({
           ...current,
-          [layer.id]: { type: "success", message },
+          [layer.id]: { type: statusType, message },
         }));
         scheduleStatusClear(layer.id);
       } catch (error) {
