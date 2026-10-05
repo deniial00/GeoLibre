@@ -5,7 +5,6 @@ import { uniqueDatabaseTables } from "./database-tables";
 import { isDesktopRuntime } from "./is-mobile";
 import { startGeoLibreSidecar } from "./sidecar";
 import type { ConnectionLoad, SetConnectionLoads } from "./browser-tree";
-import { forgetPostgresConnection } from "./saved-postgres-connections";
 
 export interface PostgresBrowserLoaderDependencies {
   isDesktop: () => boolean;
@@ -21,6 +20,10 @@ const defaultDependencies: PostgresBrowserLoaderDependencies = {
   listTables: listPostgisTables,
 };
 
+/**
+ * Lazily introspect a desktop PostgreSQL connection once per successful load.
+ * Publish loading/error/table state; failures clear the fetched marker for retry.
+ */
 export function fetchPostgresBrowserTables(
   connectionString: string,
   fetched: Set<string>,
@@ -82,19 +85,4 @@ export function fetchPostgresBrowserTables(
         message: errorMessage(err, t("addData.postgres.errorConnect")),
       });
     });
-}
-
-export function forgetPostgresBrowserConnection(
-  connectionString: string,
-  fetched: Set<string>,
-  setLoads: SetConnectionLoads,
-  forget: (connectionString: string) => unknown = forgetPostgresConnection,
-): void {
-  forget(connectionString);
-  fetched.delete(connectionString);
-  setLoads((previous) => {
-    const next = { ...previous };
-    delete next[connectionString];
-    return next;
-  });
 }

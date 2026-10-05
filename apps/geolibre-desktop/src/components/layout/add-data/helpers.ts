@@ -325,8 +325,6 @@ export function parseVideoCorner(value: string, label: string): [number, number]
 // consumed by the PostGIS layer connection registry); re-exported here so the
 // Add Data sources keep a single helpers import.
 export {
-  forgetPostgresConnection,
-  PostgresConnectionForgetError,
   readSavedPostgresConnections,
   rememberPostgresConnection,
   savedPostgresConnectionLabel,

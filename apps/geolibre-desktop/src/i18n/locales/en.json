@@ -86,8 +86,6 @@
     "loadFolderFailed": "Could not read this folder.",
     "unpinFolder": "Remove “{{name}}” from the list",
     "forgetMssqlConnection": "Forget SQL Server connection “{{name}}”",
-    "forgetPostgresConnection": "Forget PostgreSQL connection “{{name}}”",
-    "forgetPostgresConnectionFailed": "Could not forget the PostgreSQL connection because saved-connection storage is unavailable. Nothing was removed.",
     "loadingFolder": "Loading…",
     "loadingSublayers": "Loading sublayers…",
     "allSublayers": "All layers",
@@ -949,7 +947,6 @@
     },
     "postgres": {
       "defaultName": "PostgreSQL Layer",
-      "forgetConnectionConfirm": "Forget the saved PostgreSQL connection {{name}}? Its saved credential will also be removed from this device.",
       "errorDesktopOnly": "PostgreSQL layers require GeoLibre Desktop.",
       "errorConnectionString": "Enter a PostgreSQL connection string.",
       "statusCheckingBinary": "Checking Martin binary...",

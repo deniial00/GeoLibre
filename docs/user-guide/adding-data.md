@@ -149,6 +149,8 @@ The **Browser** tab on the left edge of the window opens a QGIS-style Data Sourc
 | **Recent** | The sources you added most recently, so a repeat is one click. |
 | **Databases** | PostgreSQL/PostGIS and SQL Server connections, each in its own engine group with a **+** for a new connection. Expand a connection to browse its schemas and spatial tables; the Add Data form retains each engine's table options. |
 
+Choose the **+** on the PostgreSQL or SQL Server group to open that engine's connection form; the Databases section has no shared connection action.
+
 Type in the search box to filter the whole tree, and navigate it entirely from the keyboard with the arrow keys.
 
 ## Basemaps

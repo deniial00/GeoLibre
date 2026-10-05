@@ -5,10 +5,8 @@ import type { PostgisTableInfo } from "@geolibre/processing";
 import type { ConnectionLoads } from "../apps/geolibre-desktop/src/lib/browser-tree";
 import {
   fetchPostgresBrowserTables,
-  forgetPostgresBrowserConnection,
   type PostgresBrowserLoaderDependencies,
 } from "../apps/geolibre-desktop/src/lib/postgres-browser";
-import { PostgresConnectionForgetError } from "../apps/geolibre-desktop/src/lib/saved-postgres-connections";
 
 const CONNECTION = "postgresql://u:pw@db.example/gis";
 const table: PostgisTableInfo = {
@@ -132,54 +130,5 @@ describe("PostgreSQL Browser table loading", () => {
       message: "password authentication failed",
     });
     assert.equal(fetched.has(CONNECTION), false);
-  });
-
-  it("forgets a connection's load and fetches it afresh", async () => {
-    const state = loadState();
-    const fetched = new Set<string>();
-    let listCalls = 0;
-    const deps = dependencies({
-      listTables: async () => {
-        listCalls += 1;
-        return [table];
-      },
-    });
-    fetchPostgresBrowserTables(CONNECTION, fetched, state.set, translate, deps);
-    await nextTurn();
-    state.set((previous) => ({ ...previous, other: { status: "loading" } }));
-    const forgotten: string[] = [];
-
-    forgetPostgresBrowserConnection(CONNECTION, fetched, state.set, (connection) =>
-      forgotten.push(connection),
-    );
-
-    assert.deepEqual(forgotten, [CONNECTION]);
-    assert.equal(fetched.has(CONNECTION), false);
-    assert.deepEqual(state.loads, { other: { status: "loading" } });
-    fetchPostgresBrowserTables(CONNECTION, fetched, state.set, translate, deps);
-    await nextTurn();
-    assert.equal(listCalls, 2);
-  });
-
-  it("keeps Browser state when durable forget is refused", () => {
-    const state = loadState();
-    const fetched = new Set([CONNECTION]);
-    state.set((previous) => ({
-      ...previous,
-      [CONNECTION]: { status: "loaded", tables: [{ schema: "public", table: "roads" }] },
-    }));
-    const loadsBefore = state.loads;
-    const fetchedBefore = new Set(fetched);
-
-    assert.throws(
-      () =>
-        forgetPostgresBrowserConnection(CONNECTION, fetched, state.set, () => {
-          throw new PostgresConnectionForgetError();
-        }),
-      PostgresConnectionForgetError,
-    );
-
-    assert.equal(state.loads, loadsBefore);
-    assert.deepEqual(fetched, fetchedBefore);
   });
 });

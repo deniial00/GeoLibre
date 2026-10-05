@@ -164,56 +164,6 @@ function rememberKeychainPostgresConnections(connections: string[]): void {
   void queueCredentialChanges(postgresConnectionSecrets(previous), postgresConnectionSecrets(next));
 }
 
-export class PostgresConnectionForgetError extends Error {
-  override readonly name = "PostgresConnectionForgetError";
-
-  constructor() {
-    super("The saved PostgreSQL connection list could not be updated.");
-  }
-}
-
-/** Remove a saved DSN durably; on desktop its keychain secret is deleted too. */
-export function forgetPostgresConnection(connectionString: string): string[] {
-  if (typeof window === "undefined") return [];
-  if (credentialStorageLocation() === "keychain") {
-    // An unreadable keychain, failed migration, or failed index write means the
-    // persisted list cannot be trusted to drop this entry.
-    if (!postgresKeychainWritable || keychainConnections === null) {
-      throw new PostgresConnectionForgetError();
-    }
-    const previous = keychainConnections;
-    const next = previous.filter((entry) => entry.connection !== connectionString);
-    try {
-      window.localStorage.setItem(
-        POSTGRES_CONNECTION_IDS_STORAGE_KEY,
-        JSON.stringify(next.map(({ id }) => id)),
-      );
-    } catch (error) {
-      reportCredentialStorageError(error);
-      postgresKeychainWritable = false;
-      throw new PostgresConnectionForgetError();
-    }
-    setKeychainPostgresConnections(next);
-    // Index removal is durable; deleting its now-orphaned secret is cleanup.
-    void queueCredentialChanges(
-      postgresConnectionSecrets(previous),
-      postgresConnectionSecrets(next),
-    );
-    return next.map(({ connection }) => connection);
-  }
-
-  const remaining = readBrowserPostgresConnections().filter(
-    (connection) => connection !== connectionString,
-  );
-  try {
-    window.localStorage.setItem(POSTGRES_CONNECTIONS_STORAGE_KEY, JSON.stringify(remaining));
-  } catch {
-    throw new PostgresConnectionForgetError();
-  }
-  window.dispatchEvent(new Event(POSTGRES_CONNECTIONS_CHANGED_EVENT));
-  return remaining;
-}
-
 export function savedPostgresConnectionLabel(connectionString: string): string {
   try {
     const url = new URL(connectionString);

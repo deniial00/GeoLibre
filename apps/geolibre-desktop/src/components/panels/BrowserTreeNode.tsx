@@ -62,8 +62,8 @@ interface BrowserTreeNodeProps {
   onCancelRename: (id: string) => void;
   /** Delete a saved Layer Library entry (its trash icon). */
   onDeleteLibraryLayer: (node: BrowserNode) => void;
-  /** Forget a saved database connection (its trash icon). */
-  onForgetConnection: (node: BrowserNode) => void;
+  /** Forget a saved SQL Server connection (its trash icon). */
+  onForgetMssqlConnection: (node: BrowserNode) => void;
   /** Import a Layer Library JSON bundle (the My Data section's ⬆). */
   onImportLibrary: () => void;
   /** Export the Layer Library as a JSON bundle (the My Data section's ⬇). */
@@ -176,7 +176,7 @@ export function BrowserTreeNode({
   onCommitRename,
   onCancelRename,
   onDeleteLibraryLayer,
-  onForgetConnection,
+  onForgetMssqlConnection,
   onImportLibrary,
   onExportLibrary,
 }: BrowserTreeNodeProps) {
@@ -230,12 +230,6 @@ export function BrowserTreeNode({
   const favoritable = isFavoritableKind(node.kind);
   const favorited = favoritable && favoriteIds.has(node.id);
   const isRenaming = renamingId === node.id;
-  const forgetConnectionLabel =
-    node.kind === "connection" && node.mssqlConnectionId
-      ? t("browser.forgetMssqlConnection", { name: node.label })
-      : node.kind === "connection" && node.connectionString
-        ? t("browser.forgetPostgresConnection", { name: node.label })
-        : undefined;
 
   return (
     // role="none": the treeitem role lives on the inner button, so the <li>
@@ -334,14 +328,14 @@ export function BrowserTreeNode({
             <Trash2 className="h-3.5 w-3.5" />
           </button>
         ) : null}
-        {node.kind === "connection" && (node.mssqlConnectionId || node.connectionString) ? (
+        {node.kind === "connection" && node.mssqlConnectionId ? (
           <button
             type="button"
             className="me-1 shrink-0 rounded p-1 text-muted-foreground opacity-0 hover:bg-accent hover:text-accent-foreground focus:opacity-100 group-hover:opacity-100"
-            title={forgetConnectionLabel}
-            aria-label={forgetConnectionLabel}
+            title={t("browser.forgetMssqlConnection", { name: node.label })}
+            aria-label={t("browser.forgetMssqlConnection", { name: node.label })}
             tabIndex={node.id === activeRowId ? 0 : -1}
-            onClick={() => onForgetConnection(node)}
+            onClick={() => onForgetMssqlConnection(node)}
           >
             <Trash2 className="h-3.5 w-3.5" />
           </button>
@@ -449,7 +443,7 @@ export function BrowserTreeNode({
                 onCommitRename={onCommitRename}
                 onCancelRename={onCancelRename}
                 onDeleteLibraryLayer={onDeleteLibraryLayer}
-                onForgetConnection={onForgetConnection}
+                onForgetMssqlConnection={onForgetMssqlConnection}
                 onImportLibrary={onImportLibrary}
                 onExportLibrary={onExportLibrary}
               />

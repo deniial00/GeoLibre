@@ -6,10 +6,12 @@ export interface DatabaseTableIdentity {
   table: string;
 }
 
+/** Collision-safe identity; dots inside schema or table names remain distinct. */
 export function databaseTableKey(table: DatabaseTableIdentity): string {
   return JSON.stringify([table.schema, table.table]);
 }
 
+/** Human-readable qualified name for display, not an identity key. */
 export function databaseTableLabel(table: DatabaseTableIdentity): string {
   return `${table.schema}.${table.table}`;
 }

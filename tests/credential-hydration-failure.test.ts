@@ -59,8 +59,6 @@ const { hydrateDesktopCredentials } =
 const { serializeDesktopSettingsForStorage, useDesktopSettingsStore } =
   await import("../apps/geolibre-desktop/src/hooks/useDesktopSettings");
 const {
-  forgetPostgresConnection,
-  PostgresConnectionForgetError,
   readSavedPostgresConnections,
   rememberPostgresConnection,
 } = await import("../apps/geolibre-desktop/src/lib/saved-postgres-connections");
@@ -97,18 +95,6 @@ describe("desktop credential hydration without a keychain", () => {
       JSON.stringify(["postgresql://a:pw@h/db"]),
     );
     assert.equal(keychain.size, 0);
-  });
-
-  it("refuses to forget while the keychain is unwritable", () => {
-    const savedBefore = readSavedPostgresConnections();
-    const legacyBefore = storage.get("geolibre.postgres.connectionStrings");
-
-    assert.throws(
-      () => forgetPostgresConnection("postgresql://a:pw@h/db"),
-      PostgresConnectionForgetError,
-    );
-    assert.deepEqual(readSavedPostgresConnections(), savedBefore);
-    assert.equal(storage.get("geolibre.postgres.connectionStrings"), legacyBefore);
   });
 
   it("retries a failed write once the keychain is back", async () => {

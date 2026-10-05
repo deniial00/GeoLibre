@@ -14,10 +14,7 @@ import { Search } from "lucide-react";
 import { useCallback, useMemo, useRef, useState, type KeyboardEvent, type RefObject } from "react";
 import { useTranslation } from "react-i18next";
 import { fetchMssqlBrowserTables, forgetMssqlBrowserConnection } from "../../lib/mssql-browser";
-import {
-  fetchPostgresBrowserTables,
-  forgetPostgresBrowserConnection,
-} from "../../lib/postgres-browser";
+import { fetchPostgresBrowserTables } from "../../lib/postgres-browser";
 import {
   isLoadableFilePath,
   listDirectory,
@@ -43,7 +40,7 @@ import {
   type FolderLoad,
 } from "../../lib/browser-tree";
 import { applyServiceEntry } from "../layout/add-data/apply-service";
-import { errorMessage, PostgresConnectionForgetError } from "../layout/add-data/helpers";
+import { errorMessage } from "../layout/add-data/helpers";
 import { serviceFieldString } from "../layout/add-data/service-library";
 import type { AddDataKind } from "../layout/AddDataDialog";
 import { openAddData } from "../layout/add-data/open-add-data";
@@ -768,32 +765,12 @@ export function BrowserPanel({
     deleteLayerLibraryEntry(node.libraryLayerId);
     if (fallbackRowId) requestAnimationFrame(() => focusRow(fallbackRowId));
   };
-  const forgetConnectionNode = (node: BrowserNode) => {
-    setError(null);
-    if (node.kind !== "connection") return;
-    if (node.mssqlConnectionId) {
-      if (!window.confirm(t("addData.mssql.forgetConnectionConfirm", { name: node.label }))) return;
-      forgetMssqlBrowserConnection(node.mssqlConnectionId, mssqlFetchedRef.current, setMssqlLoads);
-    } else if (node.connectionString) {
-      if (!window.confirm(t("addData.postgres.forgetConnectionConfirm", { name: node.label }))) {
-        return;
-      }
-      try {
-        forgetPostgresBrowserConnection(
-          node.connectionString,
-          connFetchedRef.current,
-          setConnLoads,
-        );
-      } catch (err) {
-        if (err instanceof PostgresConnectionForgetError) {
-          setError(t("browser.forgetPostgresConnectionFailed"));
-          return;
-        }
-        throw err;
-      }
-    } else {
-      return;
-    }
+  const forgetMssqlConnectionNode = (node: BrowserNode) => {
+    const profileId = node.mssqlConnectionId;
+    if (node.kind !== "connection" || !profileId) return;
+    if (!window.confirm(t("addData.mssql.forgetConnectionConfirm", { name: node.label }))) return;
+    if (favoriteIds.has(node.id)) removeFavorite(node.id);
+    forgetMssqlBrowserConnection(profileId, mssqlFetchedRef.current, setMssqlLoads);
     const fallbackRowId = visibleRows.find((row) => row.id === node.id)?.parentId;
     if (fallbackRowId) requestAnimationFrame(() => focusRow(fallbackRowId));
   };
@@ -915,7 +892,7 @@ export function BrowserPanel({
                 onCommitRename={commitRename}
                 onCancelRename={endRename}
                 onDeleteLibraryLayer={deleteLibraryLayer}
-                onForgetConnection={forgetConnectionNode}
+                onForgetMssqlConnection={forgetMssqlConnectionNode}
                 onImportLibrary={() => void importLibrary()}
                 onExportLibrary={() => void exportLibrary()}
               />
