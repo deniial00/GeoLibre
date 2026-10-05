@@ -13,6 +13,8 @@ import struct
 import sys
 import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import TimeoutError as FutureTimeoutError
 from contextlib import contextmanager
 from dataclasses import dataclass
 from functools import lru_cache
@@ -318,8 +320,15 @@ def _trim_fraction(value: str) -> str:
 
 
 def _unreachable_reason(host: str, instance: Optional[str], port: int) -> Optional[str]:
+    # getaddrinfo has no timeout of its own; a hung resolver must not hold the
+    # request thread, so an unanswered lookup leaves the driver message alone.
+    executor = ThreadPoolExecutor(max_workers=1)
+    lookup = executor.submit(socket.getaddrinfo, host, port, type=socket.SOCK_STREAM)
+    executor.shutdown(wait=False)
     try:
-        socket.getaddrinfo(host, port, type=socket.SOCK_STREAM)
+        lookup.result(timeout=_REACHABILITY_TIMEOUT_S)
+    except FutureTimeoutError:
+        return None
     except (socket.gaierror, UnicodeError):
         # IDNA rejects empty or over-long labels before any DNS lookup.
         return f"The host name '{host}' could not be resolved"

@@ -5,6 +5,7 @@ from __future__ import annotations
 import datetime
 import os
 import struct
+import threading
 import time
 
 import pytest
@@ -670,6 +671,28 @@ def test_open_connection_reports_malformed_host_label_as_unresolvable(monkeypatc
         mssql._open_connection(session)
     assert exc.value.status_code == 400
     assert "The host name 'db..example.com' could not be resolved" in exc.value.detail
+
+
+def test_unanswered_dns_lookup_falls_back_to_driver_message(monkeypatch):
+    release = threading.Event()
+
+    def hang(*args, **kwargs):
+        release.wait(5)
+        return []
+
+    monkeypatch.setattr(mssql, "_REACHABILITY_TIMEOUT_S", 0.05)
+    monkeypatch.setattr(mssql.socket, "getaddrinfo", hang)
+    monkeypatch.setattr(
+        mssql.socket,
+        "create_connection",
+        lambda *args, **kwargs: pytest.fail("no TCP probe after an unanswered lookup"),
+    )
+    try:
+        started = time.monotonic()
+        assert mssql._unreachable_reason("slow-dns.example", None, 1433) is None
+        assert time.monotonic() - started < 1
+    finally:
+        release.set()
 
 
 def test_named_instance_skips_fixed_tcp_port_probe(monkeypatch):

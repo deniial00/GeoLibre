@@ -174,5 +174,6 @@ export function useBrowserTree(): BrowserTreeState {
     mssqlRevision,
     foldersRevision,
     favoritesRevision,
+    t,
   ]);
 }
