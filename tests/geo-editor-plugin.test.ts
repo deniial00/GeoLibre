@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
+import type { Feature, FeatureCollection } from "geojson";
 import {
   GEO_EDITOR_PLUGIN_ID,
   hasMassingFeatures,
@@ -191,7 +192,8 @@ describe("maplibreGeoEditorPlugin", () => {
   });
 
   // The create callback's copy can lack the id Geoman gives the imported
-  // feature; storing both would duplicate the new sketch.
+  // feature; storing both would duplicate the new sketch, while a separate
+  // sketch drawn on an existing one's coordinates must still be kept.
   it("adds a created sketch only when the editor read does not already hold it", () => {
     const geometry = { type: "Point" as const, coordinates: [1, 2] };
     const created = { type: "Feature" as const, properties: {}, geometry };
@@ -202,11 +204,28 @@ describe("maplibreGeoEditorPlugin", () => {
       properties: {},
       geometry: { type: "Point" as const, coordinates: [5, 5] },
     };
+    const collection = (...features: Feature[]): FeatureCollection => ({
+      type: "FeatureCollection",
+      features,
+    });
+    const stored = collection(other);
 
-    const withCopy = { type: "FeatureCollection" as const, features: [other, editorCopy] };
-    assert.deepEqual(withCreatedSketch(withCopy, created).features, [other, editorCopy]);
-
-    const stale = { type: "FeatureCollection" as const, features: [other] };
-    assert.deepEqual(withCreatedSketch(stale, created).features, [other, created]);
+    // The read already has Geoman's copy: nothing to add.
+    assert.deepEqual(withCreatedSketch(collection(other, editorCopy), created, stored).features, [
+      other,
+      editorCopy,
+    ]);
+    // The read lags behind the create: add the callback copy.
+    assert.deepEqual(withCreatedSketch(collection(other), created, stored).features, [
+      other,
+      created,
+    ]);
+    // An older sketch already sits on the same coordinates and the read lags:
+    // the new one is still added rather than mistaken for the old one.
+    const older = { ...created, id: "feature-0" };
+    assert.deepEqual(withCreatedSketch(collection(older), created, collection(older)).features, [
+      older,
+      created,
+    ]);
   });
 });

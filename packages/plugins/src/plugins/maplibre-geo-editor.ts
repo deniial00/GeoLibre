@@ -395,16 +395,16 @@ function getGeoEditorOptions(mapboxGl: MapboxGl | null): GeoEditorOptions {
     },
     onFeatureCreate: (feature) => {
       unionSketchesWithStoreOnNextSync = true;
+      // GeoEditor opens the attribute panel synchronously after this callback
+      // returns, so a geometry-edit session closes it in the same deferred pass.
+      const closeAttributeEditor = Boolean(editTargetLayerId);
       // Geoman's callback payload is authoritative even if the collection read
       // still reflects the pre-create snapshot.
       queueMicrotask(() => {
         syncSketchesToStore(feature);
         applySketchesMapDisplay();
+        if (closeAttributeEditor) geoEditorControl?.closeAttributeEditor();
       });
-      if (editTargetLayerId) {
-        // GeoEditor opens the attribute panel after this callback returns.
-        queueMicrotask(() => geoEditorControl?.closeAttributeEditor());
-      }
     },
     onFeatureEdit: () => {
       syncSketchesToStore();
@@ -692,13 +692,16 @@ function unionFeatureCollections(...collections: FeatureCollection[]): FeatureCo
 
 /**
  * Add the feature a create callback reported unless the editor's own read
- * already holds it. The callback copy may lack the id Geoman gives the
- * imported feature, so a matching id or an identical geometry counts as the
- * same sketch; a union by `sketchFeatureKey` would keep both copies.
+ * already holds it. The callback copy may lack, or differ from, the id Geoman
+ * gives the imported feature, so besides a matching id the read counts as
+ * holding it when it has more features with that exact geometry than the
+ * stored Sketches had before. A separate sketch drawn on the same spot as an
+ * existing one is therefore still added while the read lags.
  */
 export function withCreatedSketch(
   collection: FeatureCollection,
   created: Feature,
+  stored: FeatureCollection | undefined,
 ): FeatureCollection {
   const identity = (feature: Feature) => {
     const props = feature.properties as Record<string, unknown> | null;
@@ -706,13 +709,12 @@ export function withCreatedSketch(
   };
   const createdId = identity(created);
   const createdGeometry = JSON.stringify(created.geometry);
-  const present = collection.features.some((feature) => {
-    const id = identity(feature);
-    return (
-      (createdId != null && id != null && String(id) === String(createdId)) ||
-      JSON.stringify(feature.geometry) === createdGeometry
-    );
-  });
+  const coincident = (features: Feature[] = []) =>
+    features.filter((feature) => JSON.stringify(feature.geometry) === createdGeometry).length;
+  const present =
+    (createdId != null &&
+      collection.features.some((feature) => String(identity(feature)) === String(createdId))) ||
+    coincident(collection.features) > coincident(stored?.features);
   if (present) return collection;
   return { ...collection, features: [...collection.features, structuredClone(created)] };
 }
@@ -726,11 +728,10 @@ function syncSketchesToStore(createdFeature?: Feature): void {
   // so skip store writes here; `endLayerGeometryEdit` flushes the final state.
   if (editTargetLayerId) return;
 
-  let collection = cloneFeatureCollection(geoEditorControl.getAllFeatureCollection());
-  if (createdFeature) collection = withCreatedSketch(collection, createdFeature);
-
   const store = useAppStore.getState();
   const existing = findSketchesLayer(store.layers);
+  let collection = cloneFeatureCollection(geoEditorControl.getAllFeatureCollection());
+  if (createdFeature) collection = withCreatedSketch(collection, createdFeature, existing?.geojson);
 
   if (unionSketchesWithStoreOnNextSync && existing?.geojson) {
     collection = unionFeatureCollections(existing.geojson, collection);
