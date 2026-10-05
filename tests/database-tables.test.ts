@@ -37,6 +37,12 @@ describe("database table selection", () => {
 
     assert.deepEqual(databaseBaselineKeys(layer, "postgisBaselineKeys"), [1, "two", 3]);
     assert.deepEqual(databaseBaselineKeys(layer, "mssqlBaselineKeys"), ["mssql", 2]);
-    assert.equal(databaseBaselineKeys({ id: "missing", metadata: {} } as unknown as GeoLibreLayer, "postgisBaselineKeys"), undefined);
+    assert.equal(
+      databaseBaselineKeys(
+        { id: "missing", metadata: {} } as unknown as GeoLibreLayer,
+        "postgisBaselineKeys",
+      ),
+      undefined,
+    );
   });
 });

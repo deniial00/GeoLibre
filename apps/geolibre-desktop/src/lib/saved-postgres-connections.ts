@@ -195,7 +195,10 @@ export function forgetPostgresConnection(connectionString: string): string[] {
     }
     setKeychainPostgresConnections(next);
     // Index removal is durable; deleting its now-orphaned secret is cleanup.
-    void queueCredentialChanges(postgresConnectionSecrets(previous), postgresConnectionSecrets(next));
+    void queueCredentialChanges(
+      postgresConnectionSecrets(previous),
+      postgresConnectionSecrets(next),
+    );
     return next.map(({ connection }) => connection);
   }
 

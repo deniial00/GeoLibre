@@ -105,5 +105,4 @@ describe("postgis connection registry", () => {
     assert.equal(resolvePostgisConnection(postgisLayer("layer-kept")), CONNECTION);
     unregisterPostgisConnection("layer-kept");
   });
-
 });

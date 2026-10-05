@@ -76,10 +76,7 @@ import { startGeoLibreSidecar } from "../../../lib/sidecar";
 import { importedStyleErrorMessage, importedStyleNote } from "../../../lib/style-import-note";
 import { resolvePostgisConnection } from "../../../lib/postgis-connections";
 import { databaseBaselineKeys, databaseFeatureKeys } from "../../../lib/database-tables";
-import {
-  MssqlReconnectRequiredError,
-  withMssqlSession,
-} from "../../../lib/mssql-sessions";
+import { MssqlReconnectRequiredError, withMssqlSession } from "../../../lib/mssql-sessions";
 import {
   mssqlWritePayload,
   reconcileMssqlWritebackMetadata,

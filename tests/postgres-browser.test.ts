@@ -119,7 +119,11 @@ describe("PostgreSQL Browser table loading", () => {
       fetched,
       state.set,
       translate,
-      dependencies({ listTables: async () => { throw new Error("password authentication failed"); } }),
+      dependencies({
+        listTables: async () => {
+          throw new Error("password authentication failed");
+        },
+      }),
     );
     await nextTurn();
 

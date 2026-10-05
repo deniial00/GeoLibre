@@ -32,7 +32,12 @@ import {
   withMssqlSession,
 } from "../../../../lib/mssql-sessions";
 import { rememberMssqlLoadedRows } from "../../../../lib/mssql-writeback";
-import { databaseFeatureKeys, databaseTableKey, databaseTableLabel, uniqueDatabaseTables } from "../../../../lib/database-tables";
+import {
+  databaseFeatureKeys,
+  databaseTableKey,
+  databaseTableLabel,
+  uniqueDatabaseTables,
+} from "../../../../lib/database-tables";
 import { isDesktopRuntime, isWindows } from "../../../../lib/is-mobile";
 import { IS_MAS_BUILD } from "../../../../lib/build-flags";
 import { startGeoLibreSidecar } from "../../../../lib/sidecar";

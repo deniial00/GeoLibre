@@ -624,7 +624,10 @@ describe("SQL Server Browser tree", () => {
     const tree = baseTree();
     const section = find(tree, "section:databases");
     assert.equal(section?.kind, "section");
-    assert.deepEqual(section?.children?.map((node) => node.id), ["database-engine:mssql"]);
+    assert.deepEqual(
+      section?.children?.map((node) => node.id),
+      ["database-engine:mssql"],
+    );
     const group = find(tree, "database-engine:mssql");
     assert.equal(group?.newConnectionKind, "mssql");
     assert.equal(group?.children?.[0].id, `mssql-connection:${ID}`);
@@ -639,10 +642,10 @@ describe("SQL Server Browser tree", () => {
       mssqlConnections: [{ id: ID, label: "sql.example/db" }],
     });
     const section = find(tree, "section:databases");
-    assert.deepEqual(section?.children?.map((node) => node.id), [
-      "database-engine:postgres",
-      "database-engine:mssql",
-    ]);
+    assert.deepEqual(
+      section?.children?.map((node) => node.id),
+      ["database-engine:postgres", "database-engine:mssql"],
+    );
     const postgres = find(tree, "database-engine:postgres");
     assert.equal(postgres?.count, 0);
     assert.deepEqual(postgres?.children, []);
@@ -658,14 +661,14 @@ describe("SQL Server Browser tree", () => {
     });
     const filtered = filterBrowserTree(tree, "sql.example");
     const databases = find(filtered, "section:databases");
-    assert.deepEqual(databases?.children?.map((node) => node.id), ["database-engine:mssql"]);
+    assert.deepEqual(
+      databases?.children?.map((node) => node.id),
+      ["database-engine:mssql"],
+    );
     assert.equal(find(filtered, "database-engine:postgres"), undefined);
     assert.equal(find(filtered, `mssql-connection:${ID}`)?.kind, "connection");
 
-    const rows = flattenVisibleTree(
-      tree,
-      new Set(["section:databases", "database-engine:mssql"]),
-    );
+    const rows = flattenVisibleTree(tree, new Set(["section:databases", "database-engine:mssql"]));
     const connection = rows.find((row) => row.id === `mssql-connection:${ID}`);
     assert.equal(connection?.depth, 2);
     assert.equal(connection?.parentId, "database-engine:mssql");

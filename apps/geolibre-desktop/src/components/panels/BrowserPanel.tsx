@@ -13,10 +13,7 @@ import { Input, ScrollArea } from "@geolibre/ui";
 import { Search } from "lucide-react";
 import { useCallback, useMemo, useRef, useState, type KeyboardEvent, type RefObject } from "react";
 import { useTranslation } from "react-i18next";
-import {
-  fetchMssqlBrowserTables,
-  forgetMssqlBrowserConnection,
-} from "../../lib/mssql-browser";
+import { fetchMssqlBrowserTables, forgetMssqlBrowserConnection } from "../../lib/mssql-browser";
 import {
   fetchPostgresBrowserTables,
   forgetPostgresBrowserConnection,
@@ -778,15 +775,15 @@ export function BrowserPanel({
       if (!window.confirm(t("addData.mssql.forgetConnectionConfirm", { name: node.label }))) return;
       forgetMssqlBrowserConnection(node.mssqlConnectionId, mssqlFetchedRef.current, setMssqlLoads);
     } else if (node.connectionString) {
-      if (
-        !window.confirm(
-          t("addData.postgres.forgetConnectionConfirm", { name: node.label }),
-        )
-      ) {
+      if (!window.confirm(t("addData.postgres.forgetConnectionConfirm", { name: node.label }))) {
         return;
       }
       try {
-        forgetPostgresBrowserConnection(node.connectionString, connFetchedRef.current, setConnLoads);
+        forgetPostgresBrowserConnection(
+          node.connectionString,
+          connFetchedRef.current,
+          setConnLoads,
+        );
       } catch (err) {
         if (err instanceof PostgresConnectionForgetError) {
           setError(t("browser.forgetPostgresConnectionFailed"));

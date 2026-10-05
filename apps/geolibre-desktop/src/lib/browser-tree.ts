@@ -590,10 +590,7 @@ export type ConnectionLoad =
   | { status: "error"; message: string };
 
 export type ConnectionLoads = Record<string, ConnectionLoad>;
-export type SetConnectionLoads = (
-  update: (previous: ConnectionLoads) => ConnectionLoads,
-) => void;
-
+export type SetConnectionLoads = (update: (previous: ConnectionLoads) => ConnectionLoads) => void;
 
 /**
  * Groups a saved SQL Server connection's spatial tables into `schema` → `table`

@@ -55,7 +55,6 @@ export function unregisterPostgisConnection(layerId: string): void {
   connectionsByLayerId.delete(layerId);
 }
 
-
 /**
  * Resolve the connection string for an editable PostGIS layer.
  *
