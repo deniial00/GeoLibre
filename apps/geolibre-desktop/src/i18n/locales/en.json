@@ -86,6 +86,9 @@
     "loadFolderFailed": "Could not read this folder.",
     "unpinFolder": "Remove “{{name}}” from the list",
     "forgetMssqlConnection": "Forget SQL Server connection “{{name}}”",
+    "forgetPostgresConnection": "Forget PostgreSQL connection “{{name}}”",
+    "forgetPostgresConnectionFailed": "Could not forget the PostgreSQL connection because saved-connection storage is unavailable. Nothing was removed.",
+    "forgetPostgresCredentialFailed": "The PostgreSQL connection was removed, but your system keychain did not delete its saved credential. GeoLibre will try again the next time it starts.",
     "loadingFolder": "Loading…",
     "loadingSublayers": "Loading sublayers…",
     "allSublayers": "All layers",
@@ -969,6 +972,7 @@
     },
     "postgres": {
       "defaultName": "PostgreSQL Layer",
+      "forgetConnectionConfirm": "Forget the saved PostgreSQL connection {{name}}? Its saved credential will also be removed from this device.",
       "errorDesktopOnly": "PostgreSQL layers require GeoLibre Desktop.",
       "errorConnectionString": "Enter a PostgreSQL connection string.",
       "statusCheckingBinary": "Checking Martin binary...",

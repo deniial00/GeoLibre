@@ -6,8 +6,10 @@
  * The web build and the mobile apps keep the list in localStorage. The desktop
  * build (issue #1667) keeps each DSN as its own OS credential-store entry
  * (`postgres.connection.<uuid>`) and only the non-secret MRU order of those
- * ids in localStorage. `credential-hydration.ts` loads that list into memory
- * before the app renders, so readers stay synchronous.
+ * ids in localStorage. Pending desktop deletions are recorded by id and
+ * retried on startup; re-saving a forgotten DSN uses a fresh id.
+ * `credential-hydration.ts` loads that list into memory before the app renders,
+ * so readers stay synchronous.
  *
  * Pure data utilities, deliberately UI-free: consumed both by the Add Data
  * dialog and by the PostGIS layer connection registry in
@@ -15,6 +17,7 @@
  */
 import {
   credentialStorageLocation,
+  deleteSecureCredentialAfterQueue,
   queueCredentialChanges,
   reportCredentialStorageError,
 } from "./credential-store";
@@ -23,6 +26,8 @@ import {
 export const POSTGRES_CONNECTIONS_STORAGE_KEY = "geolibre.postgres.connectionStrings";
 /** Desktop: non-secret JSON array of connection ids in MRU order. */
 export const POSTGRES_CONNECTION_IDS_STORAGE_KEY = "geolibre.postgres.connectionIds";
+/** Desktop: non-secret JSON array of connection ids whose keychain entry is still to be deleted. */
+export const POSTGRES_PENDING_DELETION_IDS_STORAGE_KEY = "geolibre.postgres.pendingDeletionIds";
 export const MAX_SAVED_POSTGRES_CONNECTIONS = 10;
 
 /**
@@ -44,6 +49,91 @@ export interface KeychainPostgresConnection {
 let keychainConnections: KeychainPostgresConnection[] | null = null;
 /** False after a failed startup migration: edits then stay in memory. */
 let postgresKeychainWritable = true;
+
+function readPendingPostgresDeletionIds(): string[] {
+  const value = window.localStorage.getItem(POSTGRES_PENDING_DELETION_IDS_STORAGE_KEY);
+  if (value === null) return [];
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(value);
+  } catch {
+    reportCredentialStorageError(
+      new Error("The pending PostGIS credential deletions list is malformed."),
+    );
+    return [];
+  }
+  if (!Array.isArray(parsed)) {
+    reportCredentialStorageError(
+      new Error("The pending PostGIS credential deletions list is malformed."),
+    );
+    return [];
+  }
+  return [
+    ...new Set(
+      parsed.filter((id): id is string => typeof id === "string" && CONNECTION_ID_PATTERN.test(id)),
+    ),
+  ];
+}
+
+function writePendingPostgresDeletionIds(ids: string[]): void {
+  if (ids.length === 0) {
+    window.localStorage.removeItem(POSTGRES_PENDING_DELETION_IDS_STORAGE_KEY);
+  } else {
+    window.localStorage.setItem(POSTGRES_PENDING_DELETION_IDS_STORAGE_KEY, JSON.stringify(ids));
+  }
+}
+
+async function deletePostgresCredential(id: string): Promise<boolean> {
+  try {
+    await deleteSecureCredentialAfterQueue(postgresConnectionAccount(id));
+  } catch {
+    return false;
+  }
+  try {
+    writePendingPostgresDeletionIds(
+      readPendingPostgresDeletionIds().filter((pendingId) => pendingId !== id),
+    );
+  } catch (error) {
+    reportCredentialStorageError(error);
+  }
+  return true;
+}
+
+export async function resumePostgresCredentialDeletions(): Promise<string[]> {
+  if (
+    credentialStorageLocation() !== "keychain" ||
+    !postgresKeychainWritable ||
+    keychainConnections === null
+  ) {
+    return [];
+  }
+  let ids: string[];
+  try {
+    ids = readPendingPostgresDeletionIds();
+  } catch (error) {
+    reportCredentialStorageError(error);
+    return [];
+  }
+
+  const indexedIds = new Set(keychainConnections.map(({ id }) => id));
+  const deletions = ids.filter((id) => !indexedIds.has(id));
+  const stillIndexed = ids.filter((id) => indexedIds.has(id));
+  if (stillIndexed.length > 0) {
+    // These ids never left the saved index, so the forget did not commit.
+    // Retain their credentials and discard only the now-stale retry markers.
+    try {
+      writePendingPostgresDeletionIds(deletions);
+    } catch (error) {
+      reportCredentialStorageError(error);
+    }
+  }
+
+  const failed: string[] = [];
+  for (const id of deletions) {
+    if (!(await deletePostgresCredential(id))) failed.push(id);
+  }
+  return failed;
+}
 
 export function uniquePostgresConnections(connections: string[]): string[] {
   return Array.from(new Set(connections));
@@ -107,6 +197,83 @@ export function readBrowserPostgresConnections(): string[] {
 export function readSavedPostgresConnections(): string[] {
   if (credentialStorageLocation() === "browser") return readBrowserPostgresConnections();
   return keychainConnections?.map(({ connection }) => connection) ?? [];
+}
+
+export interface PostgresConnectionForgetResult {
+  /** The saved list after removal. */
+  connections: string[];
+  /** True once no saved secret remains; false when the keychain refused and deletion is retried at next startup. */
+  credentialDeleted: Promise<boolean>;
+}
+
+export class PostgresConnectionForgetError extends Error {
+  constructor() {
+    super("The saved PostgreSQL connection list could not be updated.");
+    this.name = "PostgresConnectionForgetError";
+  }
+}
+
+export function forgetPostgresConnection(connectionString: string): PostgresConnectionForgetResult {
+  if (typeof window === "undefined") {
+    return { connections: [], credentialDeleted: Promise.resolve(true) };
+  }
+
+  if (credentialStorageLocation() === "keychain") {
+    if (!postgresKeychainWritable || keychainConnections === null) {
+      throw new PostgresConnectionForgetError();
+    }
+    const entry = keychainConnections.find(({ connection }) => connection === connectionString);
+    if (!entry) {
+      return {
+        connections: readSavedPostgresConnections(),
+        credentialDeleted: Promise.resolve(true),
+      };
+    }
+    try {
+      writePendingPostgresDeletionIds([
+        ...new Set([...readPendingPostgresDeletionIds(), entry.id]),
+      ]);
+    } catch (error) {
+      reportCredentialStorageError(error);
+      throw new PostgresConnectionForgetError();
+    }
+
+    const next = keychainConnections.filter(({ id }) => id !== entry.id);
+    try {
+      window.localStorage.setItem(
+        POSTGRES_CONNECTION_IDS_STORAGE_KEY,
+        JSON.stringify(next.map(({ id }) => id)),
+      );
+    } catch (error) {
+      reportCredentialStorageError(error);
+      postgresKeychainWritable = false;
+      throw new PostgresConnectionForgetError();
+    }
+    setKeychainPostgresConnections(next);
+    return {
+      connections: next.map(({ connection }) => connection),
+      credentialDeleted: resumePostgresCredentialDeletions().then(
+        (failed) => !failed.includes(entry.id),
+      ),
+    };
+  }
+
+  let connections: string[];
+  try {
+    const value = window.localStorage.getItem(POSTGRES_CONNECTIONS_STORAGE_KEY);
+    const parsed: unknown = value ? JSON.parse(value) : [];
+    if (!Array.isArray(parsed)) {
+      throw new Error("The saved PostGIS connection list is malformed.");
+    }
+    connections = uniquePostgresConnections(
+      parsed.filter((item): item is string => typeof item === "string"),
+    ).filter((saved) => saved !== connectionString);
+    window.localStorage.setItem(POSTGRES_CONNECTIONS_STORAGE_KEY, JSON.stringify(connections));
+  } catch {
+    throw new PostgresConnectionForgetError();
+  }
+  window.dispatchEvent(new Event(POSTGRES_CONNECTIONS_CHANGED_EVENT));
+  return { connections, credentialDeleted: Promise.resolve(true) };
 }
 
 export function rememberPostgresConnection(connectionString: string): string[] {

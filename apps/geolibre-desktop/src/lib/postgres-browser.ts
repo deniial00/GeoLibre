@@ -5,6 +5,10 @@ import { uniqueDatabaseTables } from "./database-tables";
 import { isDesktopRuntime } from "./is-mobile";
 import { ignoreSidecarStartError, startGeoLibreSidecar } from "./sidecar";
 import type { ConnectionLoad, SetConnectionLoads } from "./browser-tree";
+import {
+  forgetPostgresConnection,
+  type PostgresConnectionForgetResult,
+} from "./saved-postgres-connections";
 
 export interface PostgresBrowserLoaderDependencies {
   isDesktop: () => boolean;
@@ -86,4 +90,35 @@ export function fetchPostgresBrowserTables(
         message: errorMessage(err, t("addData.postgres.errorConnect")),
       });
     });
+}
+
+export type SetBrowserExpanded = (update: (previous: Set<string>) => Set<string>) => void;
+
+/**
+ * Forgets a saved DSN, then drops its cached load, fetched marker and expansion
+ * so a re-saved copy starts collapsed and loads on first expand. Throws before
+ * touching Browser state when the saved connection cannot be removed.
+ */
+export function forgetPostgresBrowserConnection(
+  connectionString: string,
+  nodeId: string,
+  fetched: Set<string>,
+  setLoads: SetConnectionLoads,
+  setExpanded: SetBrowserExpanded,
+  forget: (connectionString: string) => PostgresConnectionForgetResult = forgetPostgresConnection,
+): Promise<boolean> {
+  const { credentialDeleted } = forget(connectionString);
+  fetched.delete(connectionString);
+  setLoads((previous) => {
+    const next = { ...previous };
+    delete next[connectionString];
+    return next;
+  });
+  setExpanded((previous) => {
+    if (!previous.has(nodeId)) return previous;
+    const next = new Set(previous);
+    next.delete(nodeId);
+    return next;
+  });
+  return credentialDeleted;
 }

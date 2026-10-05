@@ -29,6 +29,7 @@ import {
   postgresConnectionAccount,
   readBrowserPostgresConnections,
   readKeychainPostgresIds,
+  resumePostgresCredentialDeletions,
   setKeychainPostgresConnections,
   setPostgresKeychainWritable,
   type KeychainPostgresConnection,
@@ -107,6 +108,7 @@ export async function hydrateDesktopCredentials(): Promise<void> {
   }
   try {
     await hydratePostgresConnections(postgresIds, stored);
+    await resumePostgresCredentialDeletions();
     hydrateMssqlSecrets(mssqlIds, stored);
     await hydrateSettingsSecrets(stored);
     hydrateProjectCredentials(projectAccounts, stored);

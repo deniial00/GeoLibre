@@ -64,6 +64,8 @@ interface BrowserTreeNodeProps {
   onDeleteLibraryLayer: (node: BrowserNode) => void;
   /** Forget a saved SQL Server connection (its trash icon). */
   onForgetMssqlConnection: (node: BrowserNode) => void;
+  /** Forget a saved PostgreSQL connection (its trash icon). */
+  onForgetPostgresConnection: (node: BrowserNode) => void;
   /** Import a Layer Library JSON bundle (the My Data section's ⬆). */
   onImportLibrary: () => void;
   /** Export the Layer Library as a JSON bundle (the My Data section's ⬇). */
@@ -177,6 +179,7 @@ export function BrowserTreeNode({
   onCancelRename,
   onDeleteLibraryLayer,
   onForgetMssqlConnection,
+  onForgetPostgresConnection,
   onImportLibrary,
   onExportLibrary,
 }: BrowserTreeNodeProps) {
@@ -340,6 +343,18 @@ export function BrowserTreeNode({
             <Trash2 className="h-3.5 w-3.5" />
           </button>
         ) : null}
+        {node.kind === "connection" && node.connectionString && !node.mssqlConnectionId ? (
+          <button
+            type="button"
+            className="me-1 shrink-0 rounded p-1 text-muted-foreground opacity-0 hover:bg-accent hover:text-accent-foreground focus:opacity-100 group-hover:opacity-100"
+            title={t("browser.forgetPostgresConnection", { name: node.label })}
+            aria-label={t("browser.forgetPostgresConnection", { name: node.label })}
+            tabIndex={node.id === activeRowId ? 0 : -1}
+            onClick={() => onForgetPostgresConnection(node)}
+          >
+            <Trash2 className="h-3.5 w-3.5" />
+          </button>
+        ) : null}
         {node.libraryImportExport ? (
           <>
             <button
@@ -444,6 +459,7 @@ export function BrowserTreeNode({
                 onCancelRename={onCancelRename}
                 onDeleteLibraryLayer={onDeleteLibraryLayer}
                 onForgetMssqlConnection={onForgetMssqlConnection}
+                onForgetPostgresConnection={onForgetPostgresConnection}
                 onImportLibrary={onImportLibrary}
                 onExportLibrary={onExportLibrary}
               />

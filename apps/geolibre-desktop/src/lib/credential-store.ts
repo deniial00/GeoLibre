@@ -129,33 +129,37 @@ function recordFailure(error: unknown, lasting: boolean): void {
 const pending = new Map<string, string>();
 let drain: Promise<void> = Promise.resolve();
 
+function markAccountFailure(account: string, error: unknown): void {
+  useCredentialStorageStatus.setState((state) => ({
+    failedAccounts: { ...state.failedAccounts, [account]: true },
+  }));
+  recordFailure(error, false);
+}
+
+function clearAccountFailure(account: string): void {
+  if (!useCredentialStorageStatus.getState().failedAccounts[account]) return;
+  useCredentialStorageStatus.setState((state) => {
+    const failedAccounts = { ...state.failedAccounts };
+    delete failedAccounts[account];
+    // Every failed write is stored now; the warning would be out of date.
+    const recovered = !state.lasting && Object.keys(failedAccounts).length === 0;
+    return recovered ? { failedAccounts, error: null } : { failedAccounts };
+  });
+}
+
 async function drainPending(): Promise<void> {
   for (const [account, value] of [...pending]) {
     try {
       await writeSecureCredential(account, value);
     } catch (error) {
-      // Record the failure and move on: accounts are independent, so one that
-      // keeps failing must not stop later accounts from being written.
-      useCredentialStorageStatus.setState((state) => ({
-        failedAccounts: { ...state.failedAccounts, [account]: true },
-      }));
-      // The retry on the next queued change can fix this one.
-      recordFailure(error, false);
+      // Accounts are independent, so one failure must not stop later writes.
+      markAccountFailure(account, error);
       continue;
     }
-    // A newer value queued while this write was in flight stays pending, and so
-    // does the account's failure mark: the stored value is not the latest yet.
+    // A newer value queued while this write was in flight stays pending.
     if (pending.get(account) !== value) continue;
     pending.delete(account);
-    if (useCredentialStorageStatus.getState().failedAccounts[account]) {
-      useCredentialStorageStatus.setState((state) => {
-        const failedAccounts = { ...state.failedAccounts };
-        delete failedAccounts[account];
-        // Every failed write is stored now; the warning would be out of date.
-        const recovered = !state.lasting && Object.keys(failedAccounts).length === 0;
-        return recovered ? { failedAccounts, error: null } : { failedAccounts };
-      });
-    }
+    clearAccountFailure(account);
   }
 }
 
@@ -180,4 +184,21 @@ export function queueCredentialChanges(
   }
   drain = drain.then(drainPending);
   return drain;
+}
+
+/**
+ * Deletes `account` after every queued write ahead of it, dropping any queued
+ * write for it so a pending save cannot recreate the entry. Unlike
+ * queueCredentialChanges, rejects when the store does not confirm the
+ * deletion; the failure is reported through useCredentialStorageStatus but not
+ * retried here, so callers keep their own durable retry record.
+ */
+export function deleteSecureCredentialAfterQueue(account: string): Promise<void> {
+  pending.delete(account);
+  const deletion = drain.then(() => writeSecureCredential(account, ""));
+  drain = deletion.then(
+    () => clearAccountFailure(account),
+    (error: unknown) => markAccountFailure(account, error),
+  );
+  return deletion;
 }

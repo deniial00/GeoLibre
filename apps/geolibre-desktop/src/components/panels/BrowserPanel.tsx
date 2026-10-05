@@ -14,7 +14,8 @@ import { Search } from "lucide-react";
 import { useCallback, useMemo, useRef, useState, type KeyboardEvent, type RefObject } from "react";
 import { useTranslation } from "react-i18next";
 import { fetchMssqlBrowserTables, forgetMssqlBrowserConnection } from "../../lib/mssql-browser";
-import { fetchPostgresBrowserTables } from "../../lib/postgres-browser";
+import { fetchPostgresBrowserTables, forgetPostgresBrowserConnection } from "../../lib/postgres-browser";
+import { PostgresConnectionForgetError } from "../../lib/saved-postgres-connections";
 import {
   isLoadableFilePath,
   listDirectory,
@@ -775,6 +776,35 @@ export function BrowserPanel({
     if (fallbackRowId) requestAnimationFrame(() => focusRow(fallbackRowId));
   };
 
+  const forgetPostgresConnectionNode = (node: BrowserNode) => {
+    setError(null);
+    const connectionString = node.connectionString;
+    if (node.kind !== "connection" || !connectionString) return;
+    if (!window.confirm(t("addData.postgres.forgetConnectionConfirm", { name: node.label })))
+      return;
+    let credentialDeleted: Promise<boolean>;
+    try {
+      credentialDeleted = forgetPostgresBrowserConnection(
+        connectionString,
+        node.id,
+        connFetchedRef.current,
+        setConnLoads,
+        setExpanded,
+      );
+    } catch (err) {
+      if (err instanceof PostgresConnectionForgetError) {
+        setError(t("browser.forgetPostgresConnectionFailed"));
+        return;
+      }
+      throw err;
+    }
+    void credentialDeleted.then((deleted) => {
+      if (!deleted) setError(t("browser.forgetPostgresCredentialFailed"));
+    });
+    const fallbackRowId = visibleRows.find((row) => row.id === node.id)?.parentId;
+    if (fallbackRowId) requestAnimationFrame(() => focusRow(fallbackRowId));
+  };
+
   // Import/export the whole library as a JSON bundle, matching how the Style
   // Manager shares its presets. Ids collide on purpose so re-importing an
   // exported bundle updates entries instead of duplicating them.
@@ -894,6 +924,7 @@ export function BrowserPanel({
                 onDeleteLibraryLayer={deleteLibraryLayer}
                 onForgetMssqlConnection={forgetMssqlConnectionNode}
                 onImportLibrary={() => void importLibrary()}
+                onForgetPostgresConnection={forgetPostgresConnectionNode}
                 onExportLibrary={() => void exportLibrary()}
               />
             ))}
