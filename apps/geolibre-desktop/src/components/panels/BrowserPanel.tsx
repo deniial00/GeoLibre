@@ -15,7 +15,7 @@ import { Search } from "lucide-react";
 import { useCallback, useMemo, useRef, useState, type KeyboardEvent, type RefObject } from "react";
 import { useTranslation } from "react-i18next";
 import { isDesktopRuntime } from "../../lib/is-mobile";
-import { startGeoLibreSidecar } from "../../lib/sidecar";
+import { ignoreSidecarStartError, startGeoLibreSidecar } from "../../lib/sidecar";
 import { fetchMssqlBrowserTables, forgetMssqlBrowserConnection } from "../../lib/mssql-browser";
 import {
   isLoadableFilePath,
@@ -201,9 +201,10 @@ export function BrowserPanel({
       // The desktop sidecar is spawned on demand and only authenticated after
       // startGeoLibreSidecar runs, so ensure it is up before hitting /postgis —
       // best-effort, mirroring PostgresSource.handleConnectEditable (a failed
-      // start still lets the status/list calls surface the real error).
+      // start still lets the status/list calls surface the real error, except a
+      // stale sidecar from an earlier session, which is surfaced directly).
       void startGeoLibreSidecar()
-        .catch(() => {})
+        .catch(ignoreSidecarStartError)
         .then(() => fetchPostgisStatus())
         .then((status) => {
           // Same runtime gate as the Add Data dialog, so a missing postgis

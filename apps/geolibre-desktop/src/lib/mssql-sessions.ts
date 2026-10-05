@@ -6,7 +6,7 @@ import {
   type ConnectMssqlRequest,
   type MssqlAuthMethod,
 } from "@geolibre/processing";
-import { startGeoLibreSidecar } from "./sidecar";
+import { ignoreSidecarStartError, startGeoLibreSidecar } from "./sidecar";
 import {
   readSavedMssqlConnections,
   savedMssqlSecret,
@@ -104,7 +104,7 @@ export async function openMssqlSession(
   return result.session_id;
 }
 async function restoreSession(profileId: string, client: MssqlSessionClient): Promise<string> {
-  await client.startSidecar().catch(() => {});
+  await client.startSidecar().catch(ignoreSidecarStartError);
   const profile = readSavedMssqlConnections().find((item) => item.id === profileId);
   if (!profile) throw new MssqlReconnectRequiredError("Reconnect to SQL Server in Add Data.");
   const secret = resolveMssqlSecret(profileId, {});

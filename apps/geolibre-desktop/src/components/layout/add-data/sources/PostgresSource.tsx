@@ -18,7 +18,7 @@ import {
 import { postgisFeatureKeys, registerPostgisConnection } from "../../../../lib/postgis-connections";
 import { postgisTableKey, postgisTableLabel } from "../../../../lib/postgis-table-selection";
 import { IS_MAS_BUILD } from "../../../../lib/build-flags";
-import { startGeoLibreSidecar } from "../../../../lib/sidecar";
+import { ignoreSidecarStartError, startGeoLibreSidecar } from "../../../../lib/sidecar";
 import { isDesktopRuntime } from "../../../../lib/is-mobile";
 import {
   createBaseLayer,
@@ -150,13 +150,10 @@ export function PostgresSource({ initialPostgres }: PostgresSourceProps) {
       }
       const connectionString = postgresConnectionString.trim();
       setPostgisStatus(t("addData.postgres.statusListingTables"));
-      try {
-        // Best-effort: the sidecar may already be running (or be started
-        // externally in dev); a failed start still lets the list call try.
-        await startGeoLibreSidecar();
-      } catch {
-        // Ignored: the status check below surfaces the real error.
-      }
+      // Best-effort: the sidecar may already be running (or be started
+      // externally in dev); the status check below surfaces a missing runtime.
+      // Only a stale sidecar from an earlier session is surfaced from here.
+      await startGeoLibreSidecar().catch(ignoreSidecarStartError);
       // Check the runtime first so a missing psycopg reads as "install the
       // postgis extra", not as a generic connection failure (mirrors how the
       // other optional engines gate their dialogs on a *Status call).

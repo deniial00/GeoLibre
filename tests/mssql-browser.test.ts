@@ -9,6 +9,7 @@ import {
   type MssqlBrowserLoads,
 } from "../apps/geolibre-desktop/src/lib/mssql-browser";
 import { MssqlReconnectRequiredError } from "../apps/geolibre-desktop/src/lib/mssql-sessions";
+import { StaleSidecarError } from "../apps/geolibre-desktop/src/lib/sidecar";
 
 const table = {
   schema: "dbo",
@@ -110,6 +111,55 @@ describe("MSSQL Browser table loading", () => {
     assert.equal(fetched.has("profile"), false);
     assert.equal(state.loads["mssql:profile"]?.status, "error");
   });
+
+  it("surfaces a stale sidecar instead of querying it without a token", async () => {
+    const state = loadState();
+    const fetched = new Set<string>();
+    let statusCalls = 0;
+    const stale =
+      "A GeoLibre processing server from a previous session is still running on port 8765 " +
+      "but does not accept this session's token. Quit any stray GeoLibre processes and try again.";
+    fetchMssqlBrowserTables(
+      "profile",
+      fetched,
+      state.set,
+      i18next.t,
+      dependencies({
+        startSidecar: async () => {
+          throw new StaleSidecarError(stale);
+        },
+        fetchStatus: async () => {
+          statusCalls += 1;
+          throw new Error("Missing or invalid sidecar token");
+        },
+      }),
+    );
+    await nextTurn();
+
+    assert.deepEqual(state.loads["mssql:profile"], { status: "error", message: stale });
+    assert.equal(statusCalls, 0);
+    assert.equal(fetched.has("profile"), false);
+  });
+
+  it("lets the runtime status explain any other failed start", async () => {
+    const state = loadState();
+    const fetched = new Set<string>();
+    fetchMssqlBrowserTables(
+      "profile",
+      fetched,
+      state.set,
+      i18next.t,
+      dependencies({
+        startSidecar: async () => {
+          throw new Error("uv sync failed");
+        },
+      }),
+    );
+    await nextTurn();
+
+    assert.deepEqual(state.loads["mssql:profile"], { status: "loaded", tables: [table] });
+  });
+
   it("explains when a saved profile has no restorable credential", async () => {
     const state = loadState();
     const fetched = new Set<string>();
