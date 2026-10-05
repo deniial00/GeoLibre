@@ -8,6 +8,7 @@ import {
   maplibreGeoEditorPlugin as plugin,
   sketchesStyleForMassing,
   withCreatedSketch,
+  withoutSupersededSketchCopies,
 } from "../packages/plugins/src/plugins/maplibre-geo-editor";
 import { DEFAULT_LAYER_STYLE, type GeoLibreLayer } from "../packages/core/src";
 import { NULL_GEOMETRY } from "./helpers/null-geometry";
@@ -227,5 +228,30 @@ describe("maplibreGeoEditorPlugin", () => {
       older,
       created,
     ]);
+  });
+
+  // A sketch stored from the id-less callback copy while the read lagged must
+  // give way to Geoman's id-bearing copy on the next merge, without dropping a
+  // different sketch that sits on the same coordinates.
+  it("drops a stored callback copy once the editor holds it under an id", () => {
+    const collection = (...features: Feature[]): FeatureCollection => ({
+      type: "FeatureCollection",
+      features,
+    });
+    const geometry = { type: "Point" as const, coordinates: [1, 2] };
+    const callbackCopy: Feature = { type: "Feature", properties: {}, geometry };
+    const editorCopy: Feature = { ...callbackCopy, id: "feature-1" };
+    const older: Feature = { ...callbackCopy, id: "feature-0" };
+
+    assert.deepEqual(
+      withoutSupersededSketchCopies(collection(older, callbackCopy), collection(older, editorCopy))
+        .features,
+      [older],
+    );
+    // The editor has not caught up yet: the stored copy stays.
+    assert.deepEqual(
+      withoutSupersededSketchCopies(collection(older, callbackCopy), collection(older)).features,
+      [older, callbackCopy],
+    );
   });
 });
