@@ -1,3 +1,4 @@
+import { useAppStore } from "@geolibre/core";
 import { MssqlSessionExpiredError, MssqlWriteRejectedError } from "@geolibre/processing";
 import type { Feature, FeatureCollection } from "geojson";
 
@@ -36,13 +37,23 @@ export function mssqlFeatureKey(feature: Feature, primaryKey: string): string | 
   return typeof key === "string" || typeof key === "number" ? key : undefined;
 }
 
-/** Keep an immutable in-memory baseline for identifying user-edited values. */
+/**
+ * Keep an immutable in-memory baseline for identifying user-edited values.
+ * Recording one also drops baselines no save can use any more: those of
+ * removed layers and those from an earlier project.
+ */
 export function rememberMssqlLoadedRows(
   layerId: string,
   generation: number,
   primaryKey: string,
   geojson: FeatureCollection,
 ): void {
+  const liveLayerIds = new Set(useAppStore.getState().layers.map((layer) => layer.id));
+  for (const [id, entry] of loadedMssqlRows) {
+    if (id !== layerId && (entry.generation !== generation || !liveLayerIds.has(id))) {
+      loadedMssqlRows.delete(id);
+    }
+  }
   const rows = new Map<string, { geometry: string; properties: Record<string, unknown> }>();
   for (const feature of geojson.features) {
     const key = mssqlFeatureKey(feature, primaryKey);

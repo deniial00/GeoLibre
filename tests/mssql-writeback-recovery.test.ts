@@ -399,6 +399,28 @@ describe("SQL Server write payload baselines", () => {
     assert.deepEqual(reopenedProjectPayload, {});
     resetMssqlLoadedRows();
   });
+
+  it("drops the baseline of a layer that is no longer in the project", () => {
+    resetMssqlLoadedRows();
+    const loaded: FeatureCollection = {
+      type: "FeatureCollection",
+      features: [feature(1, "North")],
+    };
+    const edited: FeatureCollection = {
+      type: "FeatureCollection",
+      features: [{ ...feature(1, "North"), properties: { id: 1, name: "South" } }],
+    };
+    rememberMssqlLoadedRows("removed-layer", 4, "id", loaded);
+    assert.ok(mssqlWritePayload("removed-layer", 4, edited).changedColumns);
+
+    // No layer with that id is in the store, so recording another baseline
+    // releases it; a later save falls back to sending the full rows.
+    rememberMssqlLoadedRows("layer", 4, "id", loaded);
+
+    assert.deepEqual(mssqlWritePayload("removed-layer", 4, edited), {});
+    assert.ok(mssqlWritePayload("layer", 4, edited).changedColumns);
+    resetMssqlLoadedRows();
+  });
 });
 describe("SQL Server write failure certainty", () => {
   it("keeps a confirmed rejection separate from an uncertain write", async () => {
