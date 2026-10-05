@@ -3821,8 +3821,11 @@ fn process_command_line(process: windows_sys::Win32::Foundation::HANDLE) -> Opti
     };
     use windows_sys::Win32::Foundation::UNICODE_STRING;
 
-    // NTSTATUS for "buffer too small"; the call reports the size it needs.
+    // NTSTATUS codes for "buffer too small"; the call reports the size it needs.
+    // Which one this info class returns is not documented, so accept all three.
     const STATUS_INFO_LENGTH_MISMATCH: i32 = 0xC000_0004_u32 as i32;
+    const STATUS_BUFFER_TOO_SMALL: i32 = 0xC000_0023_u32 as i32;
+    const STATUS_BUFFER_OVERFLOW: i32 = 0x8000_0005_u32 as i32;
 
     // The result is a UNICODE_STRING header followed by the text it points at.
     // A u64 buffer keeps the header's pointer field aligned.
@@ -3841,7 +3844,11 @@ fn process_command_line(process: windows_sys::Win32::Foundation::HANDLE) -> Opti
                 &mut needed,
             )
         };
-        if status == STATUS_INFO_LENGTH_MISMATCH && needed > capacity {
+        if matches!(
+            status,
+            STATUS_INFO_LENGTH_MISMATCH | STATUS_BUFFER_TOO_SMALL | STATUS_BUFFER_OVERFLOW
+        ) && needed > capacity
+        {
             buffer = vec![0u64; (needed as usize).div_ceil(size_of::<u64>())];
             continue;
         }
@@ -4104,11 +4111,14 @@ fn is_geolibre_sidecar_process(pid: i32) -> bool {
     let Ok(command_line) = fs::read(path) else {
         return false;
     };
-    is_geolibre_sidecar_command_line(&String::from_utf8_lossy(&command_line))
+    let command_line = String::from_utf8_lossy(&command_line);
+    // Linux has always also accepted the app's directory path; Windows and macOS
+    // match only the module the sidecar is launched with.
+    is_geolibre_sidecar_command_line(&command_line) || command_line.contains("geolibre_server/app")
 }
 
-// Whether a process command line is one of our sidecars (started by
-// start_geolibre_sidecar_blocking as `uvicorn geolibre_server.app.main:app`).
+// Whether a process command line is one of our sidecars, started by
+// start_geolibre_sidecar_blocking as `uvicorn geolibre_server.app.main:app`.
 #[cfg(any(
     all(
         any(target_os = "linux", target_os = "windows", target_os = "macos"),
@@ -4118,7 +4128,6 @@ fn is_geolibre_sidecar_process(pid: i32) -> bool {
 ))]
 fn is_geolibre_sidecar_command_line(command_line: &str) -> bool {
     command_line.contains("geolibre_server.app.main")
-        || command_line.contains("geolibre_server/app")
 }
 
 // Recognize OUR Jupyter server (started by start_jupyter_server) by the bundled
@@ -6392,6 +6401,11 @@ mod tests {
         // The user's own server on the same port is left alone.
         assert!(!is_geolibre_sidecar_command_line(
             "python -m uvicorn myapp.main:app --port 8765"
+        ));
+        // A different server merely run from inside the package's directory is
+        // not the sidecar.
+        assert!(!is_geolibre_sidecar_command_line(
+            "python /src/geolibre_server/app/other_server.py --port 8765"
         ));
         assert!(!is_geolibre_sidecar_command_line(""));
     }
