@@ -247,7 +247,6 @@ describe("plugin app API contract", () => {
   });
 });
 
-
 describe("plugin app API map tools", () => {
   beforeEach(() => {
     useAppStore.getState().newProject({ name: "App API map tools" });
