@@ -2528,6 +2528,13 @@ body,
   color: #1f2a37;
 }
 
+/* Reverse geocoding uses MapLibre's white popup surface in both themes.
+   Pin its inherited text (including copy/close buttons and status messages)
+   to the same dark foreground as the light map controls. */
+.geolibre-reverse-geocode-popup :is(.maplibregl-popup-content, .maplibregl-popup-close-button) {
+  color: #1f2a37;
+}
+
 .geolibre-identify-popup :is(.maplibregl-popup-content, .mapboxgl-popup-content) {
   background: hsl(var(--popover));
   border: 1px solid hsl(var(--border));
