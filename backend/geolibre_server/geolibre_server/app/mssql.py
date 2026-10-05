@@ -47,6 +47,10 @@ _LOGIN_TIMEOUT_S = 10
 _QUERY_TIMEOUT_S = 60
 _REACHABILITY_TIMEOUT_S = 3
 _GEOMETRY_SAMPLE_ROWS = 1000
+# getaddrinfo cannot be cancelled, so a lookup the resolver never answers keeps
+# its thread until the OS gives up. A small shared pool caps how many such
+# threads failed connects can pile up; lookups queued behind them time out.
+_DNS_PROBE_EXECUTOR = ThreadPoolExecutor(max_workers=2, thread_name_prefix="mssql-dns-probe")
 _INTERACTIVE_TIMEOUT_S = 300
 _SESSION_IDLE_S = 8 * 3600
 _MAX_SESSIONS = 32
@@ -322,12 +326,11 @@ def _trim_fraction(value: str) -> str:
 def _unreachable_reason(host: str, instance: Optional[str], port: int) -> Optional[str]:
     # getaddrinfo has no timeout of its own; a hung resolver must not hold the
     # request thread, so an unanswered lookup leaves the driver message alone.
-    executor = ThreadPoolExecutor(max_workers=1)
-    lookup = executor.submit(socket.getaddrinfo, host, port, type=socket.SOCK_STREAM)
-    executor.shutdown(wait=False)
+    lookup = _DNS_PROBE_EXECUTOR.submit(socket.getaddrinfo, host, port, type=socket.SOCK_STREAM)
     try:
         lookup.result(timeout=_REACHABILITY_TIMEOUT_S)
     except FutureTimeoutError:
+        lookup.cancel()
         return None
     except (socket.gaierror, UnicodeError):
         # IDNA rejects empty or over-long labels before any DNS lookup.

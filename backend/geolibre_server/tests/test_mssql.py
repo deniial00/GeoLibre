@@ -687,10 +687,18 @@ def test_unanswered_dns_lookup_falls_back_to_driver_message(monkeypatch):
         "create_connection",
         lambda *args, **kwargs: pytest.fail("no TCP probe after an unanswered lookup"),
     )
+
+    def probe_threads():
+        return [t for t in threading.enumerate() if t.name.startswith("mssql-dns-probe")]
+
     try:
         started = time.monotonic()
-        assert mssql._unreachable_reason("slow-dns.example", None, 1433) is None
-        assert time.monotonic() - started < 1
+        # Repeated failed connects against a hung resolver each fall back fast
+        # and never hold more than the pool's two probe threads.
+        for _ in range(4):
+            assert mssql._unreachable_reason("slow-dns.example", None, 1433) is None
+        assert time.monotonic() - started < 2
+        assert len(probe_threads()) <= 2
     finally:
         release.set()
 
