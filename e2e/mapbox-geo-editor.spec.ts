@@ -21,6 +21,44 @@ const PROJECT = {
   preferences: {
     map: { mapboxStyleUrl: "https://tiles.openfreemap.org/styles/liberty" },
   },
+  layers: [
+    {
+      id: "editable-point-layer",
+      name: "Editable points",
+      type: "geojson",
+      source: { type: "geojson" },
+      visible: true,
+      opacity: 1,
+      style: {
+        minZoom: 0,
+        maxZoom: 24,
+        fillColor: "#3b82f6",
+        strokeColor: "#1e40af",
+        strokeWidth: 2,
+        strokeWidthUnit: "pixels",
+        fillOpacity: 0.6,
+        circleRadius: 6,
+        rasterBrightnessMin: 0,
+        rasterBrightnessMax: 1,
+        rasterSaturation: 0,
+        rasterContrast: 0,
+        rasterHueRotate: 0,
+      },
+      metadata: {},
+      geojson: {
+        type: "FeatureCollection",
+        features: [
+          {
+            type: "Feature",
+            id: "existing-point",
+            properties: { name: "Existing" },
+            geometry: { type: "Point", coordinates: [-122.42, 37.78] },
+          },
+        ],
+      },
+      capabilities: { query: true, create: true, update: true, delete: true, export: true },
+    },
+  ],
 };
 
 test.use({ actionTimeout: 30_000 });
@@ -72,6 +110,26 @@ async function editorMapState(page: Page) {
         .map((layer: { id: string }) => layer.id)
         .filter((id: string) => id.includes("geolibre-mapbox-") || id.startsWith("layer-")),
     };
+  });
+}
+
+/** Features in the "Editable points" layer's engine source, as last written by the store. */
+async function editableFeatureCount(page: Page) {
+  return page.evaluate(() => {
+    // Minimal shape of the engine ref `bindEngine` stored on window.
+    type GeoJsonSourceLike = { serialize(): { data?: unknown } };
+    type MapLike = { getSource(id: string): GeoJsonSourceLike | undefined };
+    const { current: engine } = (
+      window as unknown as {
+        geoEditorTestRef: {
+          current: { kind: string; getMapboxMap(): MapLike; getMap(): MapLike };
+        };
+      }
+    ).geoEditorTestRef;
+    const map = engine.kind === "mapbox" ? engine.getMapboxMap() : engine.getMap();
+    const data = map.getSource("geolibre-mapbox-editable-point-layer")?.serialize().data;
+    if (!data || typeof data !== "object" || !("features" in data)) return -1;
+    return Array.isArray(data.features) ? data.features.length : -1;
   });
 }
 
@@ -196,6 +254,13 @@ for (const theme of ["light", "dark"] as const) {
 
       // The feature reaches the store as the Sketches layer, drawn by the engine.
       await expect(layerRow(page, "Sketches")).toBeVisible();
+      // Outside an in-place geometry edit, creation still opens the attribute
+      // form with the massing schema; close it before continuing.
+      const createdPanel = page.locator(".geo-editor-attribute-panel");
+      await expect(createdPanel).not.toHaveClass(/attribute-panel--hidden/);
+      await expect(createdPanel.getByText("Height (m)")).toBeVisible();
+      await createdPanel.locator(".geo-editor-attribute-panel-close").click();
+      await expect(createdPanel).toHaveClass(/attribute-panel--hidden/);
       await expect
         .poll(async () => (await editorMapState(page)).sketchesLayers.length)
         .toBeGreaterThan(0);
@@ -228,6 +293,26 @@ for (const theme of ["light", "dark"] as const) {
       await expect(rotatePopup).toBeHidden();
 
       await page.screenshot({ path: info.outputPath(`mapbox-geo-editor-${theme}.png`) });
+
+      // In-place geometry editing has no attribute schema for a newly drawn
+      // point. GeoEditor opens an empty form after the callback returns; the
+      // plugin must close it without changing the normal Sketches behavior above.
+      const editableRow = layerRow(page, "Editable points");
+      await editableRow.getByRole("button", { name: "Layer actions" }).click();
+      await page.getByRole("menuitem", { name: "Edit geometry", exact: true }).click();
+      const expandToolbar = toolbar.locator('button[title="Expand toolbar"]');
+      if (await expandToolbar.isVisible()) await expandToolbar.click();
+      await toolbar.locator('button[data-mode="marker"]').click();
+      const newPoint = await canvasPoint(page, 0.85, 0.5);
+      await page.mouse.click(newPoint.x, newPoint.y);
+      const attributePanel = page.locator(".geo-editor-attribute-panel");
+      await expect(attributePanel).toHaveClass(/attribute-panel--hidden/);
+
+      await editableRow.getByRole("button", { name: "Layer actions" }).click();
+      await page.getByRole("menuitem", { name: "Finish editing geometry", exact: true }).click();
+      // Saving the session writes the drawn point back to the layer, proving the
+      // hidden-panel assertion above followed a real creation.
+      await expect.poll(() => editableFeatureCount(page)).toBe(2);
 
       // The plugin declares both 2D engines, so the manager re-activates it on
       // each swap and the sketch persists through the store.

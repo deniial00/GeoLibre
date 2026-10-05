@@ -393,13 +393,18 @@ function getGeoEditorOptions(mapboxGl: MapboxGl | null): GeoEditorOptions {
         },
       ],
     },
-    onFeatureCreate: () => {
+    onFeatureCreate: (feature) => {
       unionSketchesWithStoreOnNextSync = true;
-      // Defer until Geoman commits the new feature to its feature store.
+      // Geoman's callback payload is authoritative even if the collection read
+      // still reflects the pre-create snapshot.
       queueMicrotask(() => {
-        syncSketchesToStore();
+        syncSketchesToStore(feature);
         applySketchesMapDisplay();
       });
+      if (editTargetLayerId !== null) {
+        // GeoEditor opens the attribute panel after this callback returns.
+        queueMicrotask(() => geoEditorControl?.closeAttributeEditor());
+      }
     },
     onFeatureEdit: () => {
       syncSketchesToStore();
@@ -685,7 +690,7 @@ function unionFeatureCollections(...collections: FeatureCollection[]): FeatureCo
   return { type: "FeatureCollection", features: [...byKey.values()] };
 }
 
-function syncSketchesToStore(): void {
+function syncSketchesToStore(createdFeature?: Feature): void {
   if (!geoEditorControl || restoringSketchesToEditor) return;
 
   // During a geometry-edit session edits live in the editor and are written
@@ -695,6 +700,13 @@ function syncSketchesToStore(): void {
   if (editTargetLayerId) return;
 
   let collection = cloneFeatureCollection(geoEditorControl.getAllFeatureCollection());
+  if (createdFeature) {
+    collection = unionFeatureCollections(collection, {
+      type: "FeatureCollection",
+      features: [structuredClone(createdFeature)],
+    });
+  }
+
   const store = useAppStore.getState();
   const existing = findSketchesLayer(store.layers);
 
