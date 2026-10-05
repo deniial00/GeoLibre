@@ -401,7 +401,7 @@ function getGeoEditorOptions(mapboxGl: MapboxGl | null): GeoEditorOptions {
         syncSketchesToStore(feature);
         applySketchesMapDisplay();
       });
-      if (editTargetLayerId !== null) {
+      if (editTargetLayerId) {
         // GeoEditor opens the attribute panel after this callback returns.
         queueMicrotask(() => geoEditorControl?.closeAttributeEditor());
       }
@@ -690,6 +690,33 @@ function unionFeatureCollections(...collections: FeatureCollection[]): FeatureCo
   return { type: "FeatureCollection", features: [...byKey.values()] };
 }
 
+/**
+ * Add the feature a create callback reported unless the editor's own read
+ * already holds it. The callback copy may lack the id Geoman gives the
+ * imported feature, so a matching id or an identical geometry counts as the
+ * same sketch; a union by `sketchFeatureKey` would keep both copies.
+ */
+export function withCreatedSketch(
+  collection: FeatureCollection,
+  created: Feature,
+): FeatureCollection {
+  const identity = (feature: Feature) => {
+    const props = feature.properties as Record<string, unknown> | null;
+    return feature.id ?? props?.__gm_id;
+  };
+  const createdId = identity(created);
+  const createdGeometry = JSON.stringify(created.geometry);
+  const present = collection.features.some((feature) => {
+    const id = identity(feature);
+    return (
+      (createdId != null && id != null && String(id) === String(createdId)) ||
+      JSON.stringify(feature.geometry) === createdGeometry
+    );
+  });
+  if (present) return collection;
+  return { ...collection, features: [...collection.features, structuredClone(created)] };
+}
+
 function syncSketchesToStore(createdFeature?: Feature): void {
   if (!geoEditorControl || restoringSketchesToEditor) return;
 
@@ -700,12 +727,7 @@ function syncSketchesToStore(createdFeature?: Feature): void {
   if (editTargetLayerId) return;
 
   let collection = cloneFeatureCollection(geoEditorControl.getAllFeatureCollection());
-  if (createdFeature) {
-    collection = unionFeatureCollections(collection, {
-      type: "FeatureCollection",
-      features: [structuredClone(createdFeature)],
-    });
-  }
+  if (createdFeature) collection = withCreatedSketch(collection, createdFeature);
 
   const store = useAppStore.getState();
   const existing = findSketchesLayer(store.layers);

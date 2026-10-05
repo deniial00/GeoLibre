@@ -6,6 +6,7 @@ import {
   isGeomanCommittedDisplayLayer,
   maplibreGeoEditorPlugin as plugin,
   sketchesStyleForMassing,
+  withCreatedSketch,
 } from "../packages/plugins/src/plugins/maplibre-geo-editor";
 import { DEFAULT_LAYER_STYLE, type GeoLibreLayer } from "../packages/core/src";
 import { NULL_GEOMETRY } from "./helpers/null-geometry";
@@ -187,5 +188,25 @@ describe("maplibreGeoEditorPlugin", () => {
     layer.style = sketchesStyleForMassing(layer, massing);
     layer.style = sketchesStyleForMassing(layer, flat);
     assert.deepEqual(layer.style, original);
+  });
+
+  // The create callback's copy can lack the id Geoman gives the imported
+  // feature; storing both would duplicate the new sketch.
+  it("adds a created sketch only when the editor read does not already hold it", () => {
+    const geometry = { type: "Point" as const, coordinates: [1, 2] };
+    const created = { type: "Feature" as const, properties: {}, geometry };
+    const editorCopy = { ...created, id: "feature-1" };
+    const other = {
+      type: "Feature" as const,
+      id: "feature-0",
+      properties: {},
+      geometry: { type: "Point" as const, coordinates: [5, 5] },
+    };
+
+    const withCopy = { type: "FeatureCollection" as const, features: [other, editorCopy] };
+    assert.deepEqual(withCreatedSketch(withCopy, created).features, [other, editorCopy]);
+
+    const stale = { type: "FeatureCollection" as const, features: [other] };
+    assert.deepEqual(withCreatedSketch(stale, created).features, [other, created]);
   });
 });
