@@ -24,6 +24,7 @@ import {
 import type { CesiumEngine, getPrimaryCesiumControlHost, MapEngine } from "@geolibre/map";
 import type * as GeoLibrePlugins from "@geolibre/plugins";
 import type {
+  GeoLibreActiveMapTool,
   GeoLibreCogLayerOptions,
   GeoLibreCogRenderEngine,
   GeoLibreDeckGL,
@@ -190,6 +191,13 @@ function effectiveBasemapUrl(
     : state.basemapStyleUrl;
 }
 
+function activeMapTool(
+  state: Pick<AppState, "identifyLayerId" | "featureSelectionActive">,
+): GeoLibreActiveMapTool {
+  if (state.featureSelectionActive) return "feature-selection";
+  return state.identifyLayerId !== null ? "identify" : null;
+}
+
 /**
  * Builds the {@link GeoLibreAppAPI} object handed to plugins.
  *
@@ -229,6 +237,19 @@ export function createAppAPI(
       return id;
     },
     ...createPluginLayerQueries(),
+    getActiveMapTool: () => activeMapTool(useAppStore.getState()),
+    onActiveMapToolChange: (callback: (tool: GeoLibreActiveMapTool) => void) => {
+      let previousTool = activeMapTool(useAppStore.getState());
+      return useAppStore.subscribe(() => {
+        // Renderer subscriptions can cancel selection in a nested store
+        // update. Read the live state and remember the delivered value so
+        // the outer update cannot emit a stale or duplicate notification.
+        const tool = activeMapTool(useAppStore.getState());
+        if (tool === previousTool) return;
+        previousTool = tool;
+        callback(tool);
+      });
+    },
     addTileLayer: (name: string, url: string, options?: GeoLibreTileLayerOptions) =>
       store.addTileLayer(
         name,

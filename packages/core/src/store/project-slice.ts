@@ -148,6 +148,7 @@ export const createProjectSlice: SliceCreator<ProjectSlice> = (set, get) => ({
       selectedFeatureIds: [],
       identifyLayerId: null,
       identifyLayerIds: null,
+      featureSelectionActive: false,
       // The copied style names a layer from the previous project, so a
       // paste in the new one would apply an orphaned entry.
       copiedLayerStyle: null,
@@ -206,6 +207,7 @@ export const createProjectSlice: SliceCreator<ProjectSlice> = (set, get) => ({
       selectedLayerId,
       selectedFeatureId: null,
       selectedFeatureIds: [],
+      featureSelectionActive: false,
       // A project that saved an Identify target (issue #2688) opens with it
       // armed; any other load disarms Identify, since the previous target
       // named a layer of the project being replaced.
