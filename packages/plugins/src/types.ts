@@ -178,6 +178,7 @@ export interface GeoLibreWfsLayerOptions {
    * Stored in the layer's request URL, so refresh and reopened projects use it.
    */
   maxFeatures?: number;
+
   /**
    * Provenance fields merged into the new layer's `metadata`, as for
    * {@link GeoLibreTileLayerOptions.metadata}. GeoLibre's own WFS request keys
