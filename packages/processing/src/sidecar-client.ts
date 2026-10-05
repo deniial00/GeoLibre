@@ -1116,6 +1116,8 @@ export interface WriteMssqlTableRequest {
   baseline_keys?: Array<string | number>;
   capabilities?: LayerCapabilities;
   unchanged_geometry_keys?: Array<string | number>;
+  /** Per loaded row, the columns edited since load; limits that row's update. */
+  changed_columns?: Array<{ key: string | number; columns: string[] }>;
 }
 
 export type WriteMssqlTableResult = WritePostgisTableResult;

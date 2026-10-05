@@ -364,7 +364,7 @@ describe("SQL Server write-back refresh recovery", () => {
 });
 
 describe("SQL Server write payload baselines", () => {
-  it("sends only changed values and marks unchanged geometry for omission", () => {
+  it("lists edited columns per loaded row and marks unchanged geometry for omission", () => {
     resetMssqlLoadedRows();
     const loaded: FeatureCollection = {
       type: "FeatureCollection",
@@ -392,12 +392,11 @@ describe("SQL Server write payload baselines", () => {
 
     const payload = mssqlWritePayload("layer", 4, edited);
 
-    assert.deepEqual(payload.geojson.features[0].properties, { id: 1, pop: 11 });
+    assert.deepEqual(payload.changedColumns, [{ key: 1, columns: ["pop"] }]);
     assert.deepEqual(payload.unchangedGeometryKeys, [1]);
 
     const reopenedProjectPayload = mssqlWritePayload("layer", 5, edited);
-    assert.equal(reopenedProjectPayload.geojson, edited);
-    assert.equal(reopenedProjectPayload.unchangedGeometryKeys, undefined);
+    assert.deepEqual(reopenedProjectPayload, {});
     resetMssqlLoadedRows();
   });
 });

@@ -55,50 +55,48 @@ export function rememberMssqlLoadedRows(
   loadedMssqlRows.set(layerId, { generation, primaryKey, rows });
 }
 
-/** Send only edited properties while retaining geometry for compatible older sidecars. */
+/**
+ * Describe which loaded rows the user edited. Features keep their full
+ * properties so a row deleted outside the app is reinserted intact rather than
+ * with only the edited columns; the sidecar limits each update to
+ * `changedColumns`, so stale loaded values cannot overwrite newer stored ones.
+ */
 export function mssqlWritePayload(
   layerId: string,
   generation: number,
   geojson: FeatureCollection,
 ): {
-  geojson: FeatureCollection;
   unchangedGeometryKeys?: Array<string | number>;
+  changedColumns?: Array<{ key: string | number; columns: string[] }>;
 } {
   const baseline = loadedMssqlRows.get(layerId);
-  if (!baseline || baseline.generation !== generation) return { geojson };
+  if (!baseline || baseline.generation !== generation) return {};
 
-  let matchedRows = 0;
   const unchangedGeometryKeys: Array<string | number> = [];
-  const features = geojson.features.map((feature) => {
+  const changedColumns: Array<{ key: string | number; columns: string[] }> = [];
+  for (const feature of geojson.features) {
     const key = mssqlFeatureKey(feature, baseline.primaryKey);
-    if (key === undefined) return feature;
+    if (key === undefined) continue;
     const row = baseline.rows.get(mssqlRowKey(key));
-    if (!row) return feature;
+    if (!row) continue;
 
-    matchedRows += 1;
-    const properties = feature.properties ?? {};
-    const changed: Record<string, unknown> = {};
-    for (const [name, value] of Object.entries(properties)) {
-      if (
-        name !== baseline.primaryKey &&
-        (!Object.prototype.hasOwnProperty.call(row.properties, name) ||
-          JSON.stringify(value) !== JSON.stringify(row.properties[name]))
-      ) {
-        changed[name] = value;
-      }
-    }
+    const columns = Object.entries(feature.properties ?? {})
+      .filter(
+        ([name, value]) =>
+          name !== baseline.primaryKey &&
+          (!Object.prototype.hasOwnProperty.call(row.properties, name) ||
+            JSON.stringify(value) !== JSON.stringify(row.properties[name])),
+      )
+      .map(([name]) => name);
+    changedColumns.push({ key, columns });
     if (JSON.stringify(feature.geometry ?? null) === row.geometry) {
       unchangedGeometryKeys.push(key);
     }
-    return {
-      ...feature,
-      properties: { [baseline.primaryKey]: key, ...changed },
-    };
-  });
+  }
 
-  if (!matchedRows) return { geojson };
+  if (!changedColumns.length) return {};
   return {
-    geojson: { ...geojson, features },
+    changedColumns,
     ...(unchangedGeometryKeys.length ? { unchangedGeometryKeys } : {}),
   };
 }

@@ -187,6 +187,7 @@ def plan_feature_diff(
     capabilities: Optional[dict[str, bool]],
     table_label: str,
     unchanged_geometry_keys: Optional[list] = None,
+    changed_columns: Optional[dict[Any, list[str]]] = None,
 ) -> FeatureDiff:
     """Plan row-level changes without executing database-specific SQL.
 
@@ -195,13 +196,17 @@ def plan_feature_diff(
     is inserted explicitly when ``insert_explicit_key`` allows. Deletes are
     scoped to the supplied baseline so concurrent inserts survive. Updates carry
     only changed writable columns and omit geometry when it is unchanged or its
-    key is listed in ``unchanged_geometry_keys``. Capabilities are caller-provided
+    key is listed in ``unchanged_geometry_keys``. When ``changed_columns`` names
+    a key, its update is further limited to those client-edited columns, so a
+    stale loaded value cannot overwrite a newer stored one; inserts still use
+    every submitted writable property. Capabilities are caller-provided
     consistency hints, not authorization; database grants remain the access-control
     boundary.
     """
     writable = set(writable_columns)
     existing = set(existing_rows)
     unchanged = set(unchanged_geometry_keys or [])
+    edited_columns = {key: set(columns) for key, columns in (changed_columns or {}).items()}
     kept: set[Any] = set()
     updates: list[RowChange] = []
     inserts: list[RowChange] = []
@@ -222,10 +227,12 @@ def plan_feature_diff(
             kept.add(key)
             stored_geometry, stored_values = existing_rows[key]
             geometry_changed = key not in unchanged and geometry != stored_geometry
+            edited = edited_columns.get(key)
             values = {
                 column: properties[column]
                 for column in columns
-                if properties[column] != stored_values.get(column)
+                if (edited is None or column in edited)
+                and properties[column] != stored_values.get(column)
             }
             if not geometry_changed and not values:
                 # The client submits the whole layer; skipping unchanged rows

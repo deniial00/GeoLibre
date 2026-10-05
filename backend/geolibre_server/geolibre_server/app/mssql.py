@@ -16,7 +16,7 @@ import time
 from contextlib import contextmanager
 from dataclasses import dataclass
 from functools import lru_cache
-from typing import Any, Iterator, Literal, Optional
+from typing import Any, Iterator, Literal, Optional, Union
 
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import JSONResponse
@@ -214,6 +214,13 @@ class MssqlReadRequest(BaseModel):
     excluded_fields: list[str] = []
 
 
+class MssqlChangedColumns(BaseModel):
+    """Columns the client edited since load for one existing row."""
+
+    key: Union[int, str]
+    columns: list[str]
+
+
 class MssqlWriteRequest(BaseModel):
     session_id: str
     schema_name: str = "dbo"
@@ -223,6 +230,7 @@ class MssqlWriteRequest(BaseModel):
     baseline_keys: Optional[list] = None
     capabilities: Optional[dict[str, bool]] = None
     unchanged_geometry_keys: Optional[list] = None
+    changed_columns: Optional[list[MssqlChangedColumns]] = None
 
 
 def _build_connection_string(
@@ -322,7 +330,8 @@ def _trim_fraction(value: str) -> str:
 def _unreachable_reason(host: str, instance: Optional[str], port: int) -> Optional[str]:
     try:
         socket.getaddrinfo(host, port, type=socket.SOCK_STREAM)
-    except socket.gaierror:
+    except (socket.gaierror, UnicodeError):
+        # IDNA rejects empty or over-long labels before any DNS lookup.
         return f"The host name '{host}' could not be resolved"
     if instance is not None:
         return None
@@ -1006,6 +1015,11 @@ def mssql_write(request: MssqlWriteRequest) -> dict[str, Any]:
                 capabilities=request.capabilities,
                 table_label=f"{request.schema_name}.{request.table}",
                 unchanged_geometry_keys=request.unchanged_geometry_keys,
+                changed_columns=(
+                    {item.key: item.columns for item in request.changed_columns}
+                    if request.changed_columns is not None
+                    else None
+                ),
             )
             needs_geometry_write = any(
                 change.geometry_changed and change.geometry is not None for change in diff.updates

@@ -870,9 +870,10 @@ export function useLayerActions({
                     schema_name: schema,
                     table,
                     geometry_column: geometryColumn,
-                    geojson: payload.geojson,
+                    geojson,
                     baseline_keys: mssqlBaseline,
                     unchanged_geometry_keys: payload.unchangedGeometryKeys,
+                    changed_columns: payload.changedColumns,
                     capabilities: resolveLayerCapabilities(layer),
                   }),
                 );

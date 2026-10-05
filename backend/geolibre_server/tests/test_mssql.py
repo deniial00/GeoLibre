@@ -561,7 +561,8 @@ def test_write_updates_only_changed_values_without_rewriting_geometry(monkeypatc
     request = _install_session(monkeypatch, conn)
     geometry = {"type": "Point", "coordinates": [0, 0]}
     conn.fetchone_results = [(1,)]
-    conn.fetchall_results = [[(1, b"wkb", 0, 1, "North", 10)]]
+    # Another client renamed the row after load; the app only edited population.
+    conn.fetchall_results = [[(1, b"wkb", 0, 1, "North (changed externally)", 10)]]
     statements = []
     conn.execute_hook = lambda sql, params: statements.append((sql, params))
     monkeypatch.setattr(mssql, "_wkb_to_geojson", lambda *args: geometry)
@@ -586,6 +587,7 @@ def test_write_updates_only_changed_values_without_rewriting_geometry(monkeypatc
             session_id=request.session_id,
             table="parcels",
             baseline_keys=[1],
+            changed_columns=[{"key": 1, "columns": ["population"]}],
             geojson={
                 "type": "FeatureCollection",
                 "features": [
@@ -759,6 +761,23 @@ def test_open_connection_distinguishes_dns_and_port_failures(monkeypatch, failur
         mssql._open_connection(session)
     assert expected in exc.value.detail
     assert "Driver message: ODBC driver connect failed" in exc.value.detail
+
+
+def test_open_connection_reports_malformed_host_label_as_unresolvable(monkeypatch):
+    class FailedDriver:
+        @staticmethod
+        def connect(*args, **kwargs):
+            raise RuntimeError("ODBC driver connect failed")
+
+    monkeypatch.setattr(mssql, "_import_pyodbc", lambda: FailedDriver)
+    # Real IDNA encoding rejects the empty label before any DNS traffic.
+    session = mssql._Session(
+        "cs", None, None, (), time.monotonic(), host="db..example.com", port=1433
+    )
+    with pytest.raises(HTTPException) as exc:
+        mssql._open_connection(session)
+    assert exc.value.status_code == 400
+    assert "The host name 'db..example.com' could not be resolved" in exc.value.detail
 
 
 def test_named_instance_skips_fixed_tcp_port_probe(monkeypatch):

@@ -226,3 +226,26 @@ def test_plan_feature_diff_updates_only_changed_columns_and_geometry() -> None:
         **options,
     )
     assert diff.updates == []
+
+
+def test_plan_feature_diff_changed_columns_protect_stale_values_and_full_reinserts() -> None:
+    """Edited-column hints limit updates but never strip a reinserted row."""
+    geometry = {"type": "Point", "coordinates": [0, 0]}
+    diff = plan_feature_diff(
+        [
+            {"id": 1, "properties": {"id": 1, "name": "stale", "pop": 2}, "geometry": geometry},
+            {"id": 2, "properties": {"id": 2, "name": "kept", "pop": 5}, "geometry": geometry},
+        ],
+        primary_key="id",
+        writable_columns=["name", "pop"],
+        existing_rows={1: (geometry, {"name": "external", "pop": 1})},
+        pk_is_generated=False,
+        insert_explicit_key=True,
+        baseline_keys=[1, 2],
+        capabilities=None,
+        table_label="dbo.t",
+        changed_columns={1: ["pop"], 2: []},
+    )
+
+    assert [(row.key, row.values) for row in diff.updates] == [(1, {"pop": 2})]
+    assert [(row.key, row.values) for row in diff.inserts] == [(2, {"name": "kept", "pop": 5})]
