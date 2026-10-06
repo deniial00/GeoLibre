@@ -40,7 +40,7 @@ import {
 } from "../../../../lib/database-tables";
 import { isDesktopRuntime, isWindows } from "../../../../lib/is-mobile";
 import { IS_MAS_BUILD } from "../../../../lib/build-flags";
-import { startGeoLibreSidecar } from "../../../../lib/sidecar";
+import { ignoreSidecarStartError, startGeoLibreSidecar } from "../../../../lib/sidecar";
 import { createBaseLayer, errorMessage } from "../helpers";
 import { AddDataSourceForm, useAddDataSource } from "../shared";
 import type { OpenAddDataMssql } from "../open-add-data";
@@ -236,11 +236,9 @@ export function MssqlSource({ initialMssql }: MssqlSourceProps) {
           t("addData.mssql.errorMissingField", { field: t(`addData.mssql.${required}`) }),
         );
       }
-      try {
-        await startGeoLibreSidecar();
-      } catch {
-        /* status request below reports the runtime failure */
-      }
+      // Best-effort: the status request below reports a missing runtime; only
+      // a stale sidecar from an earlier session is surfaced from here.
+      await startGeoLibreSidecar().catch(ignoreSidecarStartError);
       const runtime = await fetchMssqlStatus();
       if (!runtime.available)
         throw new Error(t("addData.mssql.errorRuntimeMissing", { detail: runtime.message }));

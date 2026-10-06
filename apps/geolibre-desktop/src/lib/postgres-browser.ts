@@ -3,7 +3,7 @@ import type { TFunction } from "i18next";
 import { errorMessage } from "../components/layout/add-data/helpers";
 import { uniqueDatabaseTables } from "./database-tables";
 import { isDesktopRuntime } from "./is-mobile";
-import { startGeoLibreSidecar } from "./sidecar";
+import { ignoreSidecarStartError, startGeoLibreSidecar } from "./sidecar";
 import type { ConnectionLoad, SetConnectionLoads } from "./browser-tree";
 
 export interface PostgresBrowserLoaderDependencies {
@@ -52,10 +52,11 @@ export function fetchPostgresBrowserTables(
   // The desktop sidecar is spawned on demand and only authenticated after
   // startGeoLibreSidecar runs, so ensure it is up before hitting /postgis —
   // best-effort, mirroring PostgresSource.handleConnectEditable (a failed
-  // start still lets the status/list calls surface the real error).
+  // start still lets the status/list calls surface the real error, except a
+  // stale sidecar from an earlier session, which is surfaced directly).
   void dependencies
     .startSidecar()
-    .catch(() => {})
+    .catch(ignoreSidecarStartError)
     .then(() => dependencies.fetchStatus())
     .then((status) => {
       // Same runtime gate as the Add Data dialog, so a missing postgis

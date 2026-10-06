@@ -96,6 +96,8 @@ export interface GeoLibreSelection {
   features: Feature<Geometry | null>[];
 }
 
+export type GeoLibreActiveMapTool = "identify" | "feature-selection" | null;
+
 export interface GeoLibreRasterWindowOptions {
   bounds: [number, number, number, number]; // WGS84 [west, south, east, north]
   width?: number; // sample grid, default 32
@@ -138,6 +140,10 @@ export interface GeoLibreAppAPI {
   getDrawnFeatures?: () => Feature<Geometry | null>[];
   onSelectionChange?: (
     callback: (selection: GeoLibreSelection) => void
+  ) => () => void;
+  getActiveMapTool?: () => GeoLibreActiveMapTool;
+  onActiveMapToolChange?: (
+    callback: (tool: GeoLibreActiveMapTool) => void
   ) => () => void;
   // Native raster/tile layers (see "Raster and tile layers" below). Each
   // returns the new layer's id and the layer appears in the Layers panel and
@@ -653,6 +659,47 @@ unsubscribe?.();
 These methods are a read-only query surface: calling them does not change the
 GeoLibre store. Plugins must also treat returned GeoJSON features as read-only
 and use host APIs such as `addGeoJsonLayer` when they need to add data.
+
+## Active map click tool
+
+Plugins that handle map clicks or hover can avoid presenting their own
+interaction while a GeoLibre map tool owns the pointer. The optional live
+getter and subscription cover Identify and feature selection across map
+renderers; they do not depend on the cursor style or saved project snapshot.
+
+```typescript
+const currentTool = app.getActiveMapTool?.() ?? null;
+if (currentTool !== null) closePluginPopup();
+const unsubscribe = app.onActiveMapToolChange?.((tool) => {
+  if (tool !== null) closePluginPopup();
+});
+
+function handleMapClick(event: unknown) {
+  if ((app.getActiveMapTool?.() ?? null) !== null) return;
+  openPluginPopup(event);
+}
+
+function handleMapHover(event: unknown) {
+  if ((app.getActiveMapTool?.() ?? null) !== null) return;
+  showPluginTooltip(event);
+}
+
+// In deactivate or another cleanup path:
+unsubscribe?.();
+```
+
+`getActiveMapTool` returns `"identify"` while Identify is enabled,
+`"feature-selection"` while a selection gesture owns map clicks, and `null`
+otherwise. Feature selection takes precedence if both states briefly overlap.
+Changing the Identify target does not emit a tool change. Subscribers receive
+only changes after registration, not an initial callback; read the getter to
+initialize plugin state. Keep and call the returned unsubscribe function on
+deactivation.
+Replacing one active selection gesture with another keeps
+`"feature-selection"` active without an intermediate `null`.
+
+Both methods are optional so plugins remain compatible with older hosts.
+
 
 ## Layer groups
 

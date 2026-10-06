@@ -134,6 +134,9 @@ export interface SessionSlice {
    * plain meaning.
    */
   identifyLayerIds: string[] | null;
+  /** Transient map-selection gesture activity, published by the primary renderer. */
+  featureSelectionActive: boolean;
+  setFeatureSelectionActive: (active: boolean) => void;
   pointerCoords: [number, number] | null;
   /**
    * Ground elevation in true metres under the pointer, for the status bar
@@ -181,6 +184,8 @@ export const createSessionSlice: SliceCreator<SessionSlice> = (set) => ({
   selectedFeatureIds: [],
   identifyLayerId: null,
   identifyLayerIds: null,
+  featureSelectionActive: false,
+  setFeatureSelectionActive: (active) => set({ featureSelectionActive: active }),
   pointerCoords: null,
   pointerElevation: null,
   cameraAltitude: null,

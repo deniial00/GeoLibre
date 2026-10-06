@@ -1,7 +1,7 @@
 import { fetchMssqlStatus, listMssqlTables } from "@geolibre/processing";
 import type { TFunction } from "i18next";
 import { isDesktopRuntime } from "./is-mobile";
-import { startGeoLibreSidecar } from "./sidecar";
+import { ignoreSidecarStartError, startGeoLibreSidecar } from "./sidecar";
 import {
   MssqlReconnectRequiredError,
   forgetMssqlProfile,
@@ -47,7 +47,7 @@ export function fetchMssqlBrowserTables(
   update({ status: "loading" });
   void dependencies
     .startSidecar()
-    .catch(() => {})
+    .catch(ignoreSidecarStartError)
     .then(() => dependencies.fetchStatus())
     .then((status) => {
       if (!status.available) {

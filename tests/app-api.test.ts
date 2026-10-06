@@ -247,6 +247,37 @@ describe("plugin app API contract", () => {
   });
 });
 
+describe("plugin app API map tools", () => {
+  beforeEach(() => {
+    useAppStore.getState().newProject({ name: "App API map tools" });
+  });
+
+  it("reports live tool transitions, gives feature selection precedence, and unsubscribes", () => {
+    const api = createAppAPI(undefined, fakeHost().host);
+    const events: Array<"identify" | "feature-selection" | null> = [];
+    assert.equal(api.getActiveMapTool(), null);
+    const unsubscribe = api.onActiveMapToolChange((activeTool) => events.push(activeTool));
+
+    useAppStore.getState().setIdentifyLayer("first");
+    assert.equal(api.getActiveMapTool(), "identify");
+    useAppStore.getState().setIdentifyLayer("second");
+    assert.deepEqual(events, ["identify"]);
+
+    useAppStore.getState().setFeatureSelectionActive(true);
+    assert.equal(api.getActiveMapTool(), "feature-selection");
+    useAppStore.getState().setIdentifyLayer(null);
+    assert.deepEqual(events, ["identify", "feature-selection"]);
+
+    useAppStore.getState().setFeatureSelectionActive(false);
+    assert.equal(api.getActiveMapTool(), null);
+    assert.deepEqual(events, ["identify", "feature-selection", null]);
+    unsubscribe();
+
+    useAppStore.getState().setIdentifyLayer("after-unsubscribe");
+    assert.deepEqual(events, ["identify", "feature-selection", null]);
+  });
+});
+
 describe("plugin app API layers", () => {
   beforeEach(() => {
     useAppStore.getState().newProject({ name: "App API layers" });

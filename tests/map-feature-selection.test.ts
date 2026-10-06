@@ -4,6 +4,7 @@ import { parseHTML } from "linkedom";
 import { useAppStore } from "@geolibre/core";
 import {
   attachFeatureSelection,
+  FEATURE_SELECTION_BEGIN_EVENT,
   type FeatureSelectionMap,
   type FeatureSelectionState,
 } from "../packages/map/src/map-feature-selection";
@@ -40,6 +41,9 @@ function withSelectionHarness(body: (harness: ReturnType<typeof makeHarness>) =>
       selectedLayerId: null,
       selectedFeatureId: null,
       selectedFeatureIds: [],
+      identifyLayerId: null,
+      identifyLayerIds: null,
+      featureSelectionActive: false,
     });
   }
 }
@@ -191,23 +195,102 @@ describe("attachFeatureSelection", () => {
 
       requestSelection("single");
       assert.equal(state.active.current, true);
+      assert.equal(useAppStore.getState().featureSelectionActive, true);
       assert.equal(cameraEnabled.get("boxZoom"), false);
       assert.equal(canvas.style.cursor, "crosshair");
       assert.ok(container.querySelector("svg"));
 
       fire("click", { x: 1, y: 1 });
       assert.equal(state.active.current, true, "click selection stays armed");
+      assert.equal(useAppStore.getState().featureSelectionActive, true);
       assert.equal(useAppStore.getState().selectedLayerId, "countries");
       assert.deepEqual(useAppStore.getState().selectedFeatureIds, ["inside"]);
 
       detach();
       assert.equal(state.active.current, false);
       assert.equal(state.cancel.current, null);
+      assert.equal(useAppStore.getState().featureSelectionActive, false);
       assert.equal(cameraEnabled.get("boxZoom"), true);
       assert.equal(canvas.style.cursor, "crosshair");
       assert.equal(ended, 1);
       assert.equal(container.querySelector("svg"), null);
       assert.ok([...listeners.values()].every((registered) => registered.size === 0));
+    });
+  });
+
+  it("keeps the active tool continuous when replacing a gesture and cancels on project change", () => {
+    withSelectionHarness(({ map }) => {
+      seedLayer();
+      const state: FeatureSelectionState = {
+        active: { current: false },
+        cancel: { current: null },
+      };
+      const toolChanges: boolean[] = [];
+      const unsubscribe = useAppStore.subscribe((next, previous) => {
+        if (next.featureSelectionActive !== previous.featureSelectionActive) {
+          toolChanges.push(next.featureSelectionActive);
+        }
+      });
+      const detach = attachFeatureSelection(map, {
+        state,
+        featureIdAtPoint: () => null,
+      });
+
+      requestSelection("single");
+      requestSelection("polygon");
+      assert.equal(state.active.current, true);
+      assert.equal(useAppStore.getState().featureSelectionActive, true);
+      assert.deepEqual(toolChanges, [true]);
+
+      useAppStore.getState().newProject({ name: "Replacement project" });
+      assert.equal(state.active.current, false);
+      assert.equal(useAppStore.getState().featureSelectionActive, false);
+      assert.deepEqual(toolChanges, [true, false]);
+
+      detach();
+      unsubscribe();
+    });
+  });
+
+  it("announces only the replacement when an activation subscriber switches gestures", () => {
+    withSelectionHarness(({ map, fire, listeners, container }) => {
+      seedLayer();
+      const state: FeatureSelectionState = {
+        active: { current: false },
+        cancel: { current: null },
+      };
+      let begins = 0;
+      const onBegin = () => {
+        begins += 1;
+      };
+      window.addEventListener(FEATURE_SELECTION_BEGIN_EVENT, onBegin);
+      const detach = attachFeatureSelection(map, {
+        state,
+        featureIdAtPoint: () => null,
+      });
+      const unsubscribe = useAppStore.subscribe((next, previous) => {
+        if (next.featureSelectionActive && !previous.featureSelectionActive) {
+          requestSelection("rectangle");
+        }
+      });
+      try {
+        requestSelection("single");
+        assert.equal(begins, 1);
+        assert.equal(container.querySelectorAll("svg").length, 1);
+        assert.equal(listeners.get("click")?.size, 1);
+
+        fire("mousedown", { x: 0, y: 0 });
+        fire("mousemove", { x: 2, y: 2 });
+        fire("mouseup", { x: 2, y: 2 });
+        assert.deepEqual(useAppStore.getState().selectedFeatureIds, ["inside"]);
+        assert.equal(useAppStore.getState().featureSelectionActive, false);
+        assert.equal(container.querySelector("svg"), null);
+        assert.ok([...listeners.values()].every((registered) => registered.size === 0));
+      } finally {
+        unsubscribe();
+        detach();
+        window.removeEventListener(FEATURE_SELECTION_BEGIN_EVENT, onBegin);
+      }
     });
   });
 
@@ -231,6 +314,7 @@ describe("attachFeatureSelection", () => {
         assert.deepEqual(useAppStore.getState().selectedFeatureIds, ["inside"]);
         assert.equal(state.active.current, false);
         assert.equal(state.cancel.current, null);
+        assert.equal(useAppStore.getState().featureSelectionActive, false);
         assert.equal(canvas.style.cursor, "");
         assert.equal(container.querySelector("svg"), null);
         assert.ok(CAMERA_HANDLERS.every((name) => cameraEnabled.get(name) === true));

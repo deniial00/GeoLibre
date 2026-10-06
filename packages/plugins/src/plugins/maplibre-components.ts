@@ -27,6 +27,7 @@ import {
   normalizeHtmlState,
   normalizeLegendState,
 } from "./components/gui-state";
+import { imageProjectState, restoreImagePanels, teardownImageControl } from "./components/image";
 import {
   htmlControl,
   htmlPanelVisible,
@@ -87,8 +88,33 @@ export {
   closeHtmlPanel,
   isHtmlPanelVisible,
   openHtmlPanel,
+  openHtmlPanelWithEntry,
   subscribeHtmlPanel,
 } from "./components/html";
+export {
+  closeImagePanel,
+  getImageControlStates,
+  isImagePanelVisible,
+  removeImageControl,
+  setImageControl,
+  setImageLabels,
+  subscribeImagePanel,
+} from "./components/image";
+export {
+  type ComponentImageState,
+  type ImageSizeMode,
+  IMAGE_RATIO_MAX,
+  IMAGE_RATIO_MIN,
+  IMAGE_SIZE_MAX,
+  IMAGE_SIZE_MIN,
+  MAX_IMAGE_CONTROLS,
+  DEFAULT_IMAGE_STATE,
+  formatAspectRatio,
+  normalizeImageUrl,
+  isRatioHeightInRange,
+  ratioHeight,
+  parseAspectRatio,
+} from "./components/image-model";
 export {
   closeLegendPanel,
   isLegendPanelVisible,
@@ -277,6 +303,7 @@ export const maplibreComponentsPlugin: GeoLibrePlugin = {
     teardownColorbarControl(app);
     teardownLegendControl(app);
     teardownHtmlControl(app);
+    teardownImageControl(app);
     teardownLidarControl(app);
     teardownSplattingControl(app);
     if (!componentsControl) return;
@@ -310,6 +337,8 @@ function componentsProjectStateSnapshot(): ComponentsProjectState | undefined {
   if (htmlPanelVisible && htmlControl) {
     state.html = normalizeHtmlState(htmlControl.getState());
   }
+  const images = imageProjectState();
+  if (images) state.images = images;
 
   return Object.keys(state).length > 0 ? state : undefined;
 }
@@ -333,6 +362,12 @@ function applyComponentsProjectState(app: GeoLibreAppAPI, state: unknown): void 
   } else {
     teardownHtmlControl(app);
   }
+
+  if (normalized?.images?.length) {
+    restoreImagePanels(app, normalized.images);
+  } else {
+    teardownImageControl(app);
+  }
 }
 
 export function closeMaplibreComponentControls(app: GeoLibreAppAPI): void {
@@ -350,6 +385,7 @@ export function closeMaplibreComponentControls(app: GeoLibreAppAPI): void {
   teardownColorbarControl(app);
   teardownLegendControl(app);
   teardownHtmlControl(app);
+  teardownImageControl(app);
   teardownLidarControl(app);
   teardownSplattingControl(app);
 }

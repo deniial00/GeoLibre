@@ -153,6 +153,8 @@ Choose the **+** on the PostgreSQL or SQL Server group to open that engine's con
 
 Type in the search box to filter the whole tree, and navigate it entirely from the keyboard with the arrow keys.
 
+If desktop database browsing reports a processing server from a previous session, quit any stray GeoLibre processes, then collapse and re-expand the connection to retry.
+
 ## Basemaps
 
 The basemap sits at the bottom of the [Layers panel](layers.md) as the **Background** entry. **Double-click that row** to open the **Change basemap** dialog, or activate the **Basemaps** plugin from the [Plugins menu](plugins.md) to switch between OpenFreeMap styles (Liberty, Liberty 3D, Positron, Bright, Dark, Fiord), a collapsible **Regional** group, a blank background, or a custom style URL. You can toggle basemap visibility and adjust its opacity from the Layers panel.

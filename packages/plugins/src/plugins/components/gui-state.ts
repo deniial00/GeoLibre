@@ -4,11 +4,13 @@
 
 import type { ColorbarGuiControl, HtmlGuiControl, LegendGuiControl } from "maplibre-gl-components";
 import type { GeoLibreMapControlPosition } from "../../types";
+import { type ComponentImageState, normalizeImageStates } from "./image-model";
 
 export interface ComponentsProjectState {
   colorbar?: ComponentColorbarGuiState;
   legend?: ComponentLegendGuiState;
   html?: ComponentHtmlGuiState;
+  images?: ComponentImageState[];
 }
 
 interface ComponentColorbarGuiEntryState {
@@ -148,6 +150,7 @@ export function normalizeComponentsProjectState(state: unknown): ComponentsProje
     colorbar: normalizeColorbarState(candidate.colorbar),
     legend: normalizeLegendState(candidate.legend),
     html: normalizeHtmlState(candidate.html),
+    images: normalizeImageStates(candidate.images),
   };
 }
 

@@ -1933,6 +1933,13 @@ body,
   color: hsl(var(--popover-foreground)) !important;
 }
 
+/* The rendered HTML control (not its editor) keeps a white panel in every
+   theme, so the root's dark `color-scheme` would draw a black scrollbar on it.
+   Pin the content area to the light scheme to match its background. */
+.maplibre-gl-html-control-content {
+  color-scheme: light;
+}
+
 .dark .geolibre-colorbar-control,
 .dark .geolibre-legend-control,
 .dark .geolibre-html-control,
@@ -2526,6 +2533,43 @@ body,
    white-on-white over the white control background. */
 .maplibregl-ctrl-layer-control .layer-control-icon {
   color: #1f2a37;
+}
+
+/* Reverse geocoding follows the same popover surface, foreground, and anchor
+   tip as the Identify and Geo Editor popups, in both light and dark themes. */
+.geolibre-reverse-geocode-popup .maplibregl-popup-content {
+  background: hsl(var(--popover));
+  color: hsl(var(--popover-foreground));
+}
+
+.geolibre-reverse-geocode-popup .maplibregl-popup-close-button {
+  color: hsl(var(--popover-foreground));
+}
+
+.geolibre-reverse-geocode-popup:is(
+    .maplibregl-popup-anchor-top,
+    .maplibregl-popup-anchor-top-left,
+    .maplibregl-popup-anchor-top-right
+  )
+  .maplibregl-popup-tip {
+  border-bottom-color: hsl(var(--popover));
+}
+
+.geolibre-reverse-geocode-popup:is(
+    .maplibregl-popup-anchor-bottom,
+    .maplibregl-popup-anchor-bottom-left,
+    .maplibregl-popup-anchor-bottom-right
+  )
+  .maplibregl-popup-tip {
+  border-top-color: hsl(var(--popover));
+}
+
+.geolibre-reverse-geocode-popup.maplibregl-popup-anchor-left .maplibregl-popup-tip {
+  border-right-color: hsl(var(--popover));
+}
+
+.geolibre-reverse-geocode-popup.maplibregl-popup-anchor-right .maplibregl-popup-tip {
+  border-left-color: hsl(var(--popover));
 }
 
 .geolibre-identify-popup :is(.maplibregl-popup-content, .mapboxgl-popup-content) {

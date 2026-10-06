@@ -41,6 +41,42 @@ Access tokens stay in the live connection and are not saved in the project.
 Re-add protected services with a current token after reopening a project or when
 an existing token expires.
 
+## Signing in with ArcGIS
+
+In Add Data, ArcGIS, set **Authentication** to **Sign in with ArcGIS** instead of
+pasting a token. GeoLibre opens the portal's own sign-in page (OAuth 2.0
+Authorization Code with PKCE), so it never sees your password, MFA code or
+identity-provider credentials, and the layer is added with your own permissions.
+
+1. Register an application on your portal (ArcGIS Online: Content, New item,
+   Developer credentials; Enterprise: the same on your portal). Add GeoLibre's
+   redirect URI to it: `<app URL>/oauth-callback.html` for the web app (for
+   example `https://web.geolibre.app/oauth-callback.html`), and
+   `org.geolibre.desktop:/oauth/callback` for the desktop app.
+2. Leave **Portal URL** blank for ArcGIS Online, or enter your organization URL
+   (`https://myorg.maps.arcgis.com`) to get its sign-in page, including SSO, or
+   your Enterprise portal (`https://gis.example.org/portal`). If an Enterprise
+   portal restricts allowed origins, add GeoLibre's.
+3. Paste the application's client ID and select **Sign in**. The client ID is
+   not a secret and is remembered per portal.
+
+A build can ship a default ArcGIS Online client ID in the
+`VITE_ARCGIS_OAUTH_CLIENT_ID` build variable; the hosted web app at
+`web.geolibre.app` does, so its users can skip step 1. The field is prefilled
+for ArcGIS Online and organization URLs only, and a client ID the user enters
+replaces it. The default only works where its app registration lists that
+build's redirect URI, so set it only for an origin you have registered.
+
+The session is held in memory for the running app and shared by every ArcGIS
+layer from the same portal. The access token (about 30 minutes) is renewed from
+the refresh token, including for saving edits and refreshing layers. If it cannot
+be renewed you are asked to sign in again. Select **Sign out** to end it and
+revoke the refresh token. The session, tokens and sign-in choice are never saved
+in the project or the service library, and manual access tokens remain available.
+Vector tile, map service and image service layers carry the token they were
+added with, which lasts about half an hour, so re-add them after that. The
+session is not kept across app restarts yet.
+
 ## Current scope
 
 Supported geometry families are points, multipoints, lines, multilines, polygons,

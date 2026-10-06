@@ -23,6 +23,8 @@ import {
   DEFAULT_XYZ_URL,
   GEBCO_WMS_ENDPOINT,
   GEBCO_WMS_LAYERS,
+  NLCD_WMS_ENDPOINT,
+  NLCD_WMS_LAYERS,
   MAX_SAVED_SERVICES,
   SERVICE_LIBRARY_STORAGE_KEY,
 } from "./constants";
@@ -404,6 +406,22 @@ export const BUILTIN_SERVICES: readonly ServiceLibraryEntry[] = [
       // GEBCO serves the latest grid over WMS 1.3.0; pin it so the saved
       // service does not fall back to 1.1.1's flipped-axis GetMap.
       version: "1.3.0",
+    },
+  },
+  {
+    id: "builtin-wms-nlcd-land-cover",
+    name: "NLCD 2021 Land Cover (MRLC)",
+    category: "Land cover",
+    kind: "wms",
+    builtin: true,
+    fields: {
+      endpoint: NLCD_WMS_ENDPOINT,
+      layers: NLCD_WMS_LAYERS,
+      styles: "",
+      format: "image/png",
+      transparent: true,
+      tileSize: "256",
+      version: "1.1.1",
     },
   },
   {

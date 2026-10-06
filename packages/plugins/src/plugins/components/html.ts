@@ -7,6 +7,7 @@ import { getComponentsConstructors, type HtmlGuiControlConstructor } from "./con
 import {
   type ComponentHtmlGuiState,
   type RestorableHtmlGuiControl,
+  normalizeHtmlState,
   restoreGuiControlState,
 } from "./gui-state";
 import { constrainGuiPanelToViewport } from "./shared";
@@ -50,6 +51,70 @@ export async function restoreHtmlPanel(
 
 export function openHtmlPanel(app: GeoLibreAppAPI): void {
   void openStandaloneHtmlControl(app);
+}
+
+/**
+ * Adds an HTML control to the map with the given content, opening the shared
+ * HTML control first when needed. Existing entries are kept, so several
+ * layers' legends can sit on the map together; an entry with the same title and
+ * HTML is not added twice.
+ *
+ * @param app - The live app API used to mount the control.
+ * @param options - The entry's title, HTML and map corner.
+ * @returns Whether the entry is on the map.
+ */
+export async function openHtmlPanelWithEntry(
+  app: GeoLibreAppAPI,
+  options: { title: string; html: string; htmlPosition?: GeoLibreMapControlPosition },
+): Promise<boolean> {
+  const opened = await openStandaloneHtmlControl(app);
+  if (!opened) return false;
+  // openStandaloneHtmlControl shows/expands on a 0ms timer; defer past it so the
+  // state set here is not clobbered and getState() sees the live control.
+  return await new Promise<boolean>((resolve) => {
+    setTimeout(() => {
+      if (!htmlControl) {
+        resolve(false);
+        return;
+      }
+      try {
+        const control = htmlControl as RestorableHtmlGuiControl;
+        const current = normalizeHtmlState(htmlControl.getState());
+        if (!current) {
+          resolve(false);
+          return;
+        }
+        const entry = {
+          title: options.title,
+          html: options.html,
+          htmlPosition: options.htmlPosition ?? "bottom-left",
+          collapsible: true,
+        };
+        const existingIndex = current.htmls.findIndex(
+          (existing) => existing.title === entry.title && existing.html === entry.html,
+        );
+        const htmls = existingIndex >= 0 ? current.htmls : [...current.htmls, entry];
+        // Select the entry the top-level fields describe: the matching one on a
+        // repeat click, the freshly appended last one otherwise.
+        const selectedHtmlIndex = existingIndex >= 0 ? existingIndex : htmls.length - 1;
+        restoreGuiControlState(control, {
+          ...current,
+          ...entry,
+          hasHtmlControl: true,
+          selectedHtmlIndex,
+          htmls,
+        });
+        control.show();
+        // The editor panel is not wanted here: the user asked for the content
+        // on the map, not for the HTML form.
+        control.collapse();
+        setHtmlPanelVisible(true);
+        resolve(true);
+      } catch {
+        resolve(false);
+      }
+    }, 0);
+  });
 }
 
 export function closeHtmlPanel(app: GeoLibreAppAPI): void {

@@ -7,6 +7,7 @@ import {
   fetchPostgresBrowserTables,
   type PostgresBrowserLoaderDependencies,
 } from "../apps/geolibre-desktop/src/lib/postgres-browser";
+import { StaleSidecarError } from "../apps/geolibre-desktop/src/lib/sidecar";
 
 const CONNECTION = "postgresql://u:pw@db.example/gis";
 const table: PostgisTableInfo = {
@@ -106,6 +107,64 @@ describe("PostgreSQL Browser table loading", () => {
       message: "addData.postgres.errorRuntimeMissing",
     });
     assert.equal(fetched.has(CONNECTION), false);
+  });
+
+  it("surfaces a stale sidecar instead of querying it without a token", async () => {
+    const state = loadState();
+    const fetched = new Set<string>();
+    let statusCalls = 0;
+    const stale =
+      "A GeoLibre processing server from a previous session is still running on port 8765 " +
+      "but does not accept this session's token. Quit any stray GeoLibre processes and try again.";
+    fetchPostgresBrowserTables(
+      CONNECTION,
+      fetched,
+      state.set,
+      translate,
+      dependencies({
+        startSidecar: async () => {
+          throw new StaleSidecarError(stale);
+        },
+        fetchStatus: async () => {
+          statusCalls += 1;
+          throw new Error("Missing or invalid sidecar token");
+        },
+      }),
+    );
+    await nextTurn();
+
+    assert.deepEqual(state.loads[CONNECTION], { status: "error", message: stale });
+    assert.equal(statusCalls, 0);
+    assert.equal(fetched.has(CONNECTION), false);
+
+    fetchPostgresBrowserTables(CONNECTION, fetched, state.set, translate, dependencies());
+    await nextTurn();
+    assert.deepEqual(state.loads[CONNECTION], {
+      status: "loaded",
+      tables: [{ schema: "public", table: "roads" }],
+    });
+  });
+
+  it("lets the runtime status explain any other failed start", async () => {
+    const state = loadState();
+    const fetched = new Set<string>();
+    fetchPostgresBrowserTables(
+      CONNECTION,
+      fetched,
+      state.set,
+      translate,
+      dependencies({
+        startSidecar: async () => {
+          throw new Error("uv sync failed");
+        },
+      }),
+    );
+    await nextTurn();
+
+    assert.deepEqual(state.loads[CONNECTION], {
+      status: "loaded",
+      tables: [{ schema: "public", table: "roads" }],
+    });
   });
 
   it("preserves the table-list error and permits retry", async () => {

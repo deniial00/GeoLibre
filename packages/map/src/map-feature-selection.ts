@@ -88,14 +88,29 @@ export function attachFeatureSelection(
     });
     return true;
   };
+  let replacingGesture = false;
 
   const begin = (request: FeatureSelectionRequest) => {
-    state.cancel.current?.();
     const store = useAppStore.getState();
     const layer = store.layers.find((item) => item.id === request.layerId);
-    if (!layer?.geojson?.features) return;
-    if (!effectiveLayerRenderState(layer, store.layerGroups).visible) return;
-    if (tooManyToScan(layer, request.shape)) return;
+    if (
+      !layer?.geojson?.features ||
+      !effectiveLayerRenderState(layer, store.layerGroups).visible ||
+      tooManyToScan(layer, request.shape)
+    ) {
+      state.cancel.current?.();
+      return;
+    }
+    // Replacing one active selection gesture with another does not release
+    // ownership of map clicks, so plugins see one continuous tool activation.
+    if (state.cancel.current) {
+      replacingGesture = state.active.current;
+      try {
+        state.cancel.current();
+      } finally {
+        replacingGesture = false;
+      }
+    }
 
     const canvas = map.getCanvas();
     const container = map.getContainer();
@@ -104,7 +119,10 @@ export function attachFeatureSelection(
       cleanups.forEach((cleanup) => cleanup());
       state.active.current = false;
       state.cancel.current = null;
-      onEnd?.();
+      if (!replacingGesture && useAppStore.getState().featureSelectionActive) {
+        useAppStore.getState().setFeatureSelectionActive(false);
+      }
+      if (!replacingGesture) onEnd?.();
     };
 
     const overlay = document.createElementNS("http://www.w3.org/2000/svg", "svg");
@@ -137,7 +155,6 @@ export function attachFeatureSelection(
       canvas.style.cursor = "";
     });
     state.active.current = true;
-    window.dispatchEvent(new Event(FEATURE_SELECTION_BEGIN_EVENT));
 
     let points: PointLike[] = [];
     let dragging = false;
@@ -311,11 +328,23 @@ export function attachFeatureSelection(
       () => window.removeEventListener("keydown", onKeyDown),
       () => window.removeEventListener("blur", onBlur),
     );
+    // Publish only after every listener has its cleanup registered: a plugin
+    // reacting synchronously may cancel or replace this gesture. A superseded
+    // gesture must not announce the replacement a second time.
+    const gestureCancel = state.cancel.current;
+    const current = useAppStore.getState();
+    if (!current.featureSelectionActive) current.setFeatureSelectionActive(true);
+    if (state.active.current && state.cancel.current === gestureCancel)
+      window.dispatchEvent(new Event(FEATURE_SELECTION_BEGIN_EVENT));
   };
   const onRequest = (event: Event) => begin((event as CustomEvent<FeatureSelectionRequest>).detail);
   window.addEventListener(FEATURE_SELECTION_EVENT, onRequest);
+  const unsubscribeProject = useAppStore.subscribe((next, previous) => {
+    if (next.projectGeneration !== previous.projectGeneration) state.cancel.current?.();
+  });
   return () => {
     window.removeEventListener(FEATURE_SELECTION_EVENT, onRequest);
+    unsubscribeProject();
     state.cancel.current?.();
   };
 }

@@ -108,7 +108,11 @@ async function showReverseGeocodePopup(
   // A teardown or a newer click during the import supersedes this lookup.
   if (requestToken !== lookupToken) return;
   popup?.remove();
-  popup = new Popup({ closeButton: true, closeOnClick: false })
+  popup = new Popup({
+    closeButton: true,
+    closeOnClick: false,
+    className: "geolibre-reverse-geocode-popup",
+  })
     .setLngLat([lng, lat])
     .setText(labels.lookingUp)
     .addTo(map);
