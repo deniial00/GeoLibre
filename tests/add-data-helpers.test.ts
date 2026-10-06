@@ -286,6 +286,16 @@ describe("createWmsGetCapabilitiesUrl", () => {
     assert.equal(params.get("LAYERS"), null);
     assert.equal(params.get("token"), "abc");
   });
+
+  it("keeps outputFormat, which portals publish on their capabilities URLs", () => {
+    const url = new URL(
+      createWmsGetCapabilitiesUrl(
+        "https://x.test/ows?service=WMS&version=1.3.0&request=GetCapabilities&outputFormat=application/xml",
+      ),
+    );
+    assert.equal(url.searchParams.get("outputFormat"), "application/xml");
+    assert.equal(url.searchParams.get("REQUEST"), "GetCapabilities");
+  });
 });
 
 describe("createWfsGetCapabilitiesUrl", () => {
@@ -328,6 +338,20 @@ describe("stripOgcOperationParams", () => {
     assert.equal(
       stripOgcOperationParams("https://x.test/wms?REQUEST=GetMap&LAYERS=a&token=abc", "WMS"),
       "https://x.test/wms?token=abc",
+    );
+  });
+
+  it("drops outputFormat from a WMS endpoint, case-insensitively", () => {
+    assert.equal(
+      stripOgcOperationParams(
+        "https://x.test/ows?service=WMS&version=1.3.0&request=GetCapabilities&outputFormat=application/xml&token=abc",
+        "WMS",
+      ),
+      "https://x.test/ows?token=abc",
+    );
+    assert.equal(
+      stripOgcOperationParams("https://x.test/ows?OUTPUTFORMAT=text/xml", "WMS"),
+      "https://x.test/ows",
     );
   });
 

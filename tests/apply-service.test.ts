@@ -121,6 +121,25 @@ describe("buildWmsLayer", () => {
     assert.equal((layer.metadata as Record<string, unknown>).service, "wms");
   });
 
+  it("does not send a pasted capabilities outputFormat with GetMap tiles (#3010)", () => {
+    const layer = buildWmsLayer({
+      name: "VOGIS",
+      endpoint:
+        "https://vogis.cnv.at/geoserver/vogis/fwp_flaeche/ows?service=WMS&version=1.3.0&request=GetCapabilities&outputFormat=application/xml",
+      layers: "fwp_flaeche",
+      styles: "",
+      format: "image/png",
+      transparent: true,
+      tileSize: "256",
+      version: "1.3.0",
+    });
+    const source = layer.source as Record<string, unknown>;
+    assert.equal(source.url, "https://vogis.cnv.at/geoserver/vogis/fwp_flaeche/ows");
+    const tileUrl = (source.tiles as string[])[0];
+    assert.doesNotMatch(tileUrl, /outputformat/i);
+    assert.match(tileUrl, /FORMAT=image%2Fpng/);
+  });
+
   it("marks the layer not queryable only when asked (#2887)", () => {
     const params = {
       name: "WMS",

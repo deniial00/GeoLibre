@@ -597,12 +597,17 @@ function buildCapabilitiesUrl(
  * top, or the duplicated (and conflicting) `REQUEST` makes the server answer the
  * wrong operation (e.g. returning capabilities XML instead of features).
  *
+ * For WMS this also drops `outputFormat`, which a GetCapabilities URL may carry
+ * (`…&outputFormat=application/xml`) but GeoServer applies to GetMap too, where
+ * it answers every tile with an XML exception. {@link createWmsGetCapabilitiesUrl}
+ * keeps it: some portals publish their capabilities URLs with it.
+ *
  * @param endpoint - The service endpoint as entered by the user.
  * @param service - Which operation-parameter set to strip.
  * @returns The endpoint with its OGC operation parameters removed.
  */
 export function stripOgcOperationParams(endpoint: string, service: "WMS" | "WFS"): string {
-  const operationParams = service === "WMS" ? WMS_OPERATION_PARAMS : WFS_OPERATION_PARAMS;
+  const operationParams = service === "WMS" ? WMS_GETMAP_OPERATION_PARAMS : WFS_OPERATION_PARAMS;
   return rewriteEndpointQuery(endpoint, operationParams, []);
 }
 
@@ -652,6 +657,17 @@ const WMS_OPERATION_PARAMS: ReadonlySet<string> = new Set([
 export function createWmsGetCapabilitiesUrl(endpoint: string): string {
   return buildCapabilitiesUrl(endpoint, "WMS", WMS_OPERATION_PARAMS);
 }
+
+/**
+ * The WMS parameters stripped from an endpoint before a GetMap request is built
+ * on it: everything {@link WMS_OPERATION_PARAMS} drops from a GetCapabilities
+ * request, plus `outputformat` (compared lower-cased), which only makes sense on
+ * the capabilities request.
+ */
+const WMS_GETMAP_OPERATION_PARAMS: ReadonlySet<string> = new Set([
+  ...WMS_OPERATION_PARAMS,
+  "outputformat",
+]);
 
 /** The parts of a WMS GetCapabilities document the Add Data dialog uses. */
 export interface WmsCapabilities {
