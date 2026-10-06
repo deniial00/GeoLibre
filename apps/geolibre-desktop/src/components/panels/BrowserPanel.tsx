@@ -163,6 +163,8 @@ export function BrowserPanel({
   // triggers) doesn't refetch. A failed fetch drops its entry so re-expanding
   // the connection retries (there is no separate refresh affordance).
   const connFetchedRef = useRef<Set<string>>(new Set());
+  // A successful forget invalidates pending PostgreSQL requests for that DSN.
+  const connGenRef = useRef<Map<string, number>>(new Map());
 
   // SQL Server introspection, keyed `mssql:<profile id>` so it merges with the
   // PostGIS loads without colliding; same retry-on-failure tracking.
@@ -176,7 +178,13 @@ export function BrowserPanel({
 
   const fetchConnectionTables = useCallback(
     (connectionString: string) =>
-      fetchPostgresBrowserTables(connectionString, connFetchedRef.current, setConnLoads, t),
+      fetchPostgresBrowserTables(
+        connectionString,
+        connFetchedRef.current,
+        connGenRef.current,
+        setConnLoads,
+        t,
+      ),
     [t],
   );
 
@@ -804,6 +812,7 @@ export function BrowserPanel({
       !confirmForgetPostgresBrowserConnection(
         node,
         connFetchedRef.current,
+        connGenRef.current,
         setConnLoads,
         setExpanded,
         t,

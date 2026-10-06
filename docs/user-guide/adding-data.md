@@ -151,6 +151,8 @@ The **Browser** tab on the left edge of the window opens a QGIS-style Data Sourc
 
 Choose the **+** on the PostgreSQL or SQL Server group to open that engine's connection form; the Databases section has no shared connection action.
 
+Forgetting a PostgreSQL connection invalidates table requests already in flight, so re-saving it cannot show an older request's table list. On desktop, an unreadable or malformed credential-deletion journal prevents forgetting additional connections until the journal can be read and is valid again; GeoLibre preserves it rather than discarding pending deletions. A connection's deletion result reflects the system keychain's acknowledgement, even if the journal becomes unreadable after the saved-list update.
+
 Type in the search box to filter the whole tree, and navigate it entirely from the keyboard with the arrow keys.
 
 If desktop database browsing reports a processing server from a previous session, quit any stray GeoLibre processes, then collapse and re-expand the connection to retry.

@@ -2,7 +2,11 @@ import assert from "node:assert/strict";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import type { TFunction } from "i18next";
 import type { PostgisTableInfo } from "@geolibre/processing";
-import type { BrowserNode, ConnectionLoads } from "../apps/geolibre-desktop/src/lib/browser-tree";
+import type {
+  BrowserNode,
+  ConnectionLoads,
+  SetConnectionLoads,
+} from "../apps/geolibre-desktop/src/lib/browser-tree";
 import {
   fetchPostgresBrowserTables,
   confirmForgetPostgresBrowserConnection,
@@ -63,10 +67,21 @@ function loadState(initial: ConnectionLoads = {}) {
 
 const nextTurn = () => new Promise<void>((resolve) => setImmediate(resolve));
 
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise;
+    reject = rejectPromise;
+  });
+  return { promise, resolve, reject };
+}
+
 describe("PostgreSQL Browser table loading", () => {
   it("de-duplicates geometry rows and does not refetch a settled connection", async () => {
     const state = loadState();
     const fetched = new Set<string>();
+    const generations = new Map<string, number>();
     let listCalls = 0;
     const deps = dependencies({
       listTables: async () => {
@@ -75,14 +90,14 @@ describe("PostgreSQL Browser table loading", () => {
       },
     });
 
-    fetchPostgresBrowserTables(CONNECTION, fetched, state.set, translate, deps);
+    fetchPostgresBrowserTables(CONNECTION, fetched, generations, state.set, translate, deps);
     await nextTurn();
 
     assert.deepEqual(state.loads[CONNECTION], {
       status: "loaded",
       tables: [{ schema: "public", table: "roads" }],
     });
-    fetchPostgresBrowserTables(CONNECTION, fetched, state.set, translate, deps);
+    fetchPostgresBrowserTables(CONNECTION, fetched, generations, state.set, translate, deps);
     await nextTurn();
     assert.equal(listCalls, 1);
   });
@@ -90,10 +105,12 @@ describe("PostgreSQL Browser table loading", () => {
   it("reports desktop-only access without caching the failed load", () => {
     const state = loadState();
     const fetched = new Set<string>();
+    const generations = new Map<string, number>();
 
     fetchPostgresBrowserTables(
       CONNECTION,
       fetched,
+      generations,
       state.set,
       translate,
       dependencies({ isDesktop: () => false }),
@@ -109,10 +126,11 @@ describe("PostgreSQL Browser table loading", () => {
   it("clears a failed runtime lookup so expanding the node can retry", async () => {
     const state = loadState();
     const fetched = new Set<string>();
-
+    const generations = new Map<string, number>();
     fetchPostgresBrowserTables(
       CONNECTION,
       fetched,
+      generations,
       state.set,
       translate,
       dependencies({
@@ -132,12 +150,14 @@ describe("PostgreSQL Browser table loading", () => {
     const state = loadState();
     const fetched = new Set<string>();
     let statusCalls = 0;
+    const generations = new Map<string, number>();
     const stale =
       "A GeoLibre processing server from a previous session is still running on port 8765 " +
       "but does not accept this session's token. Quit any stray GeoLibre processes and try again.";
     fetchPostgresBrowserTables(
       CONNECTION,
       fetched,
+      generations,
       state.set,
       translate,
       dependencies({
@@ -159,7 +179,14 @@ describe("PostgreSQL Browser table loading", () => {
     assert.equal(statusCalls, 0);
     assert.equal(fetched.has(CONNECTION), false);
 
-    fetchPostgresBrowserTables(CONNECTION, fetched, state.set, translate, dependencies());
+    fetchPostgresBrowserTables(
+      CONNECTION,
+      fetched,
+      generations,
+      state.set,
+      translate,
+      dependencies(),
+    );
     await nextTurn();
     assert.deepEqual(state.loads[CONNECTION], {
       status: "loaded",
@@ -170,9 +197,11 @@ describe("PostgreSQL Browser table loading", () => {
   it("lets the runtime status explain any other failed start", async () => {
     const state = loadState();
     const fetched = new Set<string>();
+    const generations = new Map<string, number>();
     fetchPostgresBrowserTables(
       CONNECTION,
       fetched,
+      generations,
       state.set,
       translate,
       dependencies({
@@ -192,10 +221,11 @@ describe("PostgreSQL Browser table loading", () => {
   it("preserves the table-list error and permits retry", async () => {
     const state = loadState();
     const fetched = new Set<string>();
-
+    const generations = new Map<string, number>();
     fetchPostgresBrowserTables(
       CONNECTION,
       fetched,
+      generations,
       state.set,
       translate,
       dependencies({
@@ -211,6 +241,214 @@ describe("PostgreSQL Browser table loading", () => {
       message: "password authentication failed",
     });
     assert.equal(fetched.has(CONNECTION), false);
+  });
+
+  it("does not let a stale success replace the reloaded connection", async () => {
+    const state = loadState();
+    const fetched = new Set<string>();
+    const generations = new Map<string, number>();
+    const oldResult = deferred<PostgisTableInfo[]>();
+    const newResult = deferred<PostgisTableInfo[]>();
+    let listCalls = 0;
+    const deps = dependencies({
+      listTables: () => (++listCalls === 1 ? oldResult.promise : newResult.promise),
+    });
+
+    fetchPostgresBrowserTables(CONNECTION, fetched, generations, state.set, translate, deps);
+    await nextTurn();
+    await forgetPostgresBrowserConnection(
+      CONNECTION,
+      `connection:${CONNECTION}`,
+      fetched,
+      generations,
+      state.set,
+      () => {},
+      () => ({ connections: [], credentialDeleted: Promise.resolve(true) }),
+    );
+    fetchPostgresBrowserTables(CONNECTION, fetched, generations, state.set, translate, deps);
+    await nextTurn();
+    newResult.resolve([{ ...table, table: "new_table" }]);
+    await nextTurn();
+    oldResult.resolve([{ ...table, table: "stale_table" }]);
+    await nextTurn();
+
+    assert.deepEqual(state.loads[CONNECTION], {
+      status: "loaded",
+      tables: [{ schema: "public", table: "new_table" }],
+    });
+    assert.equal(fetched.has(CONNECTION), true);
+  });
+
+  it("does not let a deferred forget updater clear a newer cache", async () => {
+    let currentLoads: ConnectionLoads = {};
+    const updates: Array<(previous: ConnectionLoads) => ConnectionLoads> = [];
+    const setLoads: SetConnectionLoads = (update) => updates.push(update);
+    const fetched = new Set<string>();
+    const generations = new Map<string, number>();
+    const oldResult = deferred<PostgisTableInfo[]>();
+    const newResult = deferred<PostgisTableInfo[]>();
+    let listCalls = 0;
+    const deps = dependencies({
+      listTables: () => (++listCalls === 1 ? oldResult.promise : newResult.promise),
+    });
+
+    fetchPostgresBrowserTables(CONNECTION, fetched, generations, setLoads, translate, deps);
+    await nextTurn();
+    await forgetPostgresBrowserConnection(
+      CONNECTION,
+      `connection:${CONNECTION}`,
+      fetched,
+      generations,
+      setLoads,
+      () => {},
+      () => ({ connections: [], credentialDeleted: Promise.resolve(true) }),
+    );
+    fetchPostgresBrowserTables(CONNECTION, fetched, generations, setLoads, translate, deps);
+    await nextTurn();
+    newResult.resolve([{ ...table, table: "fresh_table" }]);
+    oldResult.resolve([{ ...table, table: "stale_table" }]);
+    await nextTurn();
+
+    currentLoads = updates[2]!(currentLoads);
+    currentLoads = updates[3]!(currentLoads);
+    currentLoads = updates[1]!(currentLoads);
+    assert.deepEqual(currentLoads[CONNECTION], {
+      status: "loaded",
+      tables: [{ schema: "public", table: "fresh_table" }],
+    });
+  });
+
+  it("does not let a stale failure clear the reloaded fetched marker", async () => {
+    const state = loadState();
+    const fetched = new Set<string>();
+    const generations = new Map<string, number>();
+    const oldResult = deferred<PostgisTableInfo[]>();
+    const newResult = deferred<PostgisTableInfo[]>();
+    let listCalls = 0;
+    const deps = dependencies({
+      listTables: () => (++listCalls === 1 ? oldResult.promise : newResult.promise),
+    });
+
+    fetchPostgresBrowserTables(CONNECTION, fetched, generations, state.set, translate, deps);
+    await nextTurn();
+    await forgetPostgresBrowserConnection(
+      CONNECTION,
+      `connection:${CONNECTION}`,
+      fetched,
+      generations,
+      state.set,
+      () => {},
+      () => ({ connections: [], credentialDeleted: Promise.resolve(true) }),
+    );
+    fetchPostgresBrowserTables(CONNECTION, fetched, generations, state.set, translate, deps);
+    await nextTurn();
+    newResult.resolve([{ ...table, table: "new_table" }]);
+    await nextTurn();
+    oldResult.reject(new Error("stale failure"));
+    await nextTurn();
+
+    assert.deepEqual(state.loads[CONNECTION], {
+      status: "loaded",
+      tables: [{ schema: "public", table: "new_table" }],
+    });
+    assert.equal(fetched.has(CONNECTION), true);
+  });
+
+  it("does not restore cache when a request settles after forget without a resave", async () => {
+    const state = loadState();
+    const fetched = new Set<string>();
+    const generations = new Map<string, number>();
+    const oldResult = deferred<PostgisTableInfo[]>();
+    const deps = dependencies({ listTables: () => oldResult.promise });
+
+    fetchPostgresBrowserTables(CONNECTION, fetched, generations, state.set, translate, deps);
+    await nextTurn();
+    await forgetPostgresBrowserConnection(
+      CONNECTION,
+      `connection:${CONNECTION}`,
+      fetched,
+      generations,
+      state.set,
+      () => {},
+      () => ({ connections: [], credentialDeleted: Promise.resolve(true) }),
+    );
+    assert.equal(state.loads[CONNECTION], undefined);
+    oldResult.resolve([{ ...table, table: "forgotten_table" }]);
+    await nextTurn();
+
+    assert.equal(state.loads[CONNECTION], undefined);
+    assert.equal(fetched.has(CONNECTION), false);
+  });
+
+  it("preserves an active request when forgetting is refused", async () => {
+    const state = loadState();
+    const fetched = new Set<string>();
+    const generations = new Map<string, number>();
+    const activeResult = deferred<PostgisTableInfo[]>();
+    const deps = dependencies({ listTables: () => activeResult.promise });
+
+    fetchPostgresBrowserTables(CONNECTION, fetched, generations, state.set, translate, deps);
+    await nextTurn();
+    assert.throws(
+      () =>
+        forgetPostgresBrowserConnection(
+          CONNECTION,
+          `connection:${CONNECTION}`,
+          fetched,
+          generations,
+          state.set,
+          () => {},
+          () => {
+            throw new PostgresConnectionForgetError();
+          },
+        ),
+      PostgresConnectionForgetError,
+    );
+    assert.equal(generations.get(CONNECTION), 1);
+    activeResult.resolve([{ ...table, table: "still_valid" }]);
+    await nextTurn();
+
+    assert.deepEqual(state.loads[CONNECTION], {
+      status: "loaded",
+      tables: [{ schema: "public", table: "still_valid" }],
+    });
+    assert.equal(fetched.has(CONNECTION), true);
+  });
+
+  it("keeps an unrelated DSN request valid when forgetting another", async () => {
+    const otherConnection = "postgresql://u:pw@other.example/gis";
+    const state = loadState();
+    const fetched = new Set<string>();
+    const generations = new Map<string, number>();
+    const forgottenResult = deferred<PostgisTableInfo[]>();
+    const unrelatedResult = deferred<PostgisTableInfo[]>();
+    const deps = dependencies({
+      listTables: (dsn) => (dsn === CONNECTION ? forgottenResult.promise : unrelatedResult.promise),
+    });
+
+    fetchPostgresBrowserTables(CONNECTION, fetched, generations, state.set, translate, deps);
+    fetchPostgresBrowserTables(otherConnection, fetched, generations, state.set, translate, deps);
+    await nextTurn();
+    await forgetPostgresBrowserConnection(
+      CONNECTION,
+      `connection:${CONNECTION}`,
+      fetched,
+      generations,
+      state.set,
+      () => {},
+      () => ({ connections: [], credentialDeleted: Promise.resolve(true) }),
+    );
+    unrelatedResult.resolve([{ ...table, table: "other_table" }]);
+    await nextTurn();
+    forgottenResult.resolve([{ ...table, table: "forgotten_table" }]);
+    await nextTurn();
+
+    assert.deepEqual(state.loads[otherConnection], {
+      status: "loaded",
+      tables: [{ schema: "public", table: "other_table" }],
+    });
+    assert.equal(state.loads[CONNECTION], undefined);
+    assert.equal(fetched.has(otherConnection), true);
   });
 });
 
@@ -238,6 +476,7 @@ describe("PostgreSQL Browser forget", () => {
       other: { status: "loading" },
     });
     const fetched = new Set([connection, "other"]);
+    const generations = new Map<string, number>();
     const expanded = expandedState(new Set([nodeId, "connection:other"]));
     const credentialDeleted = Promise.resolve(false);
     let forgetCalls = 0;
@@ -246,6 +485,7 @@ describe("PostgreSQL Browser forget", () => {
       connection,
       nodeId,
       fetched,
+      generations,
       loads.set,
       expanded.set,
       () => {
@@ -265,10 +505,17 @@ describe("PostgreSQL Browser forget", () => {
     const loads = loadState({ [connection]: { status: "loading" } });
     const fetched = new Set([connection]);
     const originalExpanded = new Set(["connection:other"]);
+    const generations = new Map<string, number>();
     const expanded = expandedState(originalExpanded);
 
-    forgetPostgresBrowserConnection(connection, nodeId, fetched, loads.set, expanded.set, () =>
-      result(Promise.resolve(true)),
+    forgetPostgresBrowserConnection(
+      connection,
+      nodeId,
+      fetched,
+      generations,
+      loads.set,
+      expanded.set,
+      () => result(Promise.resolve(true)),
     );
 
     assert.equal(expanded.expanded, originalExpanded);
@@ -281,6 +528,7 @@ describe("PostgreSQL Browser forget", () => {
     const loads = loadState(initialLoads);
     const fetched = new Set([connection]);
     const originalExpanded = new Set([nodeId]);
+    const generations = new Map<string, number>();
     const expanded = expandedState(originalExpanded);
 
     assert.throws(
@@ -289,6 +537,7 @@ describe("PostgreSQL Browser forget", () => {
           connection,
           nodeId,
           fetched,
+          generations,
           loads.set,
           expanded.set,
           () => {
@@ -354,6 +603,7 @@ describe("PostgreSQL Browser forget notifications", () => {
     const second = node(CONNECTION, "postgresql://u:****@db.example/gis");
     const loads = loadState();
     const expanded = expandedState(new Set([first.id, second.id]));
+    const generations = new Map<string, number>();
     let finishFirst!: (deleted: boolean) => void;
     let finishSecond!: (deleted: boolean) => void;
     const firstDeletion = new Promise<boolean>((resolve) => {
@@ -367,6 +617,7 @@ describe("PostgreSQL Browser forget notifications", () => {
       confirmForgetPostgresBrowserConnection(
         selected,
         new Set(),
+        generations,
         loads.set,
         expanded.set,
         translate,
@@ -380,6 +631,7 @@ describe("PostgreSQL Browser forget notifications", () => {
     confirmForgetPostgresBrowserConnection(
       first,
       new Set(),
+      generations,
       loads.set,
       expanded.set,
       translate,
@@ -413,6 +665,7 @@ describe("PostgreSQL Browser forget notifications", () => {
     const initialExpanded = new Set([selected.id]);
     const expanded = expandedState(initialExpanded);
     const fetched = new Set([connection]);
+    const generations = new Map<string, number>();
     const refuse = () => {
       throw new PostgresConnectionForgetError();
     };
@@ -421,6 +674,7 @@ describe("PostgreSQL Browser forget notifications", () => {
       confirmForgetPostgresBrowserConnection(
         selected,
         fetched,
+        generations,
         loads.set,
         expanded.set,
         translate,
@@ -434,6 +688,7 @@ describe("PostgreSQL Browser forget notifications", () => {
       confirmForgetPostgresBrowserConnection(
         selected,
         fetched,
+        generations,
         loads.set,
         expanded.set,
         translate,

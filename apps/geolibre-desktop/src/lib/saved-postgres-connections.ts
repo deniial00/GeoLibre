@@ -57,22 +57,15 @@ function readPendingPostgresDeletionIds(): string[] {
   try {
     parsed = JSON.parse(value);
   } catch {
-    reportCredentialStorageError(
-      new Error("The pending PostGIS credential deletions list is malformed."),
-    );
-    return [];
+    throw new Error("The pending PostGIS credential deletions list is malformed.");
   }
-  if (!Array.isArray(parsed)) {
-    reportCredentialStorageError(
-      new Error("The pending PostGIS credential deletions list is malformed."),
-    );
-    return [];
+  if (
+    !Array.isArray(parsed) ||
+    !parsed.every((id): id is string => typeof id === "string" && CONNECTION_ID_PATTERN.test(id))
+  ) {
+    throw new Error("The pending PostGIS credential deletions list is malformed.");
   }
-  return [
-    ...new Set(
-      parsed.filter((id): id is string => typeof id === "string" && CONNECTION_ID_PATTERN.test(id)),
-    ),
-  ];
+  return [...new Set(parsed)];
 }
 
 function writePendingPostgresDeletionIds(ids: string[]): void {
@@ -117,6 +110,10 @@ async function performPostgresCredentialDeletion(id: string): Promise<boolean> {
  * those forgets never committed the saved-list update.
  */
 export async function resumePostgresCredentialDeletions(): Promise<string[]> {
+  return retryPendingPostgresCredentialDeletions();
+}
+
+async function retryPendingPostgresCredentialDeletions(excludeId?: string): Promise<string[]> {
   if (
     credentialStorageLocation() !== "keychain" ||
     !postgresKeychainWritable ||
@@ -147,7 +144,7 @@ export async function resumePostgresCredentialDeletions(): Promise<string[]> {
 
   const failed: string[] = [];
   for (const id of deletions) {
-    if (!(await deletePostgresCredential(id))) failed.push(id);
+    if (id !== excludeId && !(await deletePostgresCredential(id))) failed.push(id);
   }
   return failed;
 }
@@ -267,11 +264,13 @@ export function forgetPostgresConnection(connectionString: string): PostgresConn
       throw new PostgresConnectionForgetError();
     }
     setKeychainPostgresConnections(next);
+    // Retry older records first; the shared deletion map also prevents a retry
+    // from issuing a second native delete for an id already in flight.
+    const retries = retryPendingPostgresCredentialDeletions(entry.id);
+    void retries.catch(reportCredentialStorageError);
     return {
       connections: next.map(({ connection }) => connection),
-      credentialDeleted: resumePostgresCredentialDeletions().then(
-        (failed) => !failed.includes(entry.id),
-      ),
+      credentialDeleted: deletePostgresCredential(entry.id),
     };
   }
 

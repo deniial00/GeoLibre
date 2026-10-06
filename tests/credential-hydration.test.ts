@@ -13,12 +13,25 @@ const storage = new Map<string, string>([
 const keychain = new Map<string, string>();
 let failDeletes = false;
 let deleteGate: Promise<void> | null = null;
+let failPendingJournalReads = false;
+let failPendingJournalReadsAfterIndexWrite = false;
 const deleteCalls: string[] = [];
 
 (globalThis as { window?: unknown }).window = {
   localStorage: {
-    getItem: (key: string) => storage.get(key) ?? null,
-    setItem: (key: string, value: string) => void storage.set(key, value),
+    getItem: (key: string) => {
+      if (key === "geolibre.postgres.pendingDeletionIds" && failPendingJournalReads) {
+        throw new Error("localStorage journal is unavailable");
+      }
+      return storage.get(key) ?? null;
+    },
+    setItem: (key: string, value: string) => {
+      storage.set(key, value);
+      if (key === "geolibre.postgres.connectionIds" && failPendingJournalReadsAfterIndexWrite) {
+        failPendingJournalReadsAfterIndexWrite = false;
+        failPendingJournalReads = true;
+      }
+    },
     removeItem: (key: string) => void storage.delete(key),
   },
   __TAURI_INTERNALS__: {
@@ -205,6 +218,118 @@ describe("desktop credential hydration", () => {
     assert.equal(keychain.get(postgresConnectionAccount(aId)), a);
     assert.deepEqual(pendingIds(), []);
   });
+  it("reports the selected deletion's native acknowledgement when journal reads fail", async () => {
+    const confirmed = "postgresql://journal-confirmed:pw@h/db";
+    rememberPostgresConnection(confirmed);
+    await queueCredentialChanges({}, {});
+    const confirmedId = idFor(confirmed);
+    const confirmedDeleteStart = deleteCalls.length;
+    failPendingJournalReadsAfterIndexWrite = true;
+    let confirmedDeleted = false;
+    try {
+      const confirmedResult = forgetPostgresConnection(confirmed);
+      confirmedDeleted = await confirmedResult.credentialDeleted;
+    } finally {
+      failPendingJournalReads = false;
+      failPendingJournalReadsAfterIndexWrite = false;
+    }
+    assert.equal(confirmedDeleted, true);
+    assert.ok(
+      deleteCalls.slice(confirmedDeleteStart).includes(postgresConnectionAccount(confirmedId)),
+    );
+    assert.equal(keychain.has(postgresConnectionAccount(confirmedId)), false);
+    assert.deepEqual(pendingIds(), [confirmedId]);
+
+    const refused = "postgresql://journal-refused:pw@h/db";
+    rememberPostgresConnection(refused);
+    await queueCredentialChanges({}, {});
+    const refusedId = idFor(refused);
+    const refusedDeleteStart = deleteCalls.length;
+    failDeletes = true;
+    failPendingJournalReadsAfterIndexWrite = true;
+    let refusedDeleted = true;
+    try {
+      const refusedResult = forgetPostgresConnection(refused);
+      refusedDeleted = await refusedResult.credentialDeleted;
+    } finally {
+      failPendingJournalReads = false;
+      failPendingJournalReadsAfterIndexWrite = false;
+      failDeletes = false;
+    }
+    assert.equal(refusedDeleted, false);
+    assert.ok(deleteCalls.slice(refusedDeleteStart).includes(postgresConnectionAccount(refusedId)));
+    assert.equal(keychain.get(postgresConnectionAccount(refusedId)), refused);
+    assert.deepEqual(pendingIds(), [confirmedId, refusedId]);
+
+    await hydrateDesktopCredentials();
+    assert.equal(keychain.has(postgresConnectionAccount(confirmedId)), false);
+    assert.equal(keychain.has(postgresConnectionAccount(refusedId)), false);
+    assert.deepEqual(pendingIds(), []);
+  });
+
+  it("preserves a corrupt deletion journal until it can be restored", async () => {
+    const pending = "postgresql://journal-pending:pw@h/db";
+    rememberPostgresConnection(pending);
+    await queueCredentialChanges({}, {});
+    const pendingId = idFor(pending);
+    failDeletes = true;
+    try {
+      const pendingResult = forgetPostgresConnection(pending);
+      assert.equal(await pendingResult.credentialDeleted, false);
+    } finally {
+      failDeletes = false;
+    }
+
+    const saved = "postgresql://journal-saved:pw@h/db";
+    rememberPostgresConnection(saved);
+    await queueCredentialChanges({}, {});
+    const savedId = idFor(saved);
+    for (const corruptJournal of ["{", "{}", "[42]"]) {
+      storage.set("geolibre.postgres.pendingDeletionIds", corruptJournal);
+
+      const revisionBeforeForget = useCredentialStorageStatus.getState().revision;
+      assert.throws(() => forgetPostgresConnection(saved), PostgresConnectionForgetError);
+      assert.ok(useCredentialStorageStatus.getState().revision > revisionBeforeForget);
+      assert.ok(connectionIds().includes(savedId));
+      assert.equal(keychain.get(postgresConnectionAccount(savedId)), saved);
+      assert.equal(storage.get("geolibre.postgres.pendingDeletionIds"), corruptJournal);
+
+      const revisionBeforeResume = useCredentialStorageStatus.getState().revision;
+      await hydrateDesktopCredentials();
+      assert.ok(useCredentialStorageStatus.getState().revision > revisionBeforeResume);
+      assert.ok(connectionIds().includes(savedId));
+      assert.equal(keychain.get(postgresConnectionAccount(savedId)), saved);
+      assert.equal(storage.get("geolibre.postgres.pendingDeletionIds"), corruptJournal);
+    }
+
+    const corruptJournal = storage.get("geolibre.postgres.pendingDeletionIds");
+    const revisionBeforeUnreadableForget = useCredentialStorageStatus.getState().revision;
+    failPendingJournalReads = true;
+    try {
+      assert.throws(() => forgetPostgresConnection(saved), PostgresConnectionForgetError);
+      assert.ok(useCredentialStorageStatus.getState().revision > revisionBeforeUnreadableForget);
+      assert.ok(connectionIds().includes(savedId));
+      assert.equal(keychain.get(postgresConnectionAccount(savedId)), saved);
+      assert.equal(storage.get("geolibre.postgres.pendingDeletionIds"), corruptJournal);
+
+      const revisionBeforeUnreadableResume = useCredentialStorageStatus.getState().revision;
+      await hydrateDesktopCredentials();
+      assert.ok(useCredentialStorageStatus.getState().revision > revisionBeforeUnreadableResume);
+      assert.ok(connectionIds().includes(savedId));
+      assert.equal(keychain.get(postgresConnectionAccount(savedId)), saved);
+      assert.equal(storage.get("geolibre.postgres.pendingDeletionIds"), corruptJournal);
+    } finally {
+      failPendingJournalReads = false;
+    }
+
+    storage.set("geolibre.postgres.pendingDeletionIds", JSON.stringify([pendingId]));
+    await hydrateDesktopCredentials();
+    assert.equal(keychain.has(postgresConnectionAccount(pendingId)), false);
+    assert.ok(connectionIds().includes(savedId));
+    assert.equal(keychain.get(postgresConnectionAccount(savedId)), saved);
+    assert.deepEqual(pendingIds(), []);
+  });
+
   it("shares an in-flight deletion across rapid forgets", async () => {
     const first = "postgresql://rapid-first:pw@h/db";
     const second = "postgresql://rapid-second:pw@h/db";

@@ -29,18 +29,26 @@ const defaultDependencies: PostgresBrowserLoaderDependencies = {
 /**
  * Lazily introspect a desktop PostgreSQL connection once per successful load.
  * Publish loading/error/table state; failures clear the fetched marker for retry.
+ * Completions from generations invalidated by forget or retry are ignored.
  */
 export function fetchPostgresBrowserTables(
   connectionString: string,
   fetched: Set<string>,
+  generations: Map<string, number>,
   setLoads: SetConnectionLoads,
   t: TFunction,
   dependencies: PostgresBrowserLoaderDependencies = defaultDependencies,
 ): void {
   if (fetched.has(connectionString)) return;
+  const generation = (generations.get(connectionString) ?? 0) + 1;
+  generations.set(connectionString, generation);
   fetched.add(connectionString);
-  const key = connectionString;
-  const update = (load: ConnectionLoad) => setLoads((previous) => ({ ...previous, [key]: load }));
+  const update = (load: ConnectionLoad) =>
+    setLoads((previous) =>
+      generations.get(connectionString) === generation
+        ? { ...previous, [connectionString]: load }
+        : previous,
+    );
 
   // PostGIS browsing needs the desktop sidecar/Martin, so outside the
   // desktop shell show the same localized "requires GeoLibre Desktop"
@@ -77,6 +85,7 @@ export function fetchPostgresBrowserTables(
       return dependencies.listTables(connectionString);
     })
     .then((tables) => {
+      if (generations.get(connectionString) !== generation) return;
       // geometry_columns returns one row per geometry column, so a table
       // with several geometry columns appears several times; keep the first
       // because the Browser tree represents tables, while the Add Data
@@ -88,6 +97,7 @@ export function fetchPostgresBrowserTables(
       update({ status: "loaded", tables: unique });
     })
     .catch((err: unknown) => {
+      if (generations.get(connectionString) !== generation) return;
       // Allow a retry: drop the fetched marker so collapsing and
       // re-expanding the connection re-runs introspection rather than
       // sticking on the error. Reuse the Add Data errorMessage helper for a
@@ -111,13 +121,17 @@ export function forgetPostgresBrowserConnection(
   connectionString: string,
   nodeId: string,
   fetched: Set<string>,
+  generations: Map<string, number>,
   setLoads: SetConnectionLoads,
   setExpanded: SetBrowserExpanded,
   forget: (connectionString: string) => PostgresConnectionForgetResult = forgetPostgresConnection,
 ): Promise<boolean> {
   const { credentialDeleted } = forget(connectionString);
+  const generation = (generations.get(connectionString) ?? 0) + 1;
+  generations.set(connectionString, generation);
   fetched.delete(connectionString);
   setLoads((previous) => {
+    if (generations.get(connectionString) !== generation) return previous;
     const next = { ...previous };
     delete next[connectionString];
     return next;
@@ -135,6 +149,7 @@ export function forgetPostgresBrowserConnection(
 export function confirmForgetPostgresBrowserConnection(
   node: BrowserNode,
   fetched: Set<string>,
+  generations: Map<string, number>,
   setLoads: SetConnectionLoads,
   setExpanded: SetBrowserExpanded,
   t: TFunction,
@@ -151,6 +166,7 @@ export function confirmForgetPostgresBrowserConnection(
       connectionString,
       node.id,
       fetched,
+      generations,
       setLoads,
       setExpanded,
       forget,
