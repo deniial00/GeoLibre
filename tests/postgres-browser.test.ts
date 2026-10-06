@@ -1,10 +1,11 @@
 import assert from "node:assert/strict";
-import { describe, it } from "node:test";
+import { afterEach, beforeEach, describe, it } from "node:test";
 import type { TFunction } from "i18next";
 import type { PostgisTableInfo } from "@geolibre/processing";
-import type { ConnectionLoads } from "../apps/geolibre-desktop/src/lib/browser-tree";
+import type { BrowserNode, ConnectionLoads } from "../apps/geolibre-desktop/src/lib/browser-tree";
 import {
   fetchPostgresBrowserTables,
+  confirmForgetPostgresBrowserConnection,
   type PostgresBrowserLoaderDependencies,
   forgetPostgresBrowserConnection,
   type SetBrowserExpanded,
@@ -16,6 +17,7 @@ import {
   PostgresConnectionForgetError,
   type PostgresConnectionForgetResult,
 } from "../apps/geolibre-desktop/src/lib/saved-postgres-connections";
+import { clearNotifications, useNotificationStore } from "../apps/geolibre-desktop/src/lib/notify";
 
 const connection = "postgresql://u:pw@h/db";
 const nodeId = `connection:${connection}`;
@@ -36,7 +38,11 @@ function dependencies(
 ): PostgresBrowserLoaderDependencies {
   return {
     isDesktop: () => true,
-    startSidecar: async () => ({ baseUrl: "http://127.0.0.1", port: 8765, token: "test" }),
+    startSidecar: async () => ({
+      baseUrl: "http://127.0.0.1",
+      port: 8765,
+      token: "test",
+    }),
     fetchStatus: async () => ({ available: true, message: "" }),
     listTables: async () => [table, { ...table, geometry_column: "geom_2" }],
     ...overrides,
@@ -109,7 +115,9 @@ describe("PostgreSQL Browser table loading", () => {
       fetched,
       state.set,
       translate,
-      dependencies({ fetchStatus: async () => ({ available: false, message: "missing" }) }),
+      dependencies({
+        fetchStatus: async () => ({ available: false, message: "missing" }),
+      }),
     );
     await nextTurn();
 
@@ -144,7 +152,10 @@ describe("PostgreSQL Browser table loading", () => {
     );
     await nextTurn();
 
-    assert.deepEqual(state.loads[CONNECTION], { status: "error", message: stale });
+    assert.deepEqual(state.loads[CONNECTION], {
+      status: "error",
+      message: stale,
+    });
     assert.equal(statusCalls, 0);
     assert.equal(fetched.has(CONNECTION), false);
 
@@ -264,10 +275,9 @@ describe("PostgreSQL Browser forget", () => {
   });
 
   it("leaves Browser state untouched when forgetting is refused", () => {
-    const initialLoads = { [connection]: { status: "loaded", tables: [] } } satisfies Record<
-      string,
-      ConnectionLoad
-    >;
+    const initialLoads = {
+      [connection]: { status: "loaded", tables: [] },
+    } satisfies Record<string, ConnectionLoad>;
     const loads = loadState(initialLoads);
     const fetched = new Set([connection]);
     const originalExpanded = new Set([nodeId]);
@@ -315,5 +325,128 @@ describe("PostgreSQL Browser forget", () => {
       if (previousWindow === undefined) delete runtime.window;
       else runtime.window = previousWindow;
     }
+  });
+});
+
+describe("PostgreSQL Browser forget notifications", () => {
+  const runtime = globalThis as { window?: unknown };
+  let previousWindow: unknown;
+  beforeEach(() => {
+    previousWindow = runtime.window;
+    runtime.window = { confirm: () => true };
+    clearNotifications();
+  });
+  afterEach(() => {
+    clearNotifications();
+    if (previousWindow === undefined) delete runtime.window;
+    else runtime.window = previousWindow;
+  });
+  const node = (dsn: string, label: string): BrowserNode => ({
+    id: `connection:${dsn}`,
+    kind: "connection",
+    connectionString: dsn,
+    label,
+    addable: false,
+  });
+
+  it("retains independent masked warnings when forgets finish out of order", async () => {
+    const first = node(connection, "postgresql://u:****@h/db");
+    const second = node(CONNECTION, "postgresql://u:****@db.example/gis");
+    const loads = loadState();
+    const expanded = expandedState(new Set([first.id, second.id]));
+    let finishFirst!: (deleted: boolean) => void;
+    let finishSecond!: (deleted: boolean) => void;
+    const firstDeletion = new Promise<boolean>((resolve) => {
+      finishFirst = resolve;
+    });
+    const secondDeletion = new Promise<boolean>((resolve) => {
+      finishSecond = resolve;
+    });
+    const forget = (dsn: string) => result(dsn === connection ? firstDeletion : secondDeletion);
+    for (const selected of [first, second]) {
+      confirmForgetPostgresBrowserConnection(
+        selected,
+        new Set(),
+        loads.set,
+        expanded.set,
+        translate,
+        forget,
+      );
+    }
+    finishSecond(false);
+    await nextTurn();
+    finishFirst(false);
+    await nextTurn();
+    confirmForgetPostgresBrowserConnection(
+      first,
+      new Set(),
+      loads.set,
+      expanded.set,
+      translate,
+      () => result(Promise.resolve(true)),
+    );
+    await nextTurn();
+    const notifications = useNotificationStore.getState().notifications;
+    assert.deepEqual(
+      notifications.map(({ kind, description, durationMs }) => ({
+        kind,
+        description,
+        durationMs,
+      })),
+      [
+        { kind: "warning", description: second.label, durationMs: null },
+        { kind: "warning", description: first.label, durationMs: null },
+      ],
+    );
+    assert.ok(
+      notifications.every(({ message }) => message === "browser.forgetPostgresCredentialFailed"),
+    );
+    assert.ok(!JSON.stringify(notifications).includes(":pw@"));
+  });
+
+  it("leaves cached state intact on cancellation and on saved-list failure", () => {
+    const selected = node(connection, "postgresql://u:****@h/db");
+    const initialLoads: ConnectionLoads = {
+      [connection]: { status: "loaded", tables: [] },
+    };
+    const loads = loadState(initialLoads);
+    const initialExpanded = new Set([selected.id]);
+    const expanded = expandedState(initialExpanded);
+    const fetched = new Set([connection]);
+    const refuse = () => {
+      throw new PostgresConnectionForgetError();
+    };
+    window.confirm = () => false;
+    assert.equal(
+      confirmForgetPostgresBrowserConnection(
+        selected,
+        fetched,
+        loads.set,
+        expanded.set,
+        translate,
+        refuse,
+      ),
+      false,
+    );
+    assert.deepEqual(useNotificationStore.getState().notifications, []);
+    window.confirm = () => true;
+    assert.equal(
+      confirmForgetPostgresBrowserConnection(
+        selected,
+        fetched,
+        loads.set,
+        expanded.set,
+        translate,
+        refuse,
+      ),
+      false,
+    );
+    assert.equal(loads.loads, initialLoads);
+    assert.equal(expanded.expanded, initialExpanded);
+    assert.deepEqual([...fetched], [connection]);
+    const [failure] = useNotificationStore.getState().notifications;
+    assert.equal(failure.kind, "error");
+    assert.equal(failure.description, selected.label);
+    assert.equal(failure.message, "browser.forgetPostgresConnectionFailed");
   });
 });

@@ -12,6 +12,8 @@ const storage = new Map<string, string>([
 ]);
 const keychain = new Map<string, string>();
 let failDeletes = false;
+let deleteGate: Promise<void> | null = null;
+const deleteCalls: string[] = [];
 
 (globalThis as { window?: unknown }).window = {
   localStorage: {
@@ -32,6 +34,8 @@ let failDeletes = false;
         return null;
       }
       if (cmd === "secure_store_delete") {
+        deleteCalls.push(args.account as string);
+        await deleteGate;
         if (failDeletes) {
           throw new Error("Platform secure storage failure: item is locked");
         }
@@ -200,5 +204,36 @@ describe("desktop credential hydration", () => {
     assert.ok(readSavedPostgresConnections().includes(a));
     assert.equal(keychain.get(postgresConnectionAccount(aId)), a);
     assert.deepEqual(pendingIds(), []);
+  });
+  it("shares an in-flight deletion across rapid forgets", async () => {
+    const first = "postgresql://rapid-first:pw@h/db";
+    const second = "postgresql://rapid-second:pw@h/db";
+    rememberPostgresConnection(first);
+    rememberPostgresConnection(second);
+    await queueCredentialChanges({}, {});
+    const firstAccount = postgresConnectionAccount(idFor(first));
+    const secondAccount = postgresConnectionAccount(idFor(second));
+    const start = deleteCalls.length;
+    let release!: () => void;
+    deleteGate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    try {
+      const firstResult = forgetPostgresConnection(first);
+      const secondResult = forgetPostgresConnection(second);
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      release();
+      assert.deepEqual(
+        await Promise.all([firstResult.credentialDeleted, secondResult.credentialDeleted]),
+        [true, true],
+      );
+      assert.deepEqual(deleteCalls.slice(start), [firstAccount, secondAccount]);
+      assert.equal(keychain.has(firstAccount), false);
+      assert.equal(keychain.has(secondAccount), false);
+      assert.deepEqual(pendingIds(), []);
+    } finally {
+      release();
+      deleteGate = null;
+    }
   });
 });

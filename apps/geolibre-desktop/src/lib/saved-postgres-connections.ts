@@ -83,7 +83,19 @@ function writePendingPostgresDeletionIds(ids: string[]): void {
   }
 }
 
-async function deletePostgresCredential(id: string): Promise<boolean> {
+const postgresCredentialDeletions = new Map<string, Promise<boolean>>();
+
+function deletePostgresCredential(id: string): Promise<boolean> {
+  const existing = postgresCredentialDeletions.get(id);
+  if (existing) return existing;
+  const deletion = performPostgresCredentialDeletion(id).finally(() => {
+    postgresCredentialDeletions.delete(id);
+  });
+  postgresCredentialDeletions.set(id, deletion);
+  return deletion;
+}
+
+async function performPostgresCredentialDeletion(id: string): Promise<boolean> {
   try {
     await deleteSecureCredentialAfterQueue(postgresConnectionAccount(id));
   } catch {
@@ -99,6 +111,11 @@ async function deletePostgresCredential(id: string): Promise<boolean> {
   return true;
 }
 
+/**
+ * Retry durable deletion records, sharing any delete already in flight.
+ * Discard markers for still-indexed connections without deleting their secrets:
+ * those forgets never committed the saved-list update.
+ */
 export async function resumePostgresCredentialDeletions(): Promise<string[]> {
   if (
     credentialStorageLocation() !== "keychain" ||

@@ -4,11 +4,13 @@ import { errorMessage } from "../components/layout/add-data/helpers";
 import { uniqueDatabaseTables } from "./database-tables";
 import { isDesktopRuntime } from "./is-mobile";
 import { ignoreSidecarStartError, startGeoLibreSidecar } from "./sidecar";
-import type { ConnectionLoad, SetConnectionLoads } from "./browser-tree";
+import type { BrowserNode, ConnectionLoad, SetConnectionLoads } from "./browser-tree";
 import {
   forgetPostgresConnection,
+  PostgresConnectionForgetError,
   type PostgresConnectionForgetResult,
 } from "./saved-postgres-connections";
+import { notify } from "./notify";
 
 export interface PostgresBrowserLoaderDependencies {
   isDesktop: () => boolean;
@@ -49,7 +51,10 @@ export function fetchPostgresBrowserTables(
   // fetched set so it can retry on desktop.
   if (!dependencies.isDesktop()) {
     fetched.delete(connectionString);
-    update({ status: "error", message: t("addData.postgres.errorDesktopOnly") });
+    update({
+      status: "error",
+      message: t("addData.postgres.errorDesktopOnly"),
+    });
     return;
   }
   update({ status: "loading" });
@@ -76,7 +81,10 @@ export function fetchPostgresBrowserTables(
       // with several geometry columns appears several times; keep the first
       // because the Browser tree represents tables, while the Add Data
       // dialog provides the geometry-column picker after a table is chosen.
-      const unique = uniqueDatabaseTables(tables).map(({ schema, table }) => ({ schema, table }));
+      const unique = uniqueDatabaseTables(tables).map(({ schema, table }) => ({
+        schema,
+        table,
+      }));
       update({ status: "loaded", tables: unique });
     })
     .catch((err: unknown) => {
@@ -121,4 +129,46 @@ export function forgetPostgresBrowserConnection(
     return next;
   });
   return credentialDeleted;
+}
+
+/** Confirm removal and report each failure independently using the masked node label. */
+export function confirmForgetPostgresBrowserConnection(
+  node: BrowserNode,
+  fetched: Set<string>,
+  setLoads: SetConnectionLoads,
+  setExpanded: SetBrowserExpanded,
+  t: TFunction,
+  forget: (connectionString: string) => PostgresConnectionForgetResult = forgetPostgresConnection,
+): boolean {
+  const connectionString = node.connectionString;
+  if (node.kind !== "connection" || !connectionString || node.mssqlConnectionId) return false;
+  if (!window.confirm(t("addData.postgres.forgetConnectionConfirm", { name: node.label }))) {
+    return false;
+  }
+  let credentialDeleted: Promise<boolean>;
+  try {
+    credentialDeleted = forgetPostgresBrowserConnection(
+      connectionString,
+      node.id,
+      fetched,
+      setLoads,
+      setExpanded,
+      forget,
+    );
+  } catch (error) {
+    if (!(error instanceof PostgresConnectionForgetError)) throw error;
+    notify.error(t("browser.forgetPostgresConnectionFailed"), {
+      description: node.label,
+    });
+    return false;
+  }
+  void credentialDeleted.then((deleted) => {
+    if (!deleted) {
+      notify.warning(t("browser.forgetPostgresCredentialFailed"), {
+        description: node.label,
+        durationMs: null,
+      });
+    }
+  });
+  return true;
 }
