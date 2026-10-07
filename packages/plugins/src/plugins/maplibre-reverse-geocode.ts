@@ -60,8 +60,8 @@ function buildPopupContent(title: string, body: string, copyLabel: string): HTML
   // is set via textContent (never parsed as HTML) and the copy button's handler
   // can be bound directly.
   const container = document.createElement("div");
+  container.className = "geolibre-reverse-geocode-content";
   container.style.maxWidth = "260px";
-  container.style.font = "13px/1.4 system-ui, sans-serif";
 
   const text = document.createElement("div");
   text.textContent = body;
@@ -71,9 +71,8 @@ function buildPopupContent(title: string, body: string, copyLabel: string): HTML
   if (title) {
     const button = document.createElement("button");
     button.type = "button";
+    button.className = "geolibre-reverse-geocode-copy";
     button.textContent = copyLabel;
-    button.style.cursor = "pointer";
-    button.style.fontSize = "12px";
     button.addEventListener("click", () => {
       void navigator.clipboard?.writeText(title).then(
         () => {

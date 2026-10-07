@@ -144,6 +144,617 @@ html:lang(fa) {
   --shadow-xl: 0 8px 16px -4px var(--elev-penumbra), 0 24px 40px -8px var(--elev-umbra);
 }
 
+/* Map UI inherits the app theme, independently of prefers-color-scheme.
+   Keep these aliases on the map AND body-hosted annotation dialogs; map data,
+   authored HTML, legend swatches and branding are deliberately not recolored. */
+:root {
+  --geolibre-bg: hsl(var(--popover));
+  --geolibre-bg-subtle: hsl(var(--accent));
+  --geolibre-bg-muted: hsl(var(--muted));
+  --geolibre-fg: hsl(var(--popover-foreground));
+  --geolibre-fg-muted: hsl(var(--muted-foreground));
+  --geolibre-border: hsl(var(--border));
+  --geolibre-primary: hsl(var(--primary));
+}
+
+.maplibregl-map .maplibregl-ctrl {
+  font-family: var(--font-sans);
+}
+
+.maplibregl-map .maplibregl-ctrl-group {
+  background: hsl(var(--popover));
+  border-radius: var(--radius);
+  color: hsl(var(--popover-foreground));
+}
+
+.maplibregl-map .maplibregl-ctrl-group:not(:empty) {
+  box-shadow:
+    0 0 0 1px hsl(var(--border)),
+    var(--shadow-sm);
+}
+
+.maplibregl-map .maplibregl-ctrl-group button {
+  color: hsl(var(--popover-foreground));
+}
+
+.maplibregl-map .maplibregl-ctrl-group button + button {
+  border-top-color: hsl(var(--border));
+}
+
+.maplibregl-map
+  .maplibregl-ctrl-group
+  button:where(
+    .maplibregl-ctrl-zoom-in,
+    .maplibregl-ctrl-zoom-out,
+    .maplibregl-ctrl-compass,
+    .maplibregl-ctrl-fullscreen,
+    .maplibregl-ctrl-shrink,
+    .maplibregl-ctrl-globe,
+    .maplibregl-ctrl-globe-enabled,
+    .maplibregl-ctrl-terrain,
+    .maplibregl-ctrl-terrain-enabled,
+    .maplibregl-ctrl-geolocate,
+    .geolibre-reset-bearing-button,
+    .geolibre-graticule-button
+  ):not(:disabled):hover {
+  background-color: hsl(var(--accent));
+}
+
+.maplibregl-map .maplibregl-ctrl-group button:focus-visible,
+.maplibregl-map .maplibregl-ctrl-attrib-button:focus-visible {
+  outline: 2px solid hsl(var(--ring));
+  outline-offset: -2px;
+}
+
+.maplibregl-map .maplibregl-ctrl-group button:disabled {
+  cursor: not-allowed;
+}
+
+/* Native icons are SVG background images, not currentColor. Invert neutral
+   icons only; preserve enabled/colored status icons. Never filter map content. */
+.dark .maplibregl-map .maplibregl-ctrl-icon {
+  filter: invert(1);
+}
+
+.dark
+  .maplibregl-map
+  :is(.maplibregl-ctrl-globe-enabled, .maplibregl-ctrl-terrain-enabled)
+  .maplibregl-ctrl-icon,
+.dark
+  .maplibregl-map
+  .maplibregl-ctrl-geolocate:is(
+    .maplibregl-ctrl-geolocate-active,
+    .maplibregl-ctrl-geolocate-active-error,
+    .maplibregl-ctrl-geolocate-background,
+    .maplibregl-ctrl-geolocate-background-error
+  )
+  .maplibregl-ctrl-icon {
+  filter: none;
+}
+
+.maplibregl-map .maplibregl-ctrl:is(.maplibregl-ctrl-scale, .maplibregl-ctrl-attrib) {
+  background: hsl(var(--popover) / 0.95);
+  color: hsl(var(--popover-foreground));
+}
+
+.maplibregl-map .maplibregl-ctrl-scale {
+  border-color: hsl(var(--popover-foreground));
+}
+
+.maplibregl-map .maplibregl-ctrl-attrib a {
+  color: hsl(var(--muted-foreground));
+}
+
+.maplibregl-map .maplibregl-ctrl-attrib a:hover {
+  color: hsl(var(--popover-foreground));
+}
+
+.maplibregl-map .maplibregl-ctrl-attrib-button {
+  background-color: transparent;
+}
+
+.dark .maplibregl-map .maplibregl-ctrl-attrib-button {
+  filter: invert(1);
+}
+
+/* Shared popup frame covers native Inspect/NLDI popups too. Content-specific
+   rules below retain their layouts; inline authored content retains its colors. */
+.maplibregl-map .maplibregl-popup {
+  font-family: var(--font-sans);
+}
+
+.maplibregl-map .maplibregl-popup-content {
+  background: hsl(var(--popover));
+  border: 1px solid hsl(var(--border));
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-md);
+  color: hsl(var(--popover-foreground));
+}
+
+.maplibregl-map .maplibregl-popup-close-button {
+  align-items: center;
+  right: auto;
+  background: transparent;
+  border-radius: 4px;
+  color: hsl(var(--muted-foreground));
+  display: flex;
+  font: inherit;
+  height: 24px;
+  inset-block-start: 4px;
+  inset-inline-end: 4px;
+  justify-content: center;
+  width: 24px;
+}
+
+.maplibregl-map .maplibregl-popup-close-button:hover {
+  background: hsl(var(--accent));
+  color: hsl(var(--accent-foreground));
+}
+
+.maplibregl-map
+  .maplibregl-popup:is(
+    .maplibregl-popup-anchor-top,
+    .maplibregl-popup-anchor-top-left,
+    .maplibregl-popup-anchor-top-right
+  )
+  .maplibregl-popup-tip {
+  border-bottom-color: hsl(var(--popover));
+}
+
+.maplibregl-map
+  .maplibregl-popup:is(
+    .maplibregl-popup-anchor-bottom,
+    .maplibregl-popup-anchor-bottom-left,
+    .maplibregl-popup-anchor-bottom-right
+  )
+  .maplibregl-popup-tip {
+  border-top-color: hsl(var(--popover));
+}
+
+.maplibregl-map .maplibregl-popup-anchor-left .maplibregl-popup-tip {
+  border-right-color: hsl(var(--popover));
+}
+
+.maplibregl-map .maplibregl-popup-anchor-right .maplibregl-popup-tip {
+  border-left-color: hsl(var(--popover));
+}
+
+.maplibregl-map :is(.geolibre-element-popup-card, .geolibre-annotation-dialog) {
+  background: hsl(var(--popover));
+  border: 1px solid hsl(var(--border));
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-md);
+  color: hsl(var(--popover-foreground));
+  font-family: var(--font-sans);
+  font-size: 13px;
+}
+
+.geolibre-reverse-geocode-content {
+  font-size: 13px;
+  line-height: 1.4;
+  padding-inline-end: 20px;
+}
+
+.geolibre-reverse-geocode-copy {
+  background: hsl(var(--secondary));
+  border: 1px solid hsl(var(--border));
+  border-radius: 4px;
+  color: hsl(var(--secondary-foreground));
+  cursor: pointer;
+  font: inherit;
+  padding: 4px 8px;
+}
+
+.geolibre-reverse-geocode-copy:hover {
+  background: hsl(var(--accent));
+  color: hsl(var(--accent-foreground));
+}
+
+/* Street View has no upstream theme API. Theme the interface, not the imagery
+   letterbox, provider branding or the location/direction marker. */
+html .streetview-control,
+html .streetview-panel {
+  background: hsl(var(--popover));
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-md);
+  color: hsl(var(--popover-foreground));
+  font-family: var(--font-sans);
+}
+
+html .streetview-control-toggle,
+html .streetview-panel-title {
+  color: hsl(var(--popover-foreground));
+}
+
+html .streetview-control-toggle:is(:hover, :active),
+html .streetview-panel-close:hover,
+html .streetview-provider-tab:not(:disabled):hover {
+  background: hsl(var(--accent));
+  color: hsl(var(--accent-foreground));
+}
+
+html .streetview-control.active .streetview-control-toggle,
+html .streetview-provider-tab.active {
+  background: hsl(var(--accent));
+  border-color: hsl(var(--ring));
+  color: hsl(var(--accent-foreground));
+}
+
+html .streetview-panel-header,
+html .streetview-provider-tabs,
+html .streetview-viewer-initial,
+html .streetview-no-data {
+  background: hsl(var(--muted));
+  border-color: hsl(var(--border));
+  color: hsl(var(--muted-foreground));
+}
+
+html .streetview-api-keys {
+  background: hsl(var(--popover));
+}
+
+html .streetview-panel-close,
+html .streetview-provider-tab,
+html .streetview-api-key-label,
+html .streetview-viewer-initial-hint {
+  color: hsl(var(--muted-foreground));
+}
+
+html .streetview-no-data-title {
+  color: hsl(var(--popover-foreground));
+}
+
+html .streetview-panel-resize::before {
+  border-color: hsl(var(--muted-foreground));
+}
+
+.streetview-panel .streetview-api-key-input {
+  background: hsl(var(--background));
+  border-color: hsl(var(--input));
+  color: hsl(var(--foreground)) !important;
+}
+
+.streetview-panel .streetview-api-key-input::placeholder {
+  color: hsl(var(--muted-foreground)) !important;
+}
+
+html .streetview-api-key-input:focus,
+html .streetview-control-toggle:focus-visible {
+  border-color: hsl(var(--ring));
+  box-shadow: 0 0 0 2px hsl(var(--ring) / 0.25);
+}
+
+html .streetview-api-key-apply,
+html .streetview-no-data-button {
+  background: hsl(var(--primary));
+  color: hsl(var(--primary-foreground));
+}
+
+html .streetview-api-key-apply:is(:hover, :active),
+html .streetview-no-data-button:hover {
+  background: hsl(var(--primary) / 0.9);
+}
+
+/* These grid children also exist as standalone controls. Their GeoLibre
+   classes are attached at mount; neutralize only the vendor's inline panel
+   defaults, leaving rendered HTML, swatches, ramps and image viewers alone. */
+.geolibre-components-control {
+  background: hsl(var(--popover)) !important;
+  color: hsl(var(--popover-foreground)) !important;
+}
+
+.geolibre-components-control .maplibre-gl-control-grid-content > .maplibregl-ctrl {
+  background: hsl(var(--popover)) !important;
+  color: hsl(var(--popover-foreground)) !important;
+}
+
+.geolibre-components-control
+  .maplibre-gl-control-grid-content
+  > .maplibregl-ctrl:not(.active)
+  > button:not(.active):not([class*="--active"]) {
+  background: hsl(var(--popover)) !important;
+  color: hsl(var(--popover-foreground)) !important;
+}
+
+.geolibre-components-control
+  .maplibre-gl-control-grid-content
+  > .maplibregl-ctrl
+  > button:not(:disabled):hover {
+  background: hsl(var(--accent)) !important;
+  color: hsl(var(--accent-foreground)) !important;
+}
+
+.geolibre-components-control
+  :is(
+    .measure-panel,
+    .bookmark-panel,
+    .maplibre-gl-view-state-panel,
+    .colorbar-gui-panel,
+    .legend-gui-panel,
+    .html-gui-panel,
+    .maplibre-gl-basemap,
+    .maplibre-gl-basemap-dropdown-menu,
+    .maplibre-gl-search,
+    .spin-globe-panel
+  ) {
+  background: hsl(var(--popover)) !important;
+  color: hsl(var(--popover-foreground)) !important;
+  border-color: hsl(var(--border));
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-md);
+  font-family: var(--font-sans);
+}
+
+.geolibre-components-control
+  :is(
+    .maplibre-gl-basemap-icon-button,
+    .maplibre-gl-basemap-close,
+    .maplibre-gl-basemap-loading,
+    .maplibre-gl-basemap-group
+  ) {
+  color: hsl(var(--muted-foreground));
+  border-color: hsl(var(--border));
+}
+
+.geolibre-components-control .maplibre-gl-basemap-dropdown-button {
+  background: hsl(var(--background));
+  border-color: hsl(var(--border));
+  color: hsl(var(--foreground));
+}
+
+.geolibre-components-control
+  :is(
+    .maplibre-gl-basemap-item:hover,
+    .maplibre-gl-basemap-item--selected,
+    .maplibre-gl-basemap-gallery-item:hover,
+    .maplibre-gl-basemap-gallery-item--selected,
+    .maplibre-gl-basemap-close:hover
+  ) {
+  background: hsl(var(--accent));
+  color: hsl(var(--accent-foreground));
+  outline-color: hsl(var(--ring));
+}
+
+.geolibre-components-control .maplibre-gl-basemap-thumbnail {
+  background-color: hsl(var(--muted));
+  border-color: hsl(var(--border));
+}
+
+.geolibre-components-control .maplibre-gl-basemap :is(label, .maplibre-gl-basemap-close) {
+  color: hsl(var(--popover-foreground));
+}
+
+/* COG/STAC/Splat grid panels set an inline #333 text color. */
+.geolibre-components-control
+  :is(.maplibre-gl-cog-layer-panel, .maplibre-gl-stac-layer-panel, .maplibre-gl-splat-panel) {
+  color: hsl(var(--popover-foreground)) !important;
+}
+
+.geolibre-components-control
+  :is(.maplibre-gl-cog-layer-panel, .maplibre-gl-stac-layer-panel, .maplibre-gl-splat-panel)
+  label {
+  color: hsl(var(--muted-foreground)) !important;
+}
+
+.geolibre-components-control :is(.maplibre-gl-cog-layer-close, .maplibre-gl-stac-layer-close),
+.geolibre-components-control .maplibre-gl-splat-panel > div:first-child button {
+  color: hsl(var(--muted-foreground)) !important;
+}
+
+.geolibre-components-control .maplibre-gl-stac-layer-btn--secondary {
+  background: hsl(var(--secondary)) !important;
+  border-color: hsl(var(--border)) !important;
+  color: hsl(var(--secondary-foreground)) !important;
+}
+
+.geolibre-components-control
+  :is(.maplibre-gl-cog-layer-btn--primary, .maplibre-gl-splat-panel > button) {
+  background: hsl(var(--primary)) !important;
+  color: hsl(var(--primary-foreground)) !important;
+}
+
+.geolibre-components-control
+  :is(
+    .maplibre-gl-cog-layer-panel,
+    .maplibre-gl-stac-layer-panel,
+    .maplibre-gl-splat-panel,
+    .maplibre-gl-add-vector-panel,
+    .maplibre-gl-zarr-layer-panel,
+    .maplibre-gl-pmtiles-layer-panel
+  )
+  input:is([type="checkbox"], [type="range"]) {
+  accent-color: hsl(var(--primary));
+}
+
+/* The grid's own Swipe instance keeps the OS theme ("auto"); reuse the
+   standalone token mapping but on an opaque floating surface. */
+html .geolibre-components-control .swipe-control-panel {
+  --swipe-bg: hsl(var(--popover));
+  --swipe-header-bg: hsl(var(--muted));
+  --swipe-fg: hsl(var(--popover-foreground));
+  --swipe-text: hsl(var(--popover-foreground));
+  --swipe-label: hsl(var(--muted-foreground));
+  --swipe-muted: hsl(var(--muted-foreground));
+  --swipe-border: hsl(var(--border));
+  --swipe-border-subtle: hsl(var(--border));
+  --swipe-input-bg: hsl(var(--background));
+  --swipe-input-border: hsl(var(--border));
+  --swipe-input-border-hover: hsl(var(--ring));
+  --swipe-list-bg: hsl(var(--muted));
+  --swipe-hover: hsl(var(--accent));
+  --swipe-item-hover: hsl(var(--accent));
+  --swipe-track: hsl(var(--input));
+  background: hsl(var(--popover)) !important;
+  color: hsl(var(--popover-foreground)) !important;
+  color-scheme: light;
+}
+
+html.dark .geolibre-components-control .swipe-control-panel {
+  color-scheme: dark;
+}
+
+html .geolibre-components-control .swipe-control-panel :is(label, .swipe-toggle-label) {
+  color: hsl(var(--popover-foreground));
+}
+
+html .maplibre-gl-inspect-header {
+  background: hsl(var(--muted));
+  border-color: hsl(var(--border));
+}
+
+html .maplibre-gl-inspect-geometry {
+  background: hsl(var(--primary));
+  color: hsl(var(--primary-foreground));
+}
+
+.maplibre-gl-inspect-popup
+  :is(
+    .maplibre-gl-inspect-layer,
+    .maplibre-gl-inspect-nav button,
+    .maplibre-gl-inspect-nav-count,
+    td.key,
+    td.value.null,
+    .maplibre-gl-inspect-empty
+  ) {
+  color: hsl(var(--muted-foreground));
+}
+
+.maplibre-gl-inspect-popup .maplibre-gl-inspect-properties td.value:not(.null) {
+  color: hsl(var(--popover-foreground));
+}
+
+.maplibre-gl-inspect-popup .maplibre-gl-inspect-properties td.value pre,
+.maplibre-gl-inspect-popup .maplibre-gl-inspect-nav button:not(:disabled):hover {
+  background: hsl(var(--accent));
+  color: hsl(var(--accent-foreground));
+}
+
+.maplibregl-map :is(.maplibre-gl-inspect-button, .maplibre-gl-vector-dataset-button) {
+  color: hsl(var(--popover-foreground));
+}
+
+.maplibregl-map
+  :is(
+    .maplibre-gl-inspect-button--active,
+    .maplibre-gl-inspect-button:hover,
+    .maplibre-gl-vector-dataset-button:hover
+  ) {
+  background: hsl(var(--accent));
+  color: hsl(var(--accent-foreground));
+}
+
+html .maplibre-gl-vector-dataset-dropzone {
+  background: hsl(var(--primary) / 0.15);
+  border-color: hsl(var(--ring));
+}
+
+html .maplibre-gl-vector-dataset-loading {
+  background: hsl(var(--background) / 0.85);
+}
+
+html .maplibre-gl-vector-dataset-dropzone-content,
+html .maplibre-gl-vector-dataset-loading-content {
+  background: hsl(var(--popover));
+  box-shadow: var(--shadow-md);
+  color: hsl(var(--popover-foreground));
+  font-family: var(--font-sans);
+}
+
+html .maplibre-gl-vector-dataset-dropzone-content p,
+html .maplibre-gl-vector-dataset-loading-text {
+  color: hsl(var(--popover-foreground));
+}
+
+html .maplibre-gl-vector-dataset-loading-progress {
+  color: hsl(var(--muted-foreground));
+}
+
+html .maplibre-gl-vector-dataset-dropzone-content svg {
+  color: hsl(var(--primary));
+}
+
+html .maplibre-gl-vector-dataset-spinner {
+  border-color: hsl(var(--border));
+  border-top-color: hsl(var(--primary));
+}
+
+/* Print's auto palette is OS-driven, including the grid's private instance. */
+.maplibregl-map .maplibre-gl-print-control {
+  --print-panel-bg: hsl(var(--popover)) !important;
+  --print-subtle-bg: hsl(var(--muted)) !important;
+  --print-text: hsl(var(--popover-foreground)) !important;
+  --print-muted: hsl(var(--muted-foreground)) !important;
+  --print-subtle: hsl(var(--muted-foreground)) !important;
+  --print-border: hsl(var(--border)) !important;
+  --print-input-bg: hsl(var(--background)) !important;
+  --print-input-text: hsl(var(--foreground)) !important;
+  --print-placeholder: hsl(var(--muted-foreground)) !important;
+  --print-hover-bg: hsl(var(--accent)) !important;
+  --print-focus: hsl(var(--ring)) !important;
+  --print-button-bg: hsl(var(--popover)) !important;
+  --print-button-text: hsl(var(--popover-foreground)) !important;
+}
+
+.maplibregl-map .maplibre-gl-print-control :is(input, select) {
+  color: hsl(var(--foreground)) !important;
+}
+
+/* LiDAR's UI palette is global upstream (including body-hosted dialogs). Own
+   the UI variables, not the point-cloud colors or elevation/classification ramp. */
+:root {
+  --lidar-bg: hsl(var(--popover)) !important;
+  --lidar-bg-muted: hsl(var(--muted)) !important;
+  --lidar-bg-subtle: hsl(var(--accent)) !important;
+  --lidar-bg-code: hsl(var(--background)) !important;
+  --lidar-hover: hsl(var(--accent)) !important;
+  --lidar-active: hsl(var(--secondary)) !important;
+  --lidar-border: hsl(var(--border)) !important;
+  --lidar-border-input: hsl(var(--input)) !important;
+  --lidar-border-strong: hsl(var(--border)) !important;
+  --lidar-border-hover: hsl(var(--ring)) !important;
+  --lidar-border-subtle: hsl(var(--border)) !important;
+  --lidar-border-dashed: hsl(var(--border)) !important;
+  --lidar-text: hsl(var(--popover-foreground)) !important;
+  --lidar-text-strong: hsl(var(--foreground)) !important;
+  --lidar-text-secondary: hsl(var(--muted-foreground)) !important;
+  --lidar-text-tertiary: hsl(var(--muted-foreground)) !important;
+  --lidar-text-muted: hsl(var(--muted-foreground)) !important;
+  --lidar-text-faint: hsl(var(--muted-foreground)) !important;
+  --lidar-accent: hsl(var(--primary)) !important;
+  --lidar-accent-hover: hsl(var(--primary) / 0.9) !important;
+  --lidar-accent-border: hsl(var(--primary)) !important;
+  --lidar-accent-dark: hsl(var(--primary)) !important;
+  --lidar-accent-darker: hsl(var(--primary)) !important;
+  --lidar-accent-soft: hsl(var(--accent)) !important;
+  --lidar-accent-ring: hsl(var(--ring) / 0.25) !important;
+  --lidar-on-accent: hsl(var(--primary-foreground)) !important;
+  --lidar-shadow: var(--elev-penumbra) !important;
+  --lidar-shadow-modal: var(--elev-umbra) !important;
+  --lidar-overlay: hsl(var(--popover) / 0.95) !important;
+  --lidar-toggle-hover: hsl(var(--accent)) !important;
+  --lidar-scrollbar: hsl(var(--muted-foreground)) !important;
+  --lidar-scrollbar-hover: hsl(var(--foreground)) !important;
+  --lidar-tooltip-bg: hsl(var(--popover)) !important;
+  --lidar-tooltip-text: hsl(var(--popover-foreground)) !important;
+  --lidar-error-bg: hsl(var(--destructive) / 0.1) !important;
+  --lidar-error-border: hsl(var(--destructive) / 0.3) !important;
+  --lidar-error-text: hsl(var(--destructive)) !important;
+  --lidar-danger: hsl(var(--destructive)) !important;
+  --lidar-danger-bg: hsl(var(--destructive) / 0.1) !important;
+  --lidar-danger-on: hsl(var(--destructive-foreground)) !important;
+  --lidar-info-bg: hsl(var(--accent)) !important;
+  --lidar-info-text: hsl(var(--accent-foreground)) !important;
+  --lidar-info-border: hsl(var(--border)) !important;
+  --lidar-resize-grip: hsl(var(--border)) !important;
+  --lidar-resize-grip-hover: hsl(var(--muted-foreground)) !important;
+  --lidar-chart-bg: hsl(var(--background)) !important;
+  --lidar-chart-grid: hsl(var(--border)) !important;
+  --lidar-chart-axis: hsl(var(--muted-foreground)) !important;
+  --lidar-chart-text: hsl(var(--foreground)) !important;
+  --lidar-chart-muted: hsl(var(--muted-foreground)) !important;
+  --lidar-chart-highlight: hsl(var(--foreground)) !important;
+}
+
 /* One global reduced-motion guard. Previously only two components respected the
    preference while ~53 transition sites ignored it. Motion is reduced to a
    near-instant cross-fade rather than removed outright, so state changes stay
@@ -730,7 +1341,7 @@ body,
   overflow: visible;
 }
 
-.geolibre-flatgeobuf-control .maplibre-gl-add-vector-button {
+.geolibre-flatgeobuf-control:not(.geolibre-grid-child) .maplibre-gl-add-vector-button {
   display: none !important;
 }
 
@@ -740,7 +1351,7 @@ body,
   overflow: visible;
 }
 
-.geolibre-pmtiles-control .maplibre-gl-pmtiles-layer-button {
+.geolibre-pmtiles-control:not(.geolibre-grid-child) .maplibre-gl-pmtiles-layer-button {
   display: none !important;
 }
 
@@ -773,24 +1384,15 @@ body,
   background: hsl(var(--accent)) !important;
 }
 
-/* The control's toolbar button stays white like the other map controls in both
-   themes, but its icon uses stroke="currentColor"; without a fixed color it
-   inherits the dark-mode text color and goes white-on-white over the white
-   button. Pin it to the same dark color the other control icons use (see
-   .maplibregl-ctrl-layer-control below). */
+/* Inline SVG controls inherit the same foreground as native map buttons. */
 .maplibre-gl-spin-globe-control button {
-  color: #1f2a37;
+  color: hsl(var(--popover-foreground));
 }
 
-/* The graticule control button: flex-center its inline SVG icon (MapLibre's
-   default `.maplibregl-ctrl-group button { display: block }` would otherwise
-   left-align it), and pin the stroke="currentColor" icon to a fixed dark color
-   so it stays legible on the always-white control button in both themes (same
-   approach as the spin-globe control above). The two-class selector out-ranks
-   MapLibre's single-class rule regardless of stylesheet order. */
+/* Flex-center the graticule's currentColor icon over the themed surface. */
 .geolibre-graticule-ctrl .geolibre-graticule-button {
   align-items: center;
-  color: #1f2a37;
+  color: hsl(var(--popover-foreground));
   display: flex;
   justify-content: center;
 }
@@ -1017,7 +1619,7 @@ body,
   overflow: visible;
 }
 
-.geolibre-zarr-control .maplibre-gl-zarr-layer-button {
+.geolibre-zarr-control:not(.geolibre-grid-child) .maplibre-gl-zarr-layer-button {
   display: none !important;
 }
 
@@ -1148,9 +1750,9 @@ body,
 }
 
 .geolibre-search-control {
-  background-color: #fff !important;
-  box-shadow: 0 12px 32px rgb(0 0 0 / 0.28);
-  color: #333 !important;
+  background-color: hsl(var(--popover)) !important;
+  box-shadow: var(--shadow-md);
+  color: hsl(var(--popover-foreground)) !important;
   max-width: min(320px, calc(100vw - 32px));
   overflow: visible;
   position: relative;
@@ -1158,31 +1760,32 @@ body,
 }
 
 .geolibre-search-control .maplibre-gl-search-input-wrapper {
-  background-color: #fff !important;
-  border-bottom: 1px solid #d9d9d9 !important;
+  background-color: hsl(var(--popover)) !important;
+  border-bottom: 1px solid hsl(var(--border)) !important;
   box-sizing: border-box;
   width: 100% !important;
 }
 
 .geolibre-search-control .maplibre-gl-search-input {
-  background-color: #fff !important;
-  caret-color: #111;
-  color: #111 !important;
+  background-color: hsl(var(--background)) !important;
+  caret-color: hsl(var(--foreground));
+  color: hsl(var(--foreground)) !important;
 }
 
 .geolibre-search-control .maplibre-gl-search-input::placeholder {
-  color: #333 !important;
+  color: hsl(var(--muted-foreground)) !important;
   opacity: 1;
 }
 
 .geolibre-search-control .maplibre-gl-search-input:focus {
-  outline: none;
+  outline: 2px solid hsl(var(--ring));
+  outline-offset: -2px;
 }
 
 .geolibre-search-control .maplibre-gl-search-toggle {
-  background: #fff !important;
-  border-radius: 4px;
-  color: #333 !important;
+  background: hsl(var(--popover)) !important;
+  border-radius: var(--radius);
+  color: hsl(var(--popover-foreground)) !important;
   height: 29px !important;
   opacity: 1;
   width: 29px !important;
@@ -1194,48 +1797,48 @@ body,
 }
 
 .geolibre-search-control .maplibre-gl-search-toggle:hover {
-  background: #f2f2f2 !important;
-  color: #000 !important;
+  background: hsl(var(--accent)) !important;
+  color: hsl(var(--accent-foreground)) !important;
   opacity: 1;
 }
 
 .geolibre-search-control .maplibre-gl-search-icon,
 .geolibre-search-control .maplibre-gl-search-clear,
 .geolibre-search-control .maplibre-gl-search-collapse {
-  color: #333 !important;
+  color: hsl(var(--muted-foreground)) !important;
   opacity: 1;
 }
 
 .geolibre-search-control .maplibre-gl-search-clear:hover,
 .geolibre-search-control .maplibre-gl-search-collapse:hover {
-  color: #000 !important;
+  color: hsl(var(--popover-foreground)) !important;
   opacity: 1;
 }
 
 .geolibre-search-control .maplibre-gl-search-results {
-  background-color: #fff !important;
-  border: 1px solid #d9d9d9;
+  background-color: hsl(var(--popover)) !important;
+  border: 1px solid hsl(var(--border));
   border-top: 0;
-  color: #111 !important;
+  color: hsl(var(--popover-foreground)) !important;
   max-width: min(320px, calc(100vw - 32px));
 }
 
 .geolibre-search-control .maplibre-gl-search-result {
-  border-bottom-color: #e5e5e5 !important;
-  color: #111 !important;
+  border-bottom-color: hsl(var(--border)) !important;
+  color: hsl(var(--popover-foreground)) !important;
 }
 
 .geolibre-search-control .maplibre-gl-search-result:hover {
-  background-color: #f2f2f2 !important;
-  color: #000 !important;
+  background-color: hsl(var(--accent)) !important;
+  color: hsl(var(--accent-foreground)) !important;
 }
 
 .geolibre-search-control .maplibre-gl-search-result:hover * {
-  color: #000 !important;
+  color: hsl(var(--accent-foreground)) !important;
 }
 
 .geolibre-search-control .maplibre-gl-search-result-detail {
-  color: #555 !important;
+  color: hsl(var(--muted-foreground)) !important;
   opacity: 1;
 }
 
@@ -1336,10 +1939,10 @@ body,
  */
 .geolibre-annotations-control {
   --geolibre-annotations-cell-size: 29px;
-  background-color: hsl(var(--background)) !important;
+  background-color: hsl(var(--popover)) !important;
   border: 1px solid hsl(var(--border)) !important;
-  border-radius: 4px;
-  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.3);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-sm);
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -1361,7 +1964,7 @@ body,
   align-items: center;
   background: transparent;
   border: none;
-  color: hsl(var(--foreground));
+  color: hsl(var(--popover-foreground));
   cursor: pointer;
   display: flex !important;
   height: var(--geolibre-annotations-cell-size);
@@ -1419,6 +2022,7 @@ body,
   border: 1px solid hsl(var(--primary));
   border-radius: 4px;
   color: hsl(var(--foreground));
+  font-family: var(--font-sans);
   font-size: 13px;
   outline: none;
   padding: 2px 6px;
@@ -1432,10 +2036,10 @@ body,
  */
 .geolibre-dimensions-control {
   --geolibre-dimensions-cell-size: 29px;
-  background-color: hsl(var(--background)) !important;
+  background-color: hsl(var(--popover)) !important;
   border: 1px solid hsl(var(--border)) !important;
-  border-radius: 4px;
-  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.3);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-sm);
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -1612,6 +2216,14 @@ body,
   --ms-chip-bg: hsl(var(--muted));
   --ms-chip-text: hsl(var(--muted-foreground));
   --ms-secondary-border: hsl(var(--border));
+  --ms-focus: hsl(var(--ring));
+  --ms-info-bg: hsl(var(--accent));
+  --ms-info-text: hsl(var(--accent-foreground));
+  --ms-info-border: hsl(var(--border));
+  --ms-danger: hsl(var(--destructive));
+  --ms-danger-bg: hsl(var(--destructive) / 0.1);
+  --ms-danger-border: hsl(var(--destructive) / 0.3);
+  --ms-danger-border-hover: hsl(var(--destructive) / 0.5);
 }
 
 .geolibre-bookmark-control {
@@ -1630,6 +2242,11 @@ body,
   --bm-item-active-bg: hsl(var(--accent));
   --bm-secondary-text: hsl(var(--muted-foreground));
   --bm-secondary-border: hsl(var(--border));
+  --bm-focus: hsl(var(--ring));
+  --bm-danger: hsl(var(--destructive));
+  --bm-danger-bg: hsl(var(--destructive) / 0.1);
+  --bm-danger-border: hsl(var(--destructive) / 0.3);
+  --bm-danger-border-hover: hsl(var(--destructive) / 0.5);
 }
 
 .geolibre-view-state-control {
@@ -1644,6 +2261,15 @@ body,
   --vs-code-bg: hsl(var(--muted));
   --vs-chip-bg: hsl(var(--muted));
   --vs-chip-hover-bg: hsl(var(--accent));
+  --vs-accent: hsl(var(--primary));
+  --vs-accent-soft: hsl(var(--accent));
+  --vs-accent-softer: hsl(var(--accent));
+  --vs-accent-active: hsl(var(--accent));
+  --vs-accent-active-hover: hsl(var(--secondary));
+  --vs-accent-border: hsl(var(--border));
+  --vs-accent-border-hover: hsl(var(--ring));
+  --vs-danger: hsl(var(--destructive));
+  --vs-danger-soft: hsl(var(--destructive) / 0.1);
 }
 
 /* Make the minimap toggle and collapse buttons follow the in-app theme. The
@@ -1657,7 +2283,66 @@ body,
   --mm-button-ring: hsl(var(--border));
 }
 
-.geolibre-stac-search-control .maplibre-gl-stac-search-button {
+:is(
+  .geolibre-measure-control,
+  .geolibre-bookmark-control,
+  .geolibre-view-state-control,
+  .geolibre-minimap-control
+) {
+  color-scheme: light;
+  font-family: var(--font-sans);
+}
+
+.dark
+  :is(
+    .geolibre-measure-control,
+    .geolibre-bookmark-control,
+    .geolibre-view-state-control,
+    .geolibre-minimap-control
+  ) {
+  color-scheme: dark;
+}
+
+:is(.geolibre-measure-control, .geolibre-bookmark-control, .geolibre-view-state-control)
+  :is(input, select, textarea) {
+  background: hsl(var(--background));
+  border-color: hsl(var(--border));
+  color: hsl(var(--foreground)) !important;
+  font-family: inherit;
+}
+
+:is(.geolibre-measure-control, .geolibre-bookmark-control) input::placeholder {
+  color: hsl(var(--muted-foreground)) !important;
+}
+
+.geolibre-measure-control .measure-panel :is(.mode-btn.active, .action-btn.primary),
+.geolibre-measure-control .measure-button.active,
+.geolibre-bookmark-control .bookmark-button.active,
+.geolibre-bookmark-control .bookmark-panel .bookmark-add-btn {
+  background: hsl(var(--primary));
+  border-color: hsl(var(--primary));
+  color: hsl(var(--primary-foreground));
+}
+
+.geolibre-measure-control
+  .measure-panel
+  :is(.mode-btn.active, .action-btn.primary):not(:disabled):hover,
+.geolibre-bookmark-control .bookmark-panel .bookmark-add-btn:not(:disabled):hover {
+  background: hsl(var(--primary) / 0.9);
+  color: hsl(var(--primary-foreground));
+}
+
+.geolibre-bookmark-control .bookmark-panel .bookmark-add-btn:disabled {
+  background: hsl(var(--muted));
+  color: hsl(var(--muted-foreground));
+}
+
+:is(.geolibre-measure-control, .geolibre-bookmark-control) :is(input, select):focus {
+  border-color: hsl(var(--ring));
+  box-shadow: 0 0 0 2px hsl(var(--ring) / 0.25);
+}
+
+.geolibre-stac-search-control:not(.geolibre-grid-child) .maplibre-gl-stac-search-button {
   display: none !important;
 }
 
@@ -1902,22 +2587,26 @@ body,
 .geolibre-components-control input:not([type="checkbox"]):not([type="radio"]):not([type="range"]),
 .geolibre-components-control select,
 .geolibre-components-control textarea {
-  background-color: #fff !important;
-  border: 1px solid #d1d5db;
+  background-color: hsl(var(--background)) !important;
+  border: 1px solid hsl(var(--border));
   border-radius: 4px;
   box-sizing: border-box;
-  color: #111827 !important;
+  color: hsl(var(--foreground)) !important;
   color-scheme: light;
+}
+
+.dark .geolibre-components-control :is(input, select, textarea) {
+  color-scheme: dark;
 }
 
 .geolibre-components-control input::placeholder,
 .geolibre-components-control textarea::placeholder {
-  color: #6b7280 !important;
+  color: hsl(var(--muted-foreground)) !important;
 }
 
 .geolibre-components-control select option {
-  background-color: #fff;
-  color: #111827;
+  background-color: hsl(var(--background));
+  color: hsl(var(--foreground));
 }
 
 .geolibre-colorbar-control,
@@ -2452,14 +3141,8 @@ body,
 }
 
 .geolibre-reset-bearing-needle-label {
-  fill: #1e293b;
-  font-family:
-    ui-sans-serif,
-    system-ui,
-    -apple-system,
-    "Segoe UI",
-    Roboto,
-    sans-serif;
+  fill: hsl(var(--popover-foreground));
+  font-family: var(--font-sans);
   font-size: 8px;
   font-weight: 700;
   /* The label is a real SVG text node: stop it from being text-selected on a
@@ -2470,14 +3153,14 @@ body,
 }
 
 .geolibre-reset-bearing-needle-north {
-  fill: #1e293b;
+  fill: hsl(var(--popover-foreground));
   transition: fill 150ms ease;
 }
 
 /* Light, slim south tail so the upward north needle stays the single dominant
    pointer (issue #537) — the two halves must not read as equal triangles. */
 .geolibre-reset-bearing-needle-south {
-  fill: #cbd5e1;
+  fill: hsl(var(--muted-foreground));
 }
 
 .geolibre-reset-bearing-button--active .geolibre-reset-bearing-needle-north,
@@ -2518,60 +3201,281 @@ body,
   width: auto;
 }
 
-/* maplibre-gl-layer-control toggle button icon color.
-   The library (>=0.15.1) sizes the icon itself but leaves its color to the host
-   theme (the SVG uses stroke="currentColor"). GeoLibre keeps map controls light
-   in both light and dark mode, so pin the icon to a fixed dark color matching
-   the other controls — otherwise it inherits the dark-mode text color and goes
-   white-on-white over the white control background. */
+/* Layer Control uses a currentColor SVG, unlike native background-image icons. */
 .maplibregl-ctrl-layer-control .layer-control-icon {
-  color: #1f2a37;
+  color: hsl(var(--popover-foreground));
 }
 
-/* Reverse geocoding follows the same popover surface, foreground, and anchor
-   tip as the Identify and Geo Editor popups, in both light and dark themes. */
-.geolibre-reverse-geocode-popup .maplibregl-popup-content {
+/* The vendor floats these panels outside the control group, including menus
+   attached to body. Scope by their own classes, never by cartographic symbols. */
+html
+  :is(
+    .layer-control-panel,
+    .layer-control-opacity-input,
+    .layer-control-context-menu,
+    .layer-control-item-dragging
+  ) {
   background: hsl(var(--popover));
+  border: 1px solid hsl(var(--border));
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-md);
+  color: hsl(var(--popover-foreground));
+  font-family: var(--font-sans);
+}
+
+.layer-control-panel
+  :is(
+    .layer-control-panel-header,
+    .layer-control-name,
+    .layer-control-style-header,
+    .layer-style-control label,
+    .layer-style-value,
+    .style-control-label,
+    .style-control-value,
+    .style-editor-title,
+    .style-editor-section-header,
+    .background-legend-title,
+    .background-legend-filter-label,
+    .background-legend-presets-label,
+    .background-legend-layer-name
+  ) {
   color: hsl(var(--popover-foreground));
 }
 
-.geolibre-reverse-geocode-popup .maplibregl-popup-close-button {
+.layer-control-panel
+  :is(
+    .layer-control-style-close,
+    .style-editor-close,
+    .background-legend-close,
+    .layer-control-style-empty,
+    .style-editor-controls,
+    .background-legend-empty,
+    .layer-control-custom-info-text,
+    .layer-control-group-toggle,
+    .layer-control-drag-handle
+  ),
+.layer-control-opacity-input
+  :is(.layer-control-opacity-input-label, .layer-control-opacity-input-suffix),
+.layer-control-context-menu .context-menu-item-icon {
+  color: hsl(var(--muted-foreground));
+}
+
+.layer-control-panel
+  :is(
+    .layer-control-panel-header,
+    .layer-control-actions,
+    .layer-control-item,
+    .style-editor-header,
+    .style-editor-section-header,
+    .style-editor-actions,
+    .background-legend-header,
+    .background-legend-layer-row,
+    .background-legend-presets,
+    .layer-control-group-row
+  ) {
+  border-color: hsl(var(--border));
+}
+
+.layer-control-panel
+  :is(
+    .layer-control-style-editor,
+    .layer-control-background-legend,
+    .background-legend-filter,
+    .layer-control-custom-info-text
+  ) {
+  background: hsl(var(--muted));
+  border-color: hsl(var(--border));
+  box-shadow: none;
+}
+
+.layer-control-panel .background-legend-layer-type {
+  background: hsl(var(--accent));
+  color: hsl(var(--muted-foreground));
+}
+
+.layer-control-panel
+  :is(input, select):not([type="range"]):not([type="checkbox"]):not([type="radio"]),
+.layer-control-opacity-input input {
+  background: hsl(var(--background));
+  border-color: hsl(var(--border));
+  color: hsl(var(--foreground)) !important;
+}
+
+.layer-control-panel :is(input, select),
+.layer-control-opacity-input input {
+  accent-color: hsl(var(--primary));
+  font-family: inherit;
+  color-scheme: light;
+}
+
+.dark .layer-control-panel :is(input, select),
+.dark .layer-control-opacity-input input {
+  color-scheme: dark;
+}
+
+html .layer-control-panel input[type="checkbox"]:not(:checked) {
+  appearance: none;
+  background: hsl(var(--background));
+  border: 1px solid hsl(var(--input));
+  border-radius: 3px;
+  height: 13px;
+  width: 13px;
+}
+
+.layer-control-panel :is(input, select):focus-visible,
+.layer-control-opacity-input input:focus-visible {
+  border-color: hsl(var(--ring));
+  outline: 2px solid hsl(var(--ring));
+  outline-offset: 1px;
+  box-shadow: none;
+}
+
+.layer-control-panel
+  :is(
+    .layer-control-style-button,
+    .style-editor-button,
+    .layer-control-style-reset,
+    .layer-control-style-close-secondary,
+    .layer-control-remove-confirm-btn-cancel
+  ) {
+  background: hsl(var(--secondary));
+  border-color: hsl(var(--border));
+  color: hsl(var(--secondary-foreground));
+}
+
+.layer-control-panel
+  :is(
+    .layer-control-style-button,
+    .style-editor-button,
+    .layer-control-style-reset,
+    .layer-control-style-close-secondary,
+    .layer-control-remove-confirm-btn-cancel
+  ):not(:disabled):is(:hover, :active),
+.layer-control-panel .layer-control-background-legend-button.active {
+  background: hsl(var(--accent));
+  border-color: hsl(var(--ring));
+  color: hsl(var(--accent-foreground));
+}
+
+.layer-control-panel
+  :is(.layer-control-action-btn, .background-legend-action-btn, .layer-control-style-apply) {
+  background: hsl(var(--primary)) !important;
+  border-color: hsl(var(--primary)) !important;
+  color: hsl(var(--primary-foreground)) !important;
+}
+
+.layer-control-panel
+  :is(.layer-control-action-btn, .background-legend-action-btn, .layer-control-style-apply):not(
+    :disabled
+  ):is(:hover, :active) {
+  background: hsl(var(--primary) / 0.9) !important;
+  border-color: hsl(var(--primary)) !important;
+}
+
+html
+  .layer-control-panel
+  :is(
+    .layer-control-action-btn,
+    .background-legend-action-btn,
+    .layer-control-style-apply
+  ):disabled {
+  background: hsl(var(--muted)) !important;
+  border-color: hsl(var(--border)) !important;
+  color: hsl(var(--muted-foreground)) !important;
+  cursor: not-allowed;
+}
+
+.layer-control-panel :is(.layer-control-opacity, .style-control-slider) {
+  background: linear-gradient(to right, hsl(var(--muted)), hsl(var(--primary)));
+}
+
+.layer-control-panel :is(.layer-control-opacity, .style-control-slider)::-webkit-slider-thumb {
+  background: hsl(var(--background));
+  border-color: hsl(var(--primary));
+}
+
+.layer-control-panel :is(.layer-control-opacity, .style-control-slider)::-moz-range-thumb {
+  background: hsl(var(--background));
+  border-color: hsl(var(--primary));
+}
+
+.layer-control-panel
+  :is(.layer-control-drag-handle-disabled, .layer-control-drag-handle-disabled:hover) {
+  color: hsl(var(--muted-foreground));
+  opacity: 0.45;
+}
+
+.layer-control-panel .layer-control-drop-placeholder {
+  background: hsl(var(--accent));
+  border-color: hsl(var(--ring));
+}
+
+.layer-control-panel .layer-control-resize-handle:hover::before,
+.layer-control-panel.resizing-active .layer-control-resize-handle::before {
+  background: hsl(var(--ring));
+}
+
+:is(.layer-control-panel, .background-legend-layer-list) {
+  scrollbar-color: hsl(var(--muted-foreground)) hsl(var(--muted));
+}
+
+:is(.layer-control-panel, .background-legend-layer-list)::-webkit-scrollbar-track {
+  background: hsl(var(--muted));
+}
+
+:is(.layer-control-panel, .background-legend-layer-list)::-webkit-scrollbar-thumb {
+  background: hsl(var(--muted-foreground));
+}
+
+.layer-control-context-menu .context-menu-item {
   color: hsl(var(--popover-foreground));
 }
 
-.geolibre-reverse-geocode-popup:is(
-    .maplibregl-popup-anchor-top,
-    .maplibregl-popup-anchor-top-left,
-    .maplibregl-popup-anchor-top-right
-  )
-  .maplibregl-popup-tip {
-  border-bottom-color: hsl(var(--popover));
+.layer-control-context-menu .context-menu-item:not([disabled]):is(:hover, :active) {
+  background: hsl(var(--accent));
 }
 
-.geolibre-reverse-geocode-popup:is(
-    .maplibregl-popup-anchor-bottom,
-    .maplibregl-popup-anchor-bottom-left,
-    .maplibregl-popup-anchor-bottom-right
-  )
-  .maplibregl-popup-tip {
-  border-top-color: hsl(var(--popover));
+.layer-control-context-menu .context-menu-item[disabled] {
+  color: hsl(var(--muted-foreground));
+  opacity: 0.5;
 }
 
-.geolibre-reverse-geocode-popup.maplibregl-popup-anchor-left .maplibregl-popup-tip {
-  border-right-color: hsl(var(--popover));
+.layer-control-context-menu .context-menu-separator {
+  background: hsl(var(--border));
 }
 
-.geolibre-reverse-geocode-popup.maplibregl-popup-anchor-right .maplibregl-popup-tip {
-  border-left-color: hsl(var(--popover));
+.layer-control-panel .layer-control-remove-confirm,
+.layer-control-panel .style-editor-button-remove:hover,
+.layer-control-context-menu .context-menu-item-danger:hover {
+  background: hsl(var(--destructive) / 0.1);
+  border-color: hsl(var(--destructive) / 0.3);
+}
+
+.layer-control-panel .layer-control-remove-confirm-message,
+.layer-control-panel .style-editor-button-remove:hover,
+.layer-control-context-menu
+  :is(.context-menu-item-danger, .context-menu-item-danger .context-menu-item-icon) {
+  color: hsl(var(--destructive));
+}
+
+.layer-control-panel .layer-control-remove-confirm-btn-confirm {
+  background: hsl(var(--destructive));
+  border-color: hsl(var(--destructive));
+  color: hsl(var(--destructive-foreground));
+}
+
+.layer-control-panel .layer-control-remove-confirm-btn-confirm:hover {
+  background: hsl(var(--destructive) / 0.9);
+  border-color: hsl(var(--destructive));
 }
 
 .geolibre-identify-popup :is(.maplibregl-popup-content, .mapboxgl-popup-content) {
   background: hsl(var(--popover));
   border: 1px solid hsl(var(--border));
-  box-shadow:
-    0 10px 15px -3px rgb(0 0 0 / 0.18),
-    0 4px 6px -4px rgb(0 0 0 / 0.18);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-md);
   color: hsl(var(--popover-foreground));
+  font-family: var(--font-sans);
   max-height: calc(100vh - 96px);
   overflow: visible;
 }
@@ -2744,13 +3648,13 @@ body,
   border-radius: 0.25rem;
   color: hsl(var(--muted-foreground));
   display: flex;
-  height: 1.25rem;
-  inset-block-start: 0.375rem;
-  inset-inline-end: 0.375rem;
+  height: 1.5rem;
+  inset-block-start: 0.25rem;
+  inset-inline-end: 0.25rem;
   justify-content: center;
   line-height: 1;
   padding: 0;
-  width: 1.25rem;
+  width: 1.5rem;
 }
 
 .geolibre-identify-popup :is(.maplibregl-popup-close-button, .mapboxgl-popup-close-button):hover {
@@ -2957,22 +3861,20 @@ body,
 .geolibre-photo-popup-root :is(.maplibregl-popup-content, .mapboxgl-popup-content) {
   background: hsl(var(--popover));
   border: 1px solid hsl(var(--border));
-  border-radius: 0.5rem;
-  box-shadow:
-    0 10px 15px -3px rgb(0 0 0 / 0.18),
-    0 4px 6px -4px rgb(0 0 0 / 0.18);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-md);
   color: hsl(var(--popover-foreground));
   padding: 0.5rem;
 }
 
 .geolibre-photo-popup-root :is(.maplibregl-popup-close-button, .mapboxgl-popup-close-button) {
   color: hsl(var(--muted-foreground));
-  padding-right: 0.25rem;
+  padding: 0;
 }
 
 .geolibre-photo-popup-root :is(.maplibregl-popup-close-button, .mapboxgl-popup-close-button):hover {
-  background: transparent;
-  color: hsl(var(--popover-foreground));
+  background: hsl(var(--accent));
+  color: hsl(var(--accent-foreground));
 }
 
 .geolibre-photo-popup-root:is(.maplibregl-popup-anchor-top, .mapboxgl-popup-anchor-top)

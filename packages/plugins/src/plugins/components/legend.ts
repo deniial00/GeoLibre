@@ -183,11 +183,34 @@ async function openStandaloneLegendControl(app: GeoLibreAppAPI): Promise<boolean
 
 function createLegendControl(LegendGuiControlClass: LegendGuiControlConstructor): LegendGuiControl {
   const control = new LegendGuiControlClass(LEGEND_OPTIONS);
+  themeLegendControlOutputs(control);
   control.on("expand", () => {
     constrainGuiPanelToViewport(".geolibre-legend-control .legend-gui-panel");
     setLegendPanelVisible(true);
   });
   return control;
+}
+
+/** Apply theme defaults only to outputs managed by this GUI, including grid children. */
+export function themeLegendControlOutputs(control: LegendGuiControl): void {
+  // LegendGuiControl 0.31.1 creates each output Legend in a private factory
+  // without forwarding its GUI options. Apply live theme defaults through the
+  // public Legend.update API to each output created by the GUI.
+  type ThemedLegendOutput = {
+    update(options: { backgroundColor: string; fontColor: string }): void;
+  };
+  const guiControl = control as unknown as {
+    _createLegend: (entry: unknown) => ThemedLegendOutput;
+  };
+  const createOutput = guiControl._createLegend;
+  guiControl._createLegend = (entry) => {
+    const output = createOutput.call(guiControl, entry);
+    output.update({
+      backgroundColor: "var(--geolibre-bg)",
+      fontColor: "var(--geolibre-fg)",
+    });
+    return output;
+  };
 }
 
 export function teardownLegendControl(app: GeoLibreAppAPI): void {

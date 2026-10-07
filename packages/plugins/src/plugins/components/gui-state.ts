@@ -120,7 +120,7 @@ const DEFAULT_LEGEND_GUI_ENTRY: ComponentLegendGuiEntryState = {
 
 const DEFAULT_HTML_GUI_ENTRY: ComponentHtmlGuiEntryState = {
   title: "Info",
-  html: '<div style="padding: 4px;">\n  <h4 style="margin: 0 0 8px 0;">Welcome</h4>\n  <p style="margin: 0; color: #666;">This is a custom HTML control.</p>\n</div>',
+  html: '<div style="padding: 4px;">\n  <h4 style="margin: 0 0 8px 0;">Welcome</h4>\n  <p style="margin: 0;">This is a custom HTML control.</p>\n</div>',
   htmlPosition: "top-left",
   collapsible: true,
 };

@@ -94,11 +94,34 @@ function createColorbarControl(
   ColorbarGuiControlClass: ColorbarGuiControlConstructor,
 ): ColorbarGuiControl {
   const control = new ColorbarGuiControlClass(COLORBAR_OPTIONS);
+  themeColorbarControlOutputs(control);
   control.on("expand", () => {
     constrainGuiPanelToViewport(".geolibre-colorbar-control .colorbar-gui-panel");
     setColorbarPanelVisible(true);
   });
   return control;
+}
+
+/** Apply theme defaults only to outputs managed by this GUI, including grid children. */
+export function themeColorbarControlOutputs(control: ColorbarGuiControl): void {
+  // ColorbarGuiControl 0.31.1 creates and updates one output Colorbar per map
+  // corner in a private sync method. Style every GUI-created output through its
+  // public update API after each sync, without touching the color ramp.
+  type ThemedColorbarOutput = {
+    update(options: { backgroundColor: string; fontColor: string }): void;
+  };
+  const guiControl = control as unknown as {
+    _positionControls: Map<GeoLibreMapControlPosition, ThemedColorbarOutput>;
+    _syncPositionControl: (position: GeoLibreMapControlPosition) => void;
+  };
+  const syncPositionControl = guiControl._syncPositionControl;
+  guiControl._syncPositionControl = (position) => {
+    syncPositionControl.call(guiControl, position);
+    guiControl._positionControls.get(position)?.update({
+      backgroundColor: "var(--geolibre-bg)",
+      fontColor: "var(--geolibre-fg)",
+    });
+  };
 }
 
 export function teardownColorbarControl(app: GeoLibreAppAPI): void {

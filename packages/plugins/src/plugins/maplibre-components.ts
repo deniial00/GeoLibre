@@ -17,6 +17,7 @@ import {
   colorbarPanelVisible,
   restoreColorbarPanel,
   teardownColorbarControl,
+  themeColorbarControlOutputs,
 } from "./components/colorbar";
 import { getComponentsConstructors } from "./components/constructors";
 import { teardownFlatGeobufControl } from "./components/flatgeobuf";
@@ -32,12 +33,14 @@ import {
   htmlPanelVisible,
   restoreHtmlPanel,
   teardownHtmlControl,
+  themeHtmlControlOutputs,
 } from "./components/html";
 import {
   legendControl,
   legendPanelVisible,
   restoreLegendPanel,
   teardownLegendControl,
+  themeLegendControlOutputs,
 } from "./components/legend";
 import { teardownLidarControl } from "./components/lidar";
 import { teardownMeasureControl } from "./components/measure";
@@ -221,9 +224,41 @@ let pluginActive = false;
 let componentsControlRevision = 0;
 
 const createComponentsControl = async (app: GeoLibreAppAPI): Promise<ControlGrid | null> => {
-  const { ControlGrid: ControlGridClass } = await getComponentsConstructors();
+  const constructors = await getComponentsConstructors();
   if (!pluginActive) return null;
-  return new ControlGridClass(getComponentsOptions(app));
+  const control = new constructors.ControlGrid(getComponentsOptions(app));
+  // Grid children are separate instances from the standalone panels. Attach
+  // the same styling classes when they mount so existing token overrides also
+  // cover floating/relocated panels without recreating them on a theme toggle.
+  const themedChildren = [
+    [constructors.AddVectorControl, "geolibre-flatgeobuf-control"],
+    [constructors.BookmarkControl, "geolibre-bookmark-control"],
+    [constructors.ColorbarGuiControl, "geolibre-colorbar-control"],
+    [constructors.HtmlGuiControl, "geolibre-html-control"],
+    [constructors.LegendGuiControl, "geolibre-legend-control"],
+    [constructors.MeasureControl, "geolibre-measure-control"],
+    [constructors.MinimapControl, "geolibre-minimap-control"],
+    [constructors.PMTilesLayerControl, "geolibre-pmtiles-control"],
+    [constructors.SearchControl, "geolibre-search-control"],
+    [constructors.StacSearchControl, "geolibre-stac-search-control"],
+    [constructors.ViewStateControl, "geolibre-view-state-control"],
+    [constructors.ZarrLayerControl, "geolibre-zarr-control"],
+  ] as const;
+  for (const child of control.getControls()) {
+    const themeClass = themedChildren.find(([Constructor]) => child instanceof Constructor)?.[1];
+    if (themeClass) {
+      const onAdd = child.onAdd;
+      child.onAdd = (map) => {
+        const element = onAdd.call(child, map);
+        element.classList.add(themeClass, "geolibre-grid-child");
+        return element;
+      };
+    }
+    if (child instanceof constructors.ColorbarGuiControl) themeColorbarControlOutputs(child);
+    if (child instanceof constructors.HtmlGuiControl) themeHtmlControlOutputs(child);
+    if (child instanceof constructors.LegendGuiControl) themeLegendControlOutputs(child);
+  }
+  return control;
 };
 
 const createAndMountComponentsControl = (app: GeoLibreAppAPI): void => {

@@ -247,6 +247,29 @@ black — it declines the stack.
   the deck.gl mirror has to repaint the same geometry in the same colour. Change
   one form and change the RGBA twin beside it;
   `tests/lidar-measure-mirror.test.ts` asserts the pair agrees.
+- **Theme defaults for GUI-created overlays** (`themeHtmlControlOutputs`,
+  `themeLegendControlOutputs`, `themeColorbarControlOutputs` in
+  `packages/plugins/src/plugins/components/{html,legend,colorbar}.ts`) wrap the
+  private factories `HtmlGuiControl._createHtmlControl`,
+  `LegendGuiControl._createLegend` and `ColorbarGuiControl._syncPositionControl`
+  (which keeps the per-corner outputs in the private `_positionControls` map),
+  then call each output's public `update({ backgroundColor, fontColor })` with
+  `var(--geolibre-bg)` / `var(--geolibre-fg)`. The GUI constructor's own
+  `backgroundColor`/`fontColor` options only style the editor panel and are not
+  forwarded, so this is the only way the on-map legend/colorbar/HTML surfaces
+  follow the app theme. A rename leaves the wrapper calling an undefined
+  function (the panel throws on Add) or skipping silently (the surface reverts
+  to upstream white). `createComponentsControl` (`maplibre-components.ts`)
+  applies the same wrappers, and adds the standalone `geolibre-*` theme class
+  plus `geolibre-grid-child` in each child's `onAdd`, to the ControlGrid's
+  internally created children. After a bump, toggle the app theme with a
+  legend, colorbar and HTML overlay on the map, from both the Controls menu and
+  the Components grid.
+- **Theme overrides in `index.css`** assume the component/Layer
+  Control/Street View stylesheets may load **after** `index.css` (they arrive
+  with lazily imported chunks), so a same-specificity override loses. Overrides
+  of single-class vendor rules are prefixed with `html` to win regardless of
+  order; keep that when adding new ones.
 
 ### `maplibre-gl-basemap-control` (`packages/plugins/package.json`)
 

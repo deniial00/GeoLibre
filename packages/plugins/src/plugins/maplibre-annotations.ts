@@ -563,14 +563,9 @@ function showElementPopup(map: maplibregl.Map, lngLat: maplibregl.LngLat, featur
     left: ${left}px;
     top: ${top}px;
     width: 200px;
-    background: var(--geolibre-bg, #ffffff);
-    color: var(--geolibre-fg, #111827);
-    border: 1px solid var(--geolibre-border, #e5e7eb);
-    border-radius: 8px;
-    box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.15), 0 4px 6px -4px rgba(0, 0, 0, 0.1);
     padding: 10px;
     z-index: 60;
-    font-family: system-ui, -apple-system, sans-serif;
+    font-family: var(--font-sans);
     font-size: 12px;
     box-sizing: border-box;
   `;
@@ -1164,14 +1159,9 @@ function openElementDialog(
     left: ${left}px;
     top: ${top}px;
     width: ${boxWidth}px;
-    background: var(--geolibre-bg, #ffffff);
-    color: var(--geolibre-fg, #111827);
-    border: 1px solid var(--geolibre-border, #e5e7eb);
-    border-radius: 8px;
-    box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.15), 0 4px 6px -4px rgba(0, 0, 0, 0.1);
     padding: 12px;
     z-index: 50;
-    font-family: system-ui, -apple-system, sans-serif;
+    font-family: var(--font-sans);
     font-size: 13px;
   `;
 
@@ -1226,7 +1216,7 @@ function openElementDialog(
       btn.dataset.mode = mode;
       btn.style.cssText = `flex: 1; padding: 5px 0; border-radius: 6px; border: 1px solid var(--geolibre-border, #d1d5db); font-size: 11px; cursor: pointer; transition: background 0.15s; ${
         mode === "point"
-          ? "background: var(--geolibre-primary, #3b82f6); color: #fff; border-color: var(--geolibre-primary, #3b82f6);"
+          ? "background: var(--geolibre-primary); color: hsl(var(--primary-foreground)); border-color: var(--geolibre-primary);"
           : "background: transparent; color: inherit;"
       }`;
       btn.onclick = (e) => {
@@ -1235,13 +1225,13 @@ function openElementDialog(
         for (const child of modeRow.children) {
           const el = child as HTMLButtonElement;
           if (el.dataset.mode === mode) {
-            el.style.background = "var(--geolibre-primary, #3b82f6)";
-            el.style.color = "#fff";
-            el.style.borderColor = "var(--geolibre-primary, #3b82f6)";
+            el.style.background = "var(--geolibre-primary)";
+            el.style.color = "hsl(var(--primary-foreground))";
+            el.style.borderColor = "var(--geolibre-primary)";
           } else {
             el.style.background = "transparent";
             el.style.color = "inherit";
-            el.style.borderColor = "var(--geolibre-border, #d1d5db)";
+            el.style.borderColor = "var(--geolibre-border)";
           }
         }
       };
@@ -1320,7 +1310,7 @@ function openElementDialog(
   saveBtn.type = "button";
   saveBtn.textContent = labels.saveElement;
   saveBtn.style.cssText =
-    "padding: 5px 10px; border-radius: 6px; border: none; background: var(--geolibre-primary, #3b82f6); color: #ffffff; font-size: 12px; font-weight: 500; cursor: pointer;";
+    "padding: 5px 10px; border-radius: 6px; border: none; background: var(--geolibre-primary); color: hsl(var(--primary-foreground)); font-size: 12px; font-weight: 500; cursor: pointer;";
   saveBtn.onclick = (e) => {
     e.stopPropagation();
     const enteredTitle = titleInput.value.trim();
@@ -1332,7 +1322,7 @@ function openElementDialog(
 
     if (type === "placed_image" && !description) {
       if (descInput) {
-        descInput.style.borderColor = "var(--geolibre-error, #ef4444)";
+        descInput.style.borderColor = "hsl(var(--destructive))";
         descInput.focus();
       }
       return;
@@ -2159,7 +2149,7 @@ export function renderElementsPanel(container: HTMLElement): () => void {
   container.innerHTML = "";
   container.className = "geolibre-elements-panel";
   container.style.cssText =
-    "--geolibre-bg:hsl(var(--card)); --geolibre-bg-subtle:hsl(var(--accent)); --geolibre-fg:hsl(var(--foreground)); --geolibre-fg-muted:hsl(var(--muted-foreground)); --geolibre-border:hsl(var(--border)); padding: 12px; font-family: system-ui, -apple-system, sans-serif; font-size: 13px; color: var(--geolibre-fg, #1f2937); height: 100%; box-sizing: border-box; overflow-y: auto; display: flex; flex-direction: column; gap: 8px;";
+    "padding: 12px; font-family: var(--font-sans); font-size: 13px; color: var(--geolibre-fg); height: 100%; box-sizing: border-box; overflow-y: auto; display: flex; flex-direction: column; gap: 8px;";
 
   let editingId: string | null = null;
 
@@ -2270,7 +2260,7 @@ export function renderElementsPanel(container: HTMLElement): () => void {
 
     if (elements.length === 0) {
       const empty = document.createElement("div");
-      empty.style.cssText = "color: #9ca3af; text-align: center; padding: 24px 0;";
+      empty.style.cssText = "color: var(--geolibre-fg-muted); text-align: center; padding: 24px 0;";
       empty.textContent = labels.noElements;
       container.appendChild(empty);
       return;
@@ -2331,7 +2321,7 @@ export function renderElementsPanel(container: HTMLElement): () => void {
         width.title = labels.width;
         for (const field of [input, description, width]) {
           field.style.cssText =
-            "width:100%; box-sizing:border-box; font-size:12px; padding:4px; border:1px solid #3b82f6; border-radius:3px;";
+            "width:100%; box-sizing:border-box; font-size:12px; padding:4px; border:1px solid hsl(var(--border)); border-radius:3px;";
         }
         const commit = () => {
           const val = input.value.trim();
@@ -2372,7 +2362,7 @@ export function renderElementsPanel(container: HTMLElement): () => void {
         save.type = "button";
         save.textContent = labels.saveElement;
         save.style.cssText =
-          "border: none; background: none; cursor: pointer; color: #2563eb; padding: 2px;";
+          "border: none; background: none; cursor: pointer; color: hsl(var(--primary)); padding: 2px;";
         save.onclick = commit;
         titleContainer.appendChild(save);
         setTimeout(() => input.focus(), 10);
@@ -2505,7 +2495,7 @@ export function renderElementsPanel(container: HTMLElement): () => void {
       const del = document.createElement("button");
       del.innerHTML = `<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>`;
       del.title = labels.deleteElement;
-      del.style.cssText = `${actionButtonStyle} color:#ef4444;`;
+      del.style.cssText = `${actionButtonStyle} color:hsl(var(--destructive));`;
       del.addEventListener("click", (e) => {
         e.stopPropagation();
         deleteElementById(el.id);
