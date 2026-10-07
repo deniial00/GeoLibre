@@ -18,7 +18,15 @@ export interface WmsLegendEntry {
 
 /** The WMS request fields a legend lookup needs, read from a layer's source. */
 export interface WmsLegendSource {
+  /** The endpoint with its operation parameters stripped: the base of GetLegendGraphic. */
   endpoint: string;
+  /**
+   * The layer's URL as stored, which the GetCapabilities request is built on.
+   * `createWmsGetCapabilitiesUrl` strips the operation parameters itself and
+   * keeps `outputFormat`, which the stripped `endpoint` no longer carries.
+   * Defaults to `endpoint`.
+   */
+  capabilitiesEndpoint?: string;
   layers: string[];
   styles: string[];
   version: string;
@@ -35,7 +43,8 @@ export function wmsLegendSource(layer: GeoLibreLayer): WmsLegendSource | null {
   if (layer.type !== "wms") return null;
   const source = layer.source;
   const text = (key: string) => (typeof source[key] === "string" ? (source[key] as string) : "");
-  const endpoint = stripOgcOperationParams(text("url").trim(), "WMS");
+  const url = text("url").trim();
+  const endpoint = stripOgcOperationParams(url, "WMS");
   const styleList = text("styles").split(",");
   // Pair each style with its layer before dropping blank layer names, so a
   // LAYERS value such as "a,,b" keeps every remaining layer on its own style.
@@ -46,7 +55,13 @@ export function wmsLegendSource(layer: GeoLibreLayer): WmsLegendSource | null {
   const layers = pairs.map((pair) => pair.name);
   const styles = pairs.map((pair) => pair.style);
   if (!endpoint || layers.length === 0) return null;
-  return { endpoint, layers, styles, version: normalizeWmsVersion(text("version")) };
+  return {
+    endpoint,
+    capabilitiesEndpoint: url,
+    layers,
+    styles,
+    version: normalizeWmsVersion(text("version")),
+  };
 }
 
 /**
@@ -147,7 +162,7 @@ export async function resolveWmsLegends(
   let doc: Document | null = null;
   try {
     const { ok, text } = await fetchCapabilitiesText(
-      createWmsGetCapabilitiesUrl(source.endpoint),
+      createWmsGetCapabilitiesUrl(source.capabilitiesEndpoint ?? source.endpoint),
       WMS_PROXY_PATH,
       signal,
     );

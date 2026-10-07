@@ -38,6 +38,7 @@ describe("WMS legend", () => {
     );
     assert.deepEqual(source, {
       endpoint: "https://wms.example/s",
+      capabilitiesEndpoint: "https://wms.example/s?SERVICE=WMS",
       layers: ["a", "b"],
       styles: ["x", ""],
       version: "1.3.0",
@@ -190,6 +191,28 @@ describe("resolveWmsLegends", () => {
     for (const entry of entries) {
       assert.equal(new URL(entry.url).searchParams.get("REQUEST"), "GetLegendGraphic");
     }
+  });
+
+  it("keeps a pasted outputFormat on the capabilities request but not on GetLegendGraphic", async () => {
+    const requested: string[] = [];
+    globalThis.fetch = (async (input: RequestInfo | URL) => {
+      requested.push(String(input));
+      return capsResponse();
+    }) as typeof fetch;
+    const withOutputFormat = wmsLegendSource(
+      wmsLayer({
+        url: "https://wms.example/s?service=WMS&request=GetCapabilities&outputFormat=application/xml",
+        layers: "dtm,bare",
+        styles: "",
+        version: "1.1.1",
+      }),
+    );
+    assert.ok(withOutputFormat);
+    const [, bare] = await resolveWmsLegends(withOutputFormat);
+    assert.equal(new URL(requested[0]).searchParams.get("outputFormat"), "application/xml");
+    assert.equal(new URL(requested[0]).searchParams.get("REQUEST"), "GetCapabilities");
+    assert.equal(new URL(bare.url).searchParams.get("REQUEST"), "GetLegendGraphic");
+    assert.equal(new URL(bare.url).searchParams.get("outputFormat"), null);
   });
 
   it("rethrows when the lookup was aborted", async () => {
