@@ -6,6 +6,7 @@ import type {
   SourceSpecification,
   StyleSpecification,
 } from "maplibre-gl";
+import { nativeLayerIdPrefix, sourceId as storeSourceId } from "./style-layer-ids";
 
 /**
  * What `addLayer` accepts: MapLibre's own `AddLayerObject` (a layer whose
@@ -261,4 +262,92 @@ export function createShadowStyle(host: ShadowStyleHost): ShadowStyleMethods & {
     isStyleLoaded: () => true,
     peek: () => ({ sources: Object.fromEntries(sources), layers }),
   };
+}
+
+/**
+ * The store layers that mirror a plugin control's native style layer: the
+ * record whose id is that layer's id, that lists it in `nativeLayerIds`, that
+ * reads `sourceId` (`metadata.sourceId` / `sourceIds`), or whose own derived
+ * MapLibre style layer it names (`layer-<id>-fill`, see {@link storeStyleLayer}). On a renderer
+ * that only records a control's style, the mirror is what is drawn and
+ * picked, so a hit on it is a hit on the control's layer.
+ *
+ * @param layers - The store layers to search, in any order.
+ * @param nativeLayerId - The control's style layer id.
+ * @param sourceId - The source that style layer reads, if known.
+ * @returns The mirroring layers, in the order given.
+ */
+export function controlLayerMirrors<L extends { id: string; metadata: Record<string, unknown> }>(
+  layers: readonly L[],
+  nativeLayerId: string,
+  sourceId: string | undefined,
+): L[] {
+  return layers.filter((layer) => {
+    const { nativeLayerIds, sourceIds } = layer.metadata as {
+      nativeLayerIds?: unknown;
+      sourceIds?: unknown;
+    };
+    return (
+      layer.id === nativeLayerId ||
+      storeStyleLayerType(layer.id, nativeLayerId) !== undefined ||
+      (Array.isArray(nativeLayerIds) && nativeLayerIds.includes(nativeLayerId)) ||
+      (sourceId !== undefined &&
+        (layer.metadata.sourceId === sourceId ||
+          (Array.isArray(sourceIds) && sourceIds.includes(sourceId))))
+    );
+  });
+}
+
+/** The style layer type behind each suffix `syncLayers` gives a store layer's style layers. */
+const STORE_STYLE_LAYER_TYPES: Record<string, LayerSpecification["type"]> = {
+  fill: "fill",
+  extrusion: "fill-extrusion",
+  line: "line",
+  circle: "circle",
+  heatmap: "heatmap",
+  cluster: "circle",
+  "cluster-count": "symbol",
+  text: "symbol",
+  marker: "symbol",
+  label: "symbol",
+};
+
+/**
+ * A store layer's MapLibre style layer as a recording facade answers
+ * `getLayer` for it: just its id, type and source.
+ *
+ * On MapLibre a plugin can name the style layers `syncLayers` derives for a
+ * store layer it added (`layer-<id>-fill`, ...) - the STAC browser picks its
+ * footprints that way. A renderer that records the plugin's style has no such
+ * layers, so without this the plugin finds nothing to pick; with it, the pick
+ * reaches the store layer through {@link controlLayerMirrors}.
+ *
+ * @param layers - The store layers.
+ * @param id - The style layer id asked for.
+ * @returns The layer, or undefined when no store layer derives that id.
+ */
+export function storeStyleLayer(
+  layers: readonly { id: string }[],
+  id: string,
+): LayerSpecification | undefined {
+  for (const layer of layers) {
+    const type = storeStyleLayerType(layer.id, id);
+    if (type) return { id, type, source: storeSourceId(layer.id) } as LayerSpecification;
+  }
+  return undefined;
+}
+
+/**
+ * The type of the style layer `id` when `syncLayers` derives it for the store
+ * layer `layerId`, else undefined. The whole remainder after the prefix must
+ * be a known suffix: with store layers `a` and `a-b`, `layer-a-b-fill` is
+ * `a-b`'s fill, not something of `a`'s.
+ */
+function storeStyleLayerType(layerId: string, id: string): LayerSpecification["type"] | undefined {
+  const prefix = nativeLayerIdPrefix(layerId);
+  if (!id.startsWith(prefix)) return undefined;
+  const suffix = id.slice(prefix.length);
+  return Object.hasOwn(STORE_STYLE_LAYER_TYPES, suffix)
+    ? STORE_STYLE_LAYER_TYPES[suffix]
+    : undefined;
 }

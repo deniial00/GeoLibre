@@ -24,6 +24,7 @@ import { isMenuItemVisible } from "../../../lib/ui-profile";
 import { whiteboxMenuSubcategorySlug } from "../../../lib/processing-tool-i18n";
 import { WHITEBOX_MENU_CATALOG } from "../../../lib/whitebox-menu-catalog";
 import { DOWNLOAD_GLOBAL_DEM_TOOL_ID } from "../../../lib/global-dem";
+import { openObiaWorkbench } from "../../../lib/obia/obia-panel";
 import { CapabilityNotice, capabilityNoticeId, useCapabilityReason } from "./CapabilityNotice";
 import type { ToolbarChrome } from "./constants";
 import { useMapCapabilities } from "../../../hooks/useMapCapabilities";
@@ -162,6 +163,7 @@ export function ProcessingMenu({
   const showGeolibre = showGeolibreTools || showGeolibreActions;
   const showWorkspacesOrServices =
     show("processing.modelBuilder") ||
+    show("processing.obiaWorkbench") ||
     show("processing.history") ||
     show("processing.sqlWorkspace") ||
     show("processing.pythonConsole") ||
@@ -751,6 +753,19 @@ export function ProcessingMenu({
             aria-describedby={processingDeniedBy}
           >
             {t("toolbar.item.modelBuilder")}
+          </DropdownMenuItem>
+        )}
+        {/* The OBIA workbench chains segmentation, object features, training
+            and classification tools, so it carries the same gate as Model
+            Builder. It runs on the WASM tool runner and the store, so it needs
+            neither the sidecar nor a 2D map. */}
+        {show("processing.obiaWorkbench") && (
+          <DropdownMenuItem
+            onSelect={openObiaWorkbench}
+            disabled={processingDenied}
+            aria-describedby={processingDeniedBy}
+          >
+            {t("toolbar.item.obiaWorkbench")}
           </DropdownMenuItem>
         )}
         {show("processing.sqlWorkspace") && (

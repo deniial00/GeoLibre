@@ -1,4 +1,5 @@
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
+import { onSpaceborneLidarGranuleRequest } from "../../lib/spaceborne-lidar-handoff";
 
 /**
  * Open state for the dialogs the top toolbar owns and opens from its menus,
@@ -13,6 +14,9 @@ import { useCallback, useState } from "react";
  */
 export function useToolbarDialogs() {
   const [netcdfDialogOpen, setNetcdfDialogOpen] = useState(false);
+  const [spaceborneLidarDialogOpen, setSpaceborneLidarDialogOpen] = useState(false);
+  // A plugin (the Earthaccess panel) hands over a downloaded granule.
+  useEffect(() => onSpaceborneLidarGranuleRequest(() => setSpaceborneLidarDialogOpen(true)), []);
   const [newProjectDialogOpen, setNewProjectDialogOpen] = useState(false);
   // Whether New Project opens with its Examples section expanded: set by the
   // "Open Starter Examples" command, cleared whenever the dialog closes.
@@ -45,6 +49,8 @@ export function useToolbarDialogs() {
   return {
     netcdfDialogOpen,
     setNetcdfDialogOpen,
+    spaceborneLidarDialogOpen,
+    setSpaceborneLidarDialogOpen,
     newProjectDialogOpen,
     setNewProjectDialogOpen,
     newProjectShowExamples,

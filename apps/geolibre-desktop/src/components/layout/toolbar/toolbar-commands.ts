@@ -32,6 +32,7 @@ import {
   Printer,
   RefreshCw,
   Save,
+  Shapes,
   Share2,
   SlidersHorizontal,
   Sparkles,
@@ -53,6 +54,7 @@ import { CVD_MODE_LABEL_KEYS, useCvdPreviewStore } from "../../../lib/cvd-previe
 import { CVD_MODES } from "../../../lib/cvd-simulation";
 import { useLineOfSightTool } from "../../../lib/line-of-sight-store";
 import { masHidesDataSource } from "../../../lib/mas-build";
+import { openObiaWorkbench } from "../../../lib/obia/obia-panel";
 import { pluginDisplayName } from "../../../lib/plugin-display-name";
 import { IS_STORE_BUILD } from "../../../lib/updates";
 import type { AddDataKind } from "../AddDataDialog";
@@ -388,6 +390,12 @@ export function buildToolbarCommands(context: ToolbarCommandContext): Command[] 
       run: addLayer.netcdf,
     },
     {
+      id: "add.spaceborne-lidar",
+      title: t("toolbar.command.addSpaceborneLidarLayer"),
+      group: t("toolbar.commandGroup.addData"),
+      run: addLayer.spaceborneLidar,
+    },
+    {
       id: "add.lidar",
       title: t("toolbar.command.addLidarLayer"),
       group: t("toolbar.commandGroup.addData"),
@@ -466,6 +474,15 @@ export function buildToolbarCommands(context: ToolbarCommandContext): Command[] 
       keywords: "model builder pipeline chain modeler workflow graph canvas node",
       icon: Workflow,
       run: () => setModelBuilderOpen(true),
+    },
+    {
+      id: "proc.obiaWorkbench",
+      title: t("toolbar.command.obiaWorkbench"),
+      group: t("toolbar.commandGroup.processing"),
+      keywords:
+        "obia object based image analysis segmentation segment classify land cover ecognition",
+      icon: Shapes,
+      run: openObiaWorkbench,
     },
     {
       id: "proc.batchTools",

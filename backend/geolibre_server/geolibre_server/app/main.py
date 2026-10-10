@@ -35,6 +35,7 @@ from .mssql import (
 from .mssql import (
     router as mssql_router,
 )
+from .obia import router as obia_router
 from .pointcloud import router as pointcloud_router
 from .postgis import router as postgis_router
 from .raster import router as raster_router
@@ -126,6 +127,7 @@ app.include_router(mssql_router)
 app.include_router(sql_router)
 app.include_router(pointcloud_router)
 app.include_router(ml_router)
+app.include_router(obia_router)
 
 
 class RunRequest(BaseModel):

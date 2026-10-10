@@ -5,6 +5,7 @@ import {
   shouldZoomToNewLayers,
   styleValue,
   useAppStore,
+  installCogTilerDatumShift,
 } from "@geolibre/core";
 import type { Layer } from "@deck.gl/core";
 import type { Map as MapboxMap } from "mapbox-gl";
@@ -50,6 +51,7 @@ import { convertTiffYCbCrToRgb } from "./tiff-ycbcr";
 import { readableStacLayerHref } from "./stac-signing";
 import { configureMapboxRasterEngine } from "./raster-mapbox-compat";
 import { focusPanel, restorePanelFocus } from "./panel-focus";
+import { datumShiftEpsgResolver, type EpsgResolver } from "./epsg-datum-resolver";
 
 const rasterControlPosition: GeoLibreMapControlPosition = "top-left";
 const RASTER_PANEL_CLASS = "geolibre-raster-panel";
@@ -225,6 +227,8 @@ type GeoTiffWithOverviews = TiledRasterSource & {
 };
 
 let rasterControlClassPromise: Promise<RasterControlConstructor> | null = null;
+/** maplibre-gl-raster's own resolver factory, captured with the control class. */
+let defaultEpsgResolver: (() => EpsgResolver) | null = null;
 let mapboxOverlayClassPromise: Promise<MapboxOverlayConstructor> | null = null;
 let rasterControl: RasterControl | null = null;
 let rasterControlMounted = false;
@@ -387,6 +391,20 @@ export function openRasterLayerPanel(app: GeoLibreAppAPI): void {
 }
 
 /**
+ * Whether the primary renderer draws `cog` store records itself, so a raster
+ * is imported through the store (`native-raster-import.ts`) rather than the
+ * maplibre-gl-raster control.
+ *
+ * @param app - The GeoLibre app API.
+ * @returns True on the ArcGIS view and the Cesium globe.
+ */
+function drawsCogNatively(app: GeoLibreAppAPI): boolean {
+  const renderer = app.getMapRenderer?.();
+  // eslint-disable-next-line local/no-renderer-kind-checks -- picks the engine's own adapter
+  return renderer === "arcgis" || renderer === "cesium";
+}
+
+/**
  * Adds a raster (GeoTIFF/COG) to the map from a remote URL or a local File,
  * mounting the raster control on first use and zooming to the new layer. Used by
  * the map drag and drop handler. The control's `rasteradd` event syncs the layer
@@ -417,10 +435,11 @@ export async function addRasterToMap(
     zoomTo?: boolean;
   } = {},
 ): Promise<string> {
-  // eslint-disable-next-line local/no-renderer-kind-checks -- picks the engine's own adapter
-  if (app.getMapRenderer?.() === "arcgis") {
-    const { addArcgisRaster } = await import("./arcgis-raster-import");
-    return addArcgisRaster(app, source, options);
+  // The ArcGIS view and the Cesium globe draw `cog` records natively and have
+  // no MapLibre custom layer for this control to render through.
+  if (drawsCogNatively(app)) {
+    const { addNativeRaster } = await import("./native-raster-import");
+    return addNativeRaster(app, source, options);
   }
   // `s3://` sources and private-bucket object URLs are read through a
   // presigned URL; the store sync maps it back to `source`. Signed before the
@@ -742,10 +761,9 @@ export function readRasterWindow(
  * @param app - The GeoLibre app API.
  */
 export function restoreRasterLayers(app: GeoLibreAppAPI): void {
-  // eslint-disable-next-line local/no-renderer-kind-checks -- picks the engine's own adapter
-  if (app.getMapRenderer?.() === "arcgis") {
-    void import("./arcgis-raster-import")
-      .then(({ restoreArcgisRasterFiles }) => restoreArcgisRasterFiles(localRasterFileReader))
+  if (drawsCogNatively(app)) {
+    void import("./native-raster-import")
+      .then(({ restoreNativeRasterFiles }) => restoreNativeRasterFiles(localRasterFileReader))
       .catch(console.error);
     return;
   }
@@ -962,7 +980,7 @@ async function ensureRasterControl(app: GeoLibreAppAPI): Promise<RasterControl |
   const RasterControlClass = await getRasterControlClass();
 
   // A Mapbox check: null on the other engines, ArcGIS included (whose COGs
-  // take addArcgisRaster and never mount this control). engine-audit-allow: arcgis-null-map
+  // take addNativeRaster and never mount this control). engine-audit-allow: arcgis-null-map
   rasterControl ??= createRasterControl(RasterControlClass, !!app.getMapboxMap?.());
 
   if (!rasterControlMounted) {
@@ -1136,8 +1154,18 @@ function patchJpegCogSource(source: unknown): unknown {
 function getRasterControlClass(): Promise<RasterControlConstructor> {
   // Defer the maplibre-gl-raster import (and its deck.gl GeoTIFF pipeline)
   // until the user first opens the panel or a project restores a raster.
-  rasterControlClassPromise ??= import("maplibre-gl-raster").then(
-    (module) => module.RasterControl,
+  rasterControlClassPromise ??= Promise.all([
+    import("maplibre-gl-raster"),
+    // The control's default engine tiles with cog-tiler-wasm, which it imports
+    // itself: install the datum-shift hook on that same module first.
+    // An enhancement only: a tiler that fails to load must not block the
+    // panel (its engine reports its own error when it needs the tiler).
+    import("cog-tiler-wasm").then(installCogTilerDatumShift, () => undefined),
+  ]).then(
+    ([module]) => {
+      defaultEpsgResolver = module.createResilientEpsgResolver;
+      return module.RasterControl;
+    },
     (error: unknown) => {
       // Do not cache the rejection: a transient failure (e.g. the dev
       // server restarting) would otherwise make every later open re-throw
@@ -1163,6 +1191,8 @@ function createRasterControl(
   rasterControlInterleaved = !isTauriRuntime();
   const control = new RasterControlClass({
     className: "geolibre-raster-control",
+    // Datum shifts the default (epsg.io) resolver leaves out.
+    ...(defaultEpsgResolver ? { epsgResolver: datumShiftEpsgResolver(defaultEpsgResolver()) } : {}),
     collapsed: true,
     // No prefilled URL: the input stays empty (the upstream control supplies
     // a generic COG-URL placeholder), and the sample COGs below are the

@@ -8,6 +8,7 @@ import { open, save } from "@tauri-apps/plugin-dialog";
 import { readFile, readTextFile, writeFile, writeTextFile } from "@tauri-apps/plugin-fs";
 import { nativeFileDialogFilters, type FileDialogFilter } from "../file-dialog-filters";
 import { isTauri } from "../is-tauri";
+import { localFileSizeBytes } from "./local-fs";
 import { browserSafeFileName } from "./paths";
 import { isAbortError, toArrayBuffer } from "./shared";
 
@@ -31,6 +32,16 @@ interface LocalDataFileOptions {
   binaryExtensions?: string[];
   readBinary?: boolean;
   readText?: boolean;
+  /** Refuse a larger file before reading it (throws {@link FileTooLargeError}). */
+  maxBytes?: number;
+}
+
+/** A picked file was over `maxBytes`, so it was not read. */
+export class FileTooLargeError extends Error {
+  constructor(readonly size: number) {
+    super(`The file is ${size} bytes, over the limit.`);
+    this.name = "FileTooLargeError";
+  }
 }
 
 export interface BrowserFilePickerType {
@@ -209,9 +220,18 @@ export async function openLocalDataFileWithFallback(options: LocalDataFileOption
       filters: nativeFileDialogFilters(options.filters, options.androidFilters),
     });
     if (!selected || typeof selected !== "string") return null;
+    if (options.maxBytes != null) {
+      // Checked before reading where the size is known; a failed stat falls
+      // back to checking the bytes read.
+      const size = await localFileSizeBytes(selected);
+      if (size != null && size > options.maxBytes) throw new FileTooLargeError(size);
+    }
     const binaryByExtension = shouldReadBinaryByExtension(selected);
     const data =
       options.readBinary || binaryByExtension ? toArrayBuffer(await readFile(selected)) : undefined;
+    if (options.maxBytes != null && data && data.byteLength > options.maxBytes) {
+      throw new FileTooLargeError(data.byteLength);
+    }
     const text = options.readText && !binaryByExtension ? await readTextFile(selected) : undefined;
     return { data, path: selected, text };
   }
@@ -226,6 +246,9 @@ export async function openLocalDataFileWithFallback(options: LocalDataFileOption
         if (!file) {
           resolve(null);
           return;
+        }
+        if (options.maxBytes != null && file.size > options.maxBytes) {
+          throw new FileTooLargeError(file.size);
         }
         const binaryByExtension = shouldReadBinaryByExtension(file.name);
         const data = options.readBinary || binaryByExtension ? await file.arrayBuffer() : undefined;

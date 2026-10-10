@@ -15,6 +15,7 @@
  * clicked pixel is fetched rather than the whole scene.
  */
 
+import { withGeoKeysDatumShift } from "@geolibre/core";
 import { fromArrayBuffer, fromUrl } from "geotiff";
 import proj4 from "proj4";
 
@@ -66,7 +67,11 @@ async function projectionFor(geoKeys: Record<string, unknown> | undefined): Prom
         const projection = mod.toProj4(keys as never);
         // The `+axis=` directive makes proj4 swap easting/northing on some
         // CRSs, which would transpose the pixel lookup.
-        return projection?.proj4 ? projection.proj4.replace(/\+axis=\w+\s*/g, "") : null;
+        // With the datum shift the raster control applies, so a profile is
+        // read where the pixel is drawn.
+        return projection?.proj4
+          ? withGeoKeysDatumShift(projection.proj4.replace(/\+axis=\w+\s*/g, ""), keys)
+          : null;
       } catch {
         return null;
       }

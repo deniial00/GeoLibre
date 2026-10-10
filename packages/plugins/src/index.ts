@@ -276,6 +276,20 @@ export {
   type InlineZarrGrid,
 } from "./plugins/local-netcdf";
 export {
+  alongTrackKm,
+  detectSpaceborneLidarProduct,
+  openSpaceborneLidar,
+  SPACEBORNE_LIDAR_PRODUCTS,
+  type SpaceborneLidarBeam,
+  type SpaceborneLidarField,
+  type SpaceborneLidarFieldSpec,
+  type SpaceborneLidarFile,
+  type SpaceborneLidarFootprints,
+  type SpaceborneLidarProductId,
+  type SpaceborneLidarProductSpec,
+  type SpaceborneLidarReadOptions,
+} from "./plugins/spaceborne-lidar";
+export {
   closeDuckDBLayerPanel,
   getDuckDBFeatureBounds,
   getDuckDBLayerRows,
@@ -582,6 +596,15 @@ export {
   type EarthdataGisSearchResult,
   type EarthdataServiceKind,
 } from "./plugins/earthdata-gis-api";
+export { EARTHACCESS_PLUGIN_ID, maplibreEarthaccessPlugin } from "./plugins/maplibre-earthaccess";
+export {
+  CMR_SEARCH_URL,
+  EARTHDATA_PRESETS,
+  searchEarthdataCollections,
+  searchEarthdataGranules,
+  type EarthdataCollection,
+  type EarthdataGranule,
+} from "./plugins/earthaccess-api";
 export {
   DEFAULT_OPENAERIALMAP_LABELS,
   maplibreOpenAerialMapPlugin,

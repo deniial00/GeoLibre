@@ -228,6 +228,11 @@ export class MapController implements MapEngine {
   private map: maplibregl.Map | null = null;
   /** Whether {@link clampViewToPreferences} has a clamp queued on `moveend`. */
   private pendingViewClamp = false;
+  /**
+   * The store `mapView` objects {@link markStoreEcho} recorded, until their
+   * store sync reaches {@link applyStoreView} (issue #3083).
+   */
+  private storeEchoes = new WeakSet<MapViewState>();
   private navigationControl: maplibregl.NavigationControl | null = null;
   private fullscreenControl: maplibregl.FullscreenControl | null = null;
   private compassControl: ResetBearingControl | null = null;
@@ -968,6 +973,32 @@ export class MapController implements MapEngine {
     // jumpTo stop()s drag handlers, so skip while the user is still panning.
     if (this.map.dragPan.isActive() || this.map.dragRotate.isActive()) return;
     this.map.jumpTo(constrainMapView(view, this.mapPreferences, this.map));
+  }
+
+  /**
+   * Record `storeView`, the store's `mapView` object right after the map wrote
+   * its own view into the store, as an echo for {@link applyStoreView} to
+   * skip. Identity, not camera values, marks the echo: any other store write
+   * makes a new object, so a view set from outside always jumps even when its
+   * values match one the map reported.
+   */
+  markStoreEcho(storeView: MapViewState): void {
+    this.storeEchoes.add(storeView);
+  }
+
+  /**
+   * Apply a store view change to the map, except an echo recorded by
+   * {@link markStoreEcho}.
+   *
+   * The map was already at an echoed view, so the jump would do nothing but
+   * stop a camera move started since: a plugin's `fitBounds` begun in (or
+   * shortly after) the `moveend` that wrote it was cancelled a render later,
+   * where it stood (issue #3083). Views set from outside (project load, undo,
+   * collaboration, a synced pane) still jump.
+   */
+  applyStoreView(view: MapViewState): void {
+    if (this.storeEchoes.delete(view)) return;
+    this.applyView(view);
   }
 
   /**

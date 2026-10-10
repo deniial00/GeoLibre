@@ -1,7 +1,22 @@
 import * as maplibregl from "maplibre-gl";
-import type { CesiumWidget } from "@cesium/engine";
+import type { CesiumWidget, CustomDataSource } from "@cesium/engine";
 import { useAppStore } from "@geolibre/core";
+import {
+  installControlLayerEvents,
+  type LayerEventDispatch,
+  type PointerSource,
+} from "./control-layer-events";
+import { pickOverlayGraphics, shadowOverlayGraphics, type OverlayGraphic } from "./shadow-overlay";
 import { groundHeightAt, pickGlobeHit } from "./cesium-camera";
+import {
+  applyHorizonVisibility,
+  cameraFacingTest,
+  drawCesiumOverlayGraphics,
+  type AnchoredEntity,
+  type FacingTest,
+} from "./cesium-control-overlay";
+import type { IdentifiedFeature } from "./map-engine";
+import { controlLayerMirrors, createShadowStyle, storeStyleLayer } from "./shadow-style";
 
 /** The Cesium module namespace, injected so this file never imports the engine. */
 type CesiumNs = typeof import("@cesium/engine");
@@ -16,9 +31,48 @@ type CesiumNs = typeof import("@cesium/engine");
  */
 const OFF_SCREEN_PX = -1e6;
 
+/**
+ * The store-layer fields `controlLayerMirrors` reads, as one string: the
+ * overlay only needs a redraw when this changes.
+ *
+ * @param layers - The store layers.
+ * @returns A signature of their ids and mirror metadata.
+ */
+export function mirrorSignature(
+  layers: readonly { id: string; metadata: Record<string, unknown> }[],
+): string {
+  return JSON.stringify(
+    layers.map(({ id, metadata }) => [
+      id,
+      metadata.nativeLayerIds ?? null,
+      metadata.sourceId ?? null,
+      metadata.sourceIds ?? null,
+    ]),
+  );
+}
+
+/** The pointer events layer-scoped listeners are fed from. */
+const LAYER_POINTER = { click: true, mousemove: true, mousedown: true, mouseup: true };
+
+/** Pixels of slack a click on an overlay point or line is given, as on ArcGIS. */
+const HIT_TOLERANCE_PX = 4;
+
+/**
+ * The MapLibre-shaped map a plugin control receives on the globe.
+ *
+ * Camera, DOM and pointer events act on the globe. The Style Spec half is
+ * recorded into a shadow style that is never drawn as such (the model the
+ * ArcGIS host uses, issue #3088): a layer the plugin mirrors into the GeoLibre
+ * store is drawn by `CesiumLayerSync` from that record, and the host draws any
+ * other GeoJSON fill, line, circle or text layer as globe entities. A plugin
+ * still reaches this facade only when its `engines` list declares `cesium`.
+ */
 class CesiumMapFacade extends maplibregl.Evented {
   private cleanups: Array<() => void> = [];
   private disposed = false;
+  private layerEvents: LayerEventDispatch;
+  /** The recorded style, for the host's overlay; not a MapLibre method. */
+  readonly peekStyle: ReturnType<typeof createShadowStyle>["peek"];
 
   constructor(
     private host: CesiumControlHost,
@@ -26,6 +80,67 @@ class CesiumMapFacade extends maplibregl.Evented {
     private Cesium: CesiumNs | null,
   ) {
     super();
+    const { peek, ...shadow } = createShadowStyle({
+      fire: (type, data) => this.fire(type, data),
+      self: () => this,
+    });
+    this.peekStyle = peek;
+    const images = new Set<string>();
+    // A store layer's derived style layers (`layer-<id>-fill`) read back too,
+    // as they would on MapLibre; see `storeStyleLayer`.
+    const getLayer = (id: string) =>
+      shadow.getLayer(id) ?? storeStyleLayer(useAppStore.getState().layers, id);
+    Object.assign(this, shadow, {
+      getLayer,
+      // A custom layer renders through MapLibre's WebGL context, which the
+      // globe does not have: recording one would let a GPU control (the COG,
+      // LiDAR, splat and deck.gl overlays) mount and then never draw, or spin
+      // waiting for frames that never come. Refuse it loudly, as the facade
+      // refused every style call before it recorded them, so such a control
+      // fails to mount instead.
+      addLayer: (layer: { type?: string; id?: string }, beforeId?: string) => {
+        if (layer?.type === "custom")
+          throw new Error(
+            `CesiumControlHost: custom layer "${layer.id}" cannot render on the globe.`,
+          );
+        return shadow.addLayer(layer as never, beforeId);
+      },
+      // Feature state and images have nothing to act on without a MapLibre
+      // renderer; they answer as a map that has them would, so a control that
+      // touches them in passing does not throw.
+      setFeatureState: () => {},
+      removeFeatureState: () => {},
+      getFeatureState: () => ({}),
+      addImage: (id: string) => void images.add(id),
+      updateImage: () => {},
+      hasImage: (id: string) => images.has(id),
+      removeImage: (id: string) => void images.delete(id),
+      listImages: () => [...images],
+      // A control's box or line draw turns drag-pan off so the drag reaches
+      // its own mouse handlers instead of moving the globe.
+      dragPan: cameraInputHandler(viewer, ["enableRotate", "enableTranslate", "enableTilt"]),
+      scrollZoom: cameraInputHandler(viewer, ["enableZoom"]),
+      dragRotate: cameraInputHandler(viewer, ["enableLook"]),
+      ...Object.fromEntries(
+        ["boxZoom", "doubleClickZoom", "touchZoomRotate", "touchPitch", "keyboard"].map((name) => [
+          name,
+          inertHandler(),
+        ]),
+      ),
+    });
+    this.layerEvents = installControlLayerEvents({
+      manualPointer: true,
+      facade: this as unknown as maplibregl.Evented & Record<string, unknown>,
+      pick: (lngLat, layerId, sourceId) => host.pickControlLayer(lngLat, layerId, sourceId),
+      layerSource: (layerId) => {
+        const layer = getLayer(layerId);
+        return layer && "source" in layer && typeof layer.source === "string"
+          ? layer.source
+          : undefined;
+      },
+      layerIds: () => shadow.getLayersOrder(),
+      unproject: (point) => this.pickLngLat(point),
+    });
     for (const [event, name] of [
       [viewer.camera.moveStart, "movestart"],
       [viewer.camera.changed, "move"],
@@ -38,6 +153,7 @@ class CesiumMapFacade extends maplibregl.Evented {
       observer.observe(viewer.canvas);
       this.cleanups.push(() => observer.disconnect());
     }
+    this.cleanups.push(restoreCompatibilityMouseEvents(viewer.canvas));
     for (const name of [
       "click",
       "dblclick",
@@ -52,8 +168,10 @@ class CesiumMapFacade extends maplibregl.Evented {
         if (!C || !scene) return;
         // `pickGlobeHit` costs a terrain ray intersection, and `mousemove` fires
         // on every pointer frame. The engine's own cursor readout already picks
-        // on move, so skip the work entirely when no control is listening here.
-        if (!this.listens(name)) return;
+        // on move, so skip the work entirely when no control is listening here,
+        // on the map or on one of its style layers.
+        const layered = name in LAYER_POINTER && this.layerEvents.listening(name as PointerSource);
+        if (!this.listens(name) && !layered) return;
         const rect = viewer.canvas.getBoundingClientRect();
         const point = new maplibregl.Point(
           originalEvent.clientX - rect.left,
@@ -72,14 +190,14 @@ class CesiumMapFacade extends maplibregl.Evented {
           C.Math.toDegrees(position.longitude),
           C.Math.toDegrees(position.latitude),
         );
-        this.fire(
-          new maplibregl.Event(name, {
-            point,
-            lngLat,
-            originalEvent,
-            preventDefault: () => originalEvent.preventDefault(),
-          }),
-        );
+        const payload = {
+          point,
+          lngLat,
+          originalEvent,
+          preventDefault: () => originalEvent.preventDefault(),
+        };
+        this.fire(new maplibregl.Event(name, payload));
+        if (layered) this.layerEvents.dispatch(name as PointerSource, payload);
       };
       viewer.canvas.addEventListener(name, listener);
       this.cleanups.push(() => viewer.canvas.removeEventListener(name, listener));
@@ -99,8 +217,43 @@ class CesiumMapFacade extends maplibregl.Evented {
     return this.viewer.canvas;
   }
 
-  isStyleLoaded() {
+  getCanvasContainer() {
+    return this.getContainer();
+  }
+
+  loaded() {
     return true;
+  }
+
+  /** "globe" in the 3D scene, "mercator" in the flat 2D and Columbus modes. */
+  getProjection() {
+    const C = this.Cesium;
+    const mode = this.scene()?.mode;
+    return { type: C && mode !== undefined && mode !== C.SceneMode.SCENE3D ? "mercator" : "globe" };
+  }
+
+  triggerRepaint() {
+    if (!this.viewer.isDestroyed?.()) this.viewer.scene?.requestRender?.();
+  }
+
+  fitBounds(bounds: maplibregl.LngLatBoundsLike) {
+    const b = maplibregl.LngLatBounds.convert(bounds);
+    this.host.fitBounds([b.getWest(), b.getSouth(), b.getEast(), b.getNorth()]);
+    return this;
+  }
+
+  addControl(control: maplibregl.IControl, position?: maplibregl.ControlPosition) {
+    this.host.addControl(control, position);
+    return this;
+  }
+
+  removeControl(control: maplibregl.IControl) {
+    this.host.removeControl(control);
+    return this;
+  }
+
+  hasControl(control: maplibregl.IControl) {
+    return this.host.hasControl(control);
   }
 
   setStyle(style: any, options?: any) {
@@ -147,26 +300,6 @@ class CesiumMapFacade extends maplibregl.Evented {
     return this.jumpTo(options as any);
   }
 
-  addSource(id: string, source: any) {
-    throw new Error("CesiumControlHost: addSource is not supported on the globe.");
-  }
-
-  getSource(id: string) {
-    return undefined;
-  }
-
-  removeSource(id: string) {
-    throw new Error("CesiumControlHost: removeSource is not supported on the globe.");
-  }
-
-  addLayer(layer: any, beforeId?: string) {
-    throw new Error("CesiumControlHost: addLayer is not supported on the globe.");
-  }
-
-  removeLayer(id: string) {
-    throw new Error("CesiumControlHost: removeLayer is not supported on the globe.");
-  }
-
   /**
    * Window coordinates for a geographic position, the globe's answer to
    * MapLibre's `project` (issue #2262).
@@ -205,17 +338,23 @@ class CesiumMapFacade extends maplibregl.Evented {
     const C = this.Cesium;
     const scene = this.scene();
     const p = maplibregl.Point.convert(point);
-    if (!C || !scene) return this.getCenter();
-    const hit = pickGlobeHit(C, this.viewer, { x: p.x, y: p.y });
-    if (!hit) return this.getCenter();
+    const lngLat = this.pickLngLat(p);
+    return lngLat ? new maplibregl.LngLat(lngLat[0], lngLat[1]) : this.getCenter();
+  }
+
+  /** The ground position under a window coordinate, or null off the globe. */
+  pickLngLat(point: { x: number; y: number }): [number, number] | null {
+    const C = this.Cesium;
+    const scene = this.scene();
+    if (!C || !scene) return null;
+    const hit = pickGlobeHit(C, this.viewer, { x: point.x, y: point.y });
+    if (!hit) return null;
     const ellipsoid = scene.globe?.ellipsoid ?? C.Ellipsoid.WGS84;
     const carto = ellipsoid.cartesianToCartographic(hit.position);
-    if (!carto) return this.getCenter();
+    if (!carto) return null;
     const lng = C.Math.toDegrees(carto.longitude);
     const lat = C.Math.toDegrees(carto.latitude);
-    return Number.isFinite(lng) && Number.isFinite(lat)
-      ? new maplibregl.LngLat(lng, lat)
-      : this.getCenter();
+    return Number.isFinite(lng) && Number.isFinite(lat) ? [lng, lat] : null;
   }
   getCenter() {
     const view = useAppStore.getState().mapView;
@@ -263,24 +402,146 @@ class CesiumMapFacade extends maplibregl.Evented {
   private scene() {
     return this.viewer.isDestroyed?.() ? null : (this.viewer.scene ?? null);
   }
-
-  // Throw explicitly for style-spec mutations
-  setPaintProperty() {
-    throw new Error("CesiumControlHost: setPaintProperty is not supported on the globe.");
-  }
-  setLayoutProperty() {
-    throw new Error("CesiumControlHost: setLayoutProperty is not supported on the globe.");
-  }
-  getStyle() {
-    throw new Error("CesiumControlHost: getStyle is not supported on the globe.");
-  }
 }
+
+/**
+ * Re-dispatch the mouse events the browser drops during a press on the globe.
+ *
+ * Cesium's input handler cancels `pointerdown`, and a cancelled `pointerdown`
+ * suppresses the compatibility `mousedown`, `mousemove` and `mouseup` until
+ * the pointer is released (only `click` still fires). A plugin control that
+ * draws by dragging - a STAC search box, a measure line - listens for those
+ * mouse events on the canvas and the window, as it would on MapLibre, so on
+ * the globe it never saw the press. While a mouse press Cesium cancelled is
+ * down, each pointer event is mirrored as its mouse event on the same target,
+ * bubbling as the real one would.
+ *
+ * Listeners sit on the window in the bubble phase, so they run after the
+ * canvas's own and see whether Cesium cancelled the press. A press nothing
+ * cancelled keeps the browser's own mouse events and is not mirrored.
+ *
+ * @param canvas - The globe's canvas.
+ * @returns Removes the listeners.
+ */
+export function restoreCompatibilityMouseEvents(canvas: HTMLCanvasElement): () => void {
+  const view = canvas.ownerDocument?.defaultView;
+  if (!view || typeof view.MouseEvent !== "function") return () => {};
+  let pressed: number | null = null;
+  const mirror = (type: string, event: PointerEvent) => {
+    const target = event.target instanceof view.Node ? event.target : canvas;
+    target.dispatchEvent(
+      new view.MouseEvent(type, {
+        bubbles: true,
+        cancelable: true,
+        composed: true,
+        view,
+        clientX: event.clientX,
+        clientY: event.clientY,
+        screenX: event.screenX,
+        screenY: event.screenY,
+        button: event.button,
+        buttons: event.buttons,
+        ctrlKey: event.ctrlKey,
+        shiftKey: event.shiftKey,
+        altKey: event.altKey,
+        metaKey: event.metaKey,
+      }),
+    );
+  };
+  const onDown = (event: PointerEvent) => {
+    if (event.pointerType !== "mouse" || event.target !== canvas || !event.defaultPrevented) return;
+    pressed = event.pointerId;
+    mirror("mousedown", event);
+  };
+  const onMove = (event: PointerEvent) => {
+    if (event.pointerId === pressed) mirror("mousemove", event);
+  };
+  const onUp = (event: PointerEvent) => {
+    if (event.pointerId !== pressed) return;
+    pressed = null;
+    mirror("mouseup", event);
+  };
+  const onCancel = (event: PointerEvent) => {
+    if (event.pointerId === pressed) pressed = null;
+  };
+  view.addEventListener("pointerdown", onDown);
+  view.addEventListener("pointermove", onMove);
+  view.addEventListener("pointerup", onUp);
+  view.addEventListener("pointercancel", onCancel);
+  return () => {
+    view.removeEventListener("pointerdown", onDown);
+    view.removeEventListener("pointermove", onMove);
+    view.removeEventListener("pointerup", onUp);
+    view.removeEventListener("pointercancel", onCancel);
+  };
+}
+
+/** A MapLibre interaction handler with nothing to drive: it only keeps its flag. */
+function inertHandler() {
+  let enabled = true;
+  return {
+    enable: () => {
+      enabled = true;
+    },
+    disable: () => {
+      enabled = false;
+    },
+    isEnabled: () => enabled,
+    isActive: () => false,
+  };
+}
+
+type CameraInput = "enableRotate" | "enableTranslate" | "enableTilt" | "enableZoom" | "enableLook";
+
+/**
+ * A MapLibre interaction handler that switches the globe's own camera inputs:
+ * `disable()` turns them off and `enable()` restores what they were, so a
+ * control that suspends panning for a draw gesture does not re-enable an
+ * input something else had turned off.
+ */
+function cameraInputHandler(viewer: CesiumWidget, inputs: CameraInput[]) {
+  let saved: Partial<Record<CameraInput, boolean>> | null = null;
+  const controller = () =>
+    viewer.isDestroyed?.() ? null : (viewer.scene?.screenSpaceCameraController ?? null);
+  return {
+    enable: () => {
+      const camera = controller();
+      if (camera && saved) for (const input of inputs) camera[input] = saved[input] ?? true;
+      saved = null;
+    },
+    disable: () => {
+      const camera = controller();
+      if (!camera || saved) return;
+      saved = Object.fromEntries(inputs.map((input) => [input, camera[input]]));
+      for (const input of inputs) camera[input] = false;
+    },
+    isEnabled: () => saved === null,
+    isActive: () => false,
+  };
+}
+
+/** What the engine lends the control host: picking and framing on the globe. */
+export interface CesiumControlHostHooks {
+  /** Store features under a point for one store layer (`CesiumEngine.identifyFeatures`). */
+  identify: (lngLat: [number, number], layerId: string) => IdentifiedFeature[];
+  /** Frame a west/south/east/north extent (`CesiumEngine.fitBounds`). */
+  fitBounds: (bounds: [number, number, number, number]) => void;
+}
+
+const NO_HOOKS: CesiumControlHostHooks = { identify: () => [], fitBounds: () => {} };
 
 export class CesiumControlHost {
   private container: HTMLDivElement;
   private corners: Record<string, HTMLDivElement>;
   private controls = new Map<maplibregl.IControl, HTMLElement>();
   private facade: CesiumMapFacade;
+  private overlay: CustomDataSource | null = null;
+  private overlayGraphics: OverlayGraphic[] = [];
+  private overlayQueued = false;
+  private facing: FacingTest | null = null;
+  private anchored: AnchoredEntity[] = [];
+  private destroyed = false;
+  private cleanups: Array<() => void> = [];
 
   /**
    * @param viewer The globe this host mounts controls over.
@@ -288,11 +549,14 @@ export class CesiumControlHost {
    * @param Cesium The engine namespace, for the facade's scene geometry
    *   (`project` / `unproject` / `getBounds`). Omitting it leaves those
    *   answering their documented fallbacks rather than throwing.
+   * @param hooks What the engine lends for picking a control's mirrored
+   *   layers and framing an extent.
    */
   constructor(
     public viewer: CesiumWidget,
     containerParent: HTMLElement,
-    Cesium: CesiumNs | null = null,
+    private Cesium: CesiumNs | null = null,
+    private hooks: CesiumControlHostHooks = NO_HOOKS,
   ) {
     this.container = document.createElement("div");
     this.container.className = "maplibregl-control-container";
@@ -314,9 +578,137 @@ export class CesiumControlHost {
 
     containerParent.appendChild(this.container);
     this.facade = new CesiumMapFacade(this, viewer, Cesium);
+    // Redraw the overlay once per burst of style edits, when the store's
+    // layers change (a record registered or dropped changes which control
+    // layers are mirrored), and when the integer zoom a zoom range or zoom
+    // expression reads changes.
+    const redraw = () => this.refreshOverlay();
+    this.facade.on("styledata", redraw);
+    // Points and labels past the horizon follow the camera, not the style.
+    for (const event of [viewer.camera?.changed, viewer.camera?.moveEnd])
+      if (event) this.cleanups.push(event.addEventListener(() => this.updateHorizon()));
+    this.facade.on("sourcedata", redraw);
+    let overlayZoom = Math.floor(this.facade.getZoom());
+    this.facade.on("moveend", () => {
+      const zoom = Math.floor(this.facade.getZoom());
+      if (zoom === overlayZoom) return;
+      overlayZoom = zoom;
+      this.refreshOverlay();
+    });
+    // Only what decides which control layers are mirrored matters here: an
+    // opacity drag or a restyle must not rebuild every overlay entity.
+    let mirrors = mirrorSignature(useAppStore.getState().layers);
+    this.cleanups.push(
+      useAppStore.subscribe((state, previous) => {
+        if (state.layers === previous.layers) return;
+        const next = mirrorSignature(state.layers);
+        if (next === mirrors) return;
+        mirrors = next;
+        this.refreshOverlay();
+      }),
+    );
+  }
+
+  /**
+   * The MapLibre-shaped map a control receives here, for a plugin that docks
+   * its panel outside the globe but still needs a map to talk to.
+   */
+  getControlMap(): maplibregl.Map {
+    return this.facade as unknown as maplibregl.Map;
+  }
+
+  hasControl(control: maplibregl.IControl): boolean {
+    return this.controls.has(control);
+  }
+
+  /** Frame an extent through the engine. */
+  fitBounds(bounds: [number, number, number, number]): void {
+    this.hooks.fitBounds(bounds);
+  }
+
+  /**
+   * Features a control's style layer has under `lngLat`: the hits on the store
+   * layers that mirror it, which `CesiumLayerSync` draws, or else the hits on
+   * this host's own overlay graphics for that layer.
+   */
+  pickControlLayer(
+    lngLat: [number, number],
+    layerId: string,
+    sourceId: string | undefined,
+  ): IdentifiedFeature[] {
+    const mirrors = this.mirrorsOf(layerId, sourceId);
+    if (mirrors.length)
+      return mirrors.flatMap((layer) =>
+        this.hooks.identify(lngLat, layer.id).map((hit) => ({ ...hit, layerId: layer.id })),
+      );
+    return pickOverlayGraphics(this.overlayGraphics, lngLat, layerId, this.tolerance(lngLat));
+  }
+
+  private mirrorsOf(layerId: string, sourceId: string | undefined) {
+    return controlLayerMirrors(useAppStore.getState().layers, layerId, sourceId);
+  }
+
+  /** {@link HIT_TOLERANCE_PX} in degrees of longitude at `lngLat`. */
+  private tolerance(lngLat: [number, number]): number {
+    const at = this.facade.project(lngLat);
+    // Probe both sides: next to the limb one of them is off the globe, and a
+    // zero tolerance would leave points and lines there unclickable.
+    for (const dx of [HIT_TOLERANCE_PX, -HIT_TOLERANCE_PX]) {
+      const beside = this.facade.pickLngLat({ x: at.x + dx, y: at.y });
+      if (!beside) continue;
+      const span = Math.abs(beside[0] - lngLat[0]);
+      // Across the antimeridian the short way round is 360 minus the gap.
+      if (Number.isFinite(span)) return Math.min(span, 360 - span);
+    }
+    return 0;
+  }
+
+  /**
+   * Redraw the controls' own GeoJSON overlays: the recorded style's layers
+   * that no store layer mirrors. Coalesced to one redraw per microtask.
+   */
+  refreshOverlay(): void {
+    // A control torn down with the globe edits its style on the way out; the
+    // redraw that queues must not touch the destroyed widget.
+    if (this.destroyed || this.overlayQueued) return;
+    this.overlayQueued = true;
+    queueMicrotask(() => {
+      this.overlayQueued = false;
+      if (!this.destroyed) this.drawOverlay();
+    });
+  }
+
+  private drawOverlay(): void {
+    const C = this.Cesium;
+    if (!C || this.viewer.isDestroyed?.()) return;
+    const graphics = shadowOverlayGraphics(
+      this.facade.peekStyle(),
+      this.facade.getZoom(),
+      (layerId, sourceId) => this.mirrorsOf(layerId, sourceId).length > 0,
+    );
+    this.overlayGraphics = graphics;
+    if (!graphics.length && !this.overlay) return;
+    if (!this.overlay) {
+      this.overlay = new C.CustomDataSource("geolibre-plugin-overlays");
+      void this.viewer.dataSources.add(this.overlay);
+    }
+    this.anchored = drawCesiumOverlayGraphics(C, this.overlay, graphics);
+    this.updateHorizon();
+    this.viewer.scene?.requestRender?.();
+  }
+
+  /** Re-run the overlay's horizon pass (see `applyHorizonVisibility`). */
+  private updateHorizon(): void {
+    const C = this.Cesium;
+    if (!C || !this.anchored.length || this.viewer.isDestroyed?.()) return;
+    this.facing ??= cameraFacingTest(C, this.viewer.scene);
+    if (applyHorizonVisibility(this.anchored, this.facing)) this.viewer.scene?.requestRender?.();
   }
 
   destroy() {
+    this.destroyed = true;
+    for (const cleanup of this.cleanups.splice(0)) cleanup();
+    this.facade.fire("remove");
     this.facade.dispose();
     for (const control of Array.from(this.controls.keys())) {
       this.removeControl(control);
@@ -324,6 +716,9 @@ export class CesiumControlHost {
     if (this.container.parentElement) {
       this.container.parentElement.removeChild(this.container);
     }
+    if (this.overlay && !this.viewer.isDestroyed?.())
+      this.viewer.dataSources.remove(this.overlay, true);
+    this.overlay = null;
   }
 
   getContainer() {

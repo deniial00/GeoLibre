@@ -75,6 +75,18 @@ at zoom >= 12 on Mesa GPUs without them). Before bumping it, confirm
   that tool's field offers metres and silently converts a dimensionless number as
   if it were a distance.
 
+### `geotiff` (`packages/processing/package.json`) — private `actualizedFields`
+
+`readRasterData` (`packages/processing/src/raster-client.ts`) pads a
+`SampleFormat` tag shorter than `SamplesPerPixel` so geotiff.js can decode
+band 2+ of such files (older geolibre-wasm COGs carry one). geotiff.js reads
+the tag from several places, so the pad replaces the parsed value in the
+image's private `fileDirectory.actualizedFields` map (keyed by tag number, 339).
+If a bump renames or reshapes that map, the pad stops working and those files
+fail again with "Unsupported data format/bitsPerSample";
+`readRasterData` warns when the map is missing, and
+`tests/upstream-contracts.test.ts` checks the map and key on a real image.
+
 ### `maplibre-gl`
 
 - **`GLOBE_CONTROL_TOGGLE_SELECTOR`** (`packages/map/src/globe-control-toggle.ts`)
@@ -583,6 +595,33 @@ imports that way.
 `tests/raster-picker-mirror.test.ts` compares every value and both helpers with
 the package export, so a colormap added or renamed upstream fails
 `npm run test:frontend`. Regenerate the copy from the package when it does.
+
+### Datum shifts (`geotiff-geokeys-to-proj4`, `cog-tiler-wasm`, `maplibre-gl-raster`)
+
+The EPSG tables in `geotiff-geokeys-to-proj4` leave the datum shift
+(`+towgs84`) out for many national grids, and epsg.io's PROJJSON (the default
+resolver of the raster control's deck.gl engine) carries none either, so
+without help those rasters land 50 to 300 m off. `packages/core/src/datum-shift.ts`
+holds a small table of shifts and adds them wherever GeoLibre builds a
+projection from an EPSG code or GeoTIFF geokeys:
+
+- `cog-tiler-wasm` (the raster control's default engine) through its
+  `setSourceCrsResolver` hook (0.5.0 and later), installed by
+  `installCogTilerDatumShift` wherever GeoLibre imports the tiler and before
+  the raster control loads;
+- the deck.gl engine through the control's `epsgResolver` option
+  (`packages/plugins/src/plugins/epsg-datum-resolver.ts`);
+- `epsg-proj4.ts`, the OBIA `toPixel`, `polygonizeLabels` (which traces pixels
+  on a stand-in grid and places the vertices through the same definition),
+  the spectral profile, samgeo, point clouds and ArcGIS Zarr.
+
+`withDatumShift` leaves a definition that already names a transformation, so
+a `geotiff-geokeys-to-proj4` bump that adds shifts to its tables needs no
+change here. On a bump of any of the three packages, run
+`tests/datum-shift.test.ts`; it checks the British National Grid against a
+PROJ-computed point. Every entry in the table was checked against PROJ's best
+transformation for that code (within 2 m; 15 m for the NAD27 mean). Re-check
+any entry you add the same way.
 
 ### `tauri-plugin-persisted-scope` — private on-disk format
 

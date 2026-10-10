@@ -8,7 +8,9 @@
   "exports": {
     ".": "./src/index.ts",
     "./assistant-tool-registry": "./src/assistant-tool-registry.ts",
+    "./atl03": "./src/plugins/atl03.ts",
     "./cog-spectral-profile": "./src/plugins/cog-spectral-profile.ts",
+    "./earthdata-relay": "./src/plugins/earthdata-relay.ts",
     "./elevation-profile-chart": "./src/plugins/elevation-profile/chart/profileChart.ts",
     "./geo-editor-geometry": "./src/plugins/geo-editor-geometry.ts",
     "./lidar": "./src/plugins/components/lidar.ts",
@@ -49,7 +51,7 @@
     "@tauri-apps/plugin-opener": "^2.7.0",
     "@turf/union": "^7.4.0",
     "a5-js": "^0.10.1",
-    "cog-tiler-wasm": "^0.4.0",
+    "cog-tiler-wasm": "^0.5.0",
     "dggal": "^0.0.6",
     "fflate": "^0.8.3",
     "geotiff": "^3.0.5",

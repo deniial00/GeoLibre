@@ -7,6 +7,7 @@ import {
   type LayerStyle,
 } from "../packages/core/src/types";
 import { CesiumLayerSync, isCesiumSupportedLayerType } from "../packages/map/src/cesium-layer-sync";
+import { labelBaseColors } from "../packages/map/src/cesium-labels";
 
 // Verifies the store → Cesium reconciler against a fake Cesium namespace + viewer
 // (the real engine never loads here — its import in the module is type-only). It
@@ -638,6 +639,42 @@ describe("CesiumLayerSync", () => {
     assert.ok(Math.abs(label.outlineColor.value.alpha - 0.5) < 1e-9);
   });
 
+  it("fades a data-defined label opacity with a story fade", async () => {
+    const sync = newSync(f);
+    const fc = { type: "FeatureCollection", features: [{}] };
+    sync.sync([
+      mkLayer({
+        id: "fade",
+        type: "geojson",
+        geojson: fc as never,
+        opacity: 0.5,
+        style: { labels: { ...DEFAULT_LAYER_STYLE.labels } },
+      }),
+    ]);
+    await f.flush();
+    const ds = f.calls.dataSourcesAdded[0] as {
+      entities: { values: Array<{ label?: { fillColor: { value: { alpha: number } } } }> };
+    };
+    const entity = ds.entities.values[3];
+    const opaque = (css: string) => ({
+      alpha: 1,
+      withAlpha: (alpha: number) => ({ css, alpha }),
+    });
+    // As the labeler records a label with a data-defined opacity of 0.8.
+    labelBaseColors.set(entity as never, {
+      fill: opaque("#f00") as never,
+      outline: opaque("#fff") as never,
+      opacity: 0.8,
+    });
+    // Halfway from the layer's 0.5 down: the override fades by the same half.
+    sync.setStoryLayerOpacity("fade", 0.25);
+    assert.ok(Math.abs(entity.label!.fillColor.value.alpha - 0.4) < 1e-9);
+    sync.setStoryLayerOpacity("fade", 0);
+    assert.equal(entity.label!.fillColor.value.alpha, 0, "a fade to 0 hides it");
+    sync.restoreStoryLayerStyles();
+    assert.ok(Math.abs(entity.label!.fillColor.value.alpha - 0.8) < 1e-9);
+  });
+
   it("renders xyz/raster tiles as an imagery layer with opacity + visibility", () => {
     const sync = newSync(f);
     sync.sync([
@@ -703,6 +740,24 @@ describe("CesiumLayerSync", () => {
     sync.sync([{ ...base, metadata: { bounds: [0, 0, 2, 2] } }]);
     assert.equal(f.calls.urlProviders.length, 1);
     assert.equal(f.calls.imageryRemoved.length, 0);
+  });
+
+  it("draws a wms record whose tile is an ArcGIS REST export from that template", () => {
+    // Earthdata GIS records an ImageServer as `source.url`; GetMap against it
+    // returns no image, so the exportImage template is what draws.
+    const sync = newSync(f);
+    const tile =
+      "https://gis.example/rest/services/X/ImageServer/exportImage?bbox={bbox-epsg-3857}&bboxSR=3857&f=image";
+    sync.sync([
+      mkLayer({
+        id: "img",
+        type: "wms",
+        source: { url: "https://gis.example/rest/services/X/ImageServer", tiles: [tile] },
+      }),
+    ]);
+    assert.equal(f.calls.wmsProviders.length, 0);
+    assert.equal(f.calls.urlProviders.length, 1);
+    assert.equal(String(f.calls.urlProviders[0].url), tile);
   });
 
   it("treats a wms layer with only a service url as globe-supported", () => {
@@ -935,6 +990,28 @@ describe("CesiumLayerSync", () => {
     sync.sync([mkLayer({ id: "x", type: "xyz", source: { tiles: ["u/{z}/{x}/{y}"] } })]);
     sync.sync([]);
     assert.equal(f.calls.imageryRemoved.length, 1);
+  });
+
+  it("reads a raster record's Esri-style tile template from source.url", async () => {
+    // The Esri Wayback control mirrors its release as a raster record whose
+    // `source.url` is a `{level}/{row}/{col}` template, as ArcGIS reads it.
+    const sync = newSync(f);
+    sync.sync([
+      mkLayer({
+        id: "wayback",
+        type: "raster",
+        source: {
+          type: "raster",
+          url: "https://wayback.example/tile/10/{level}/{row}/{col}",
+        },
+      }),
+    ]);
+    await f.flush();
+    assert.equal(f.calls.urlProviders.length, 1);
+    assert.equal(
+      String(f.calls.urlProviders[0].url),
+      "https://wayback.example/tile/10/{z}/{y}/{x}",
+    );
   });
 
   it("renders an arcgis MapServer layer via ArcGisMapServerImageryProvider.fromUrl", async () => {

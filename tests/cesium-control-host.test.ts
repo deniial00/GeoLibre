@@ -350,20 +350,33 @@ describe("CesiumControlHost", () => {
     assert.equal(facade.getCenter().lng, -122.4);
     assert.equal(facade.getCenter().lat, 37.7);
 
-    // Unsupported style-spec mutations throw explicitly
-    assert.throws(() => facade.addLayer({}), /addLayer is not supported/);
-    assert.throws(() => facade.setPaintProperty(), /setPaintProperty is not supported/);
-    assert.throws(() => facade.setLayoutProperty(), /setLayoutProperty is not supported/);
-    assert.throws(() => facade.getStyle(), /getStyle is not supported/);
-
-    // Source mutations must not report success without rendering anything.
-    assert.throws(
-      () => facade.addSource("test-src", { type: "geojson" }),
-      /addSource is not supported/,
+    // Style-spec calls record into a shadow style (issue #3088): they succeed
+    // and read back, as a control's own bookkeeping expects.
+    facade.addSource("test-src", {
+      type: "geojson",
+      data: { type: "FeatureCollection", features: [] },
+    });
+    facade.addLayer({ id: "test-layer", type: "line", source: "test-src" });
+    assert.equal(facade.getLayer("test-layer")?.type, "line");
+    facade.setPaintProperty("test-layer", "line-color", "#ff0000");
+    assert.equal(facade.getPaintProperty("test-layer", "line-color"), "#ff0000");
+    facade.setLayoutProperty("test-layer", "visibility", "none");
+    assert.equal(facade.getLayoutProperty("test-layer", "visibility"), "none");
+    assert.deepEqual(
+      facade.getStyle().layers.map((layer: { id: string }) => layer.id),
+      ["test-layer"],
     );
-    assert.throws(() => facade.removeSource("test-src"), /removeSource is not supported/);
-    assert.throws(() => facade.removeLayer("test-layer"), /removeLayer is not supported/);
+    assert.equal(facade.getSource("test-src")?.type, "geojson");
+    facade.removeLayer("test-layer");
+    facade.removeSource("test-src");
+    assert.equal(facade.getLayer("test-layer"), undefined);
     assert.equal(facade.getSource("test-src"), undefined);
+
+    // A custom layer draws through a WebGL context the globe does not have.
+    assert.throws(
+      () => facade.addLayer({ id: "gpu", type: "custom", render: () => {} }),
+      /cannot render on the globe/,
+    );
 
     host.destroy();
   });
@@ -483,6 +496,18 @@ describe("CesiumControlHost", () => {
     sceneViewer.canvas.dispatchEvent(move);
     assert.equal(picks, 1);
     assert.equal(moves.length, 1);
+    host.destroy();
+  });
+
+  it("reports a Mercator projection in the flat scene modes", () => {
+    const sceneViewer = makeSceneViewer(doc);
+    const Cesium = { ...makeFakeCesium(), SceneMode: { SCENE3D: 3, SCENE2D: 2 } };
+    const host = new CesiumControlHost(sceneViewer as never, parent, Cesium as never);
+    const facade = facadeOf(host);
+    Object.assign(sceneViewer.scene, { mode: 3 });
+    assert.equal(facade.getProjection().type, "globe");
+    Object.assign(sceneViewer.scene, { mode: 2 });
+    assert.equal(facade.getProjection().type, "mercator");
     host.destroy();
   });
 

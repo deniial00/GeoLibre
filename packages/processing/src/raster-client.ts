@@ -86,18 +86,64 @@ const PRESERVED_GEO_KEYS = [
  * Upper bound on the Float32 pixel buffers the client engine will allocate
  * (512 MB). Larger rasters should use the sidecar, which streams from disk.
  */
-const MAX_CLIENT_RASTER_BYTES = 512 * 1024 * 1024;
+export const MAX_CLIENT_RASTER_BYTES = 512 * 1024 * 1024;
 
-/** Decode GeoTIFF bytes into a {@link RasterData}. */
-export async function readRasterData(bytes: ArrayBuffer): Promise<RasterData> {
+const SAMPLE_FORMAT_TAG = 339;
+
+type GeoTiffImage = Awaited<ReturnType<Awaited<ReturnType<typeof fromArrayBuffer>>["getImage"]>>;
+
+/**
+ * Let geotiff.js decode a multi-band file whose SampleFormat tag holds fewer
+ * values than SamplesPerPixel. TIFF sizes the tag per sample, but writers
+ * (including geolibre-wasm's COG converter before the whitebox-wasm fix) emit
+ * a single value; geotiff.js indexes it per sample and throws "Unsupported data
+ * format/bitsPerSample" for band 2+. Reusing the last value matches GDAL.
+ */
+export function padShortSampleFormat(image: GeoTiffImage): void {
+  const samples = image.getSamplesPerPixel();
+  const formats = image.fileDirectory.getValue("SampleFormat") as ArrayLike<number> | undefined;
+  if (!formats || formats.length === 0 || formats.length >= samples) return;
+  const padded = Uint16Array.from({ length: samples }, (_, i) =>
+    i < formats.length ? formats[i] : formats[formats.length - 1],
+  );
+  // geotiff.js reads the tag from several places (getSampleFormat and the
+  // per-sample readers), so replace the parsed value itself. 339 = SampleFormat.
+  const fields = (image.fileDirectory as unknown as { actualizedFields?: unknown })
+    .actualizedFields;
+  if (!(fields instanceof Map)) {
+    // A geotiff.js upgrade moved this private map (docs/maintenance.md).
+    console.warn(
+      "readRasterData: cannot pad a short SampleFormat tag; band 2+ may fail to decode.",
+    );
+    return;
+  }
+  fields.set(SAMPLE_FORMAT_TAG, padded);
+}
+
+/**
+ * Decode GeoTIFF bytes into a {@link RasterData}.
+ *
+ * @param bytes GeoTIFF bytes.
+ * @param options `samples`: 0-based bands to decode, in this order (all bands
+ *   when omitted), so a caller needing a few bands of a large image does not
+ *   decode the rest.
+ */
+export async function readRasterData(
+  bytes: ArrayBuffer,
+  options: { samples?: readonly number[] } = {},
+): Promise<RasterData> {
   const tiff = await fromArrayBuffer(bytes);
   const image = await tiff.getImage();
+  padShortSampleFormat(image);
   const width = image.getWidth();
   const height = image.getHeight();
   // Guard against decoding a raster too large to hold in browser memory before
   // we materialize the band arrays (which would freeze or OOM the tab).
   const estimatedBytes =
-    width * height * image.getSamplesPerPixel() * Float32Array.BYTES_PER_ELEMENT;
+    width *
+    height *
+    (options.samples?.length ?? image.getSamplesPerPixel()) *
+    Float32Array.BYTES_PER_ELEMENT;
   if (!Number.isFinite(estimatedBytes) || estimatedBytes > MAX_CLIENT_RASTER_BYTES) {
     throw new Error(
       "This raster is too large for the in-browser engine. Use the sidecar (rasterio/GDAL) engine instead.",
@@ -106,7 +152,9 @@ export async function readRasterData(bytes: ArrayBuffer): Promise<RasterData> {
   const [originX, originY] = image.getOrigin();
   const [resolutionX, resolutionY] = image.getResolution();
 
-  const result = await image.readRasters();
+  const result = await image.readRasters(
+    options.samples ? { samples: [...options.samples] } : undefined,
+  );
   const rawBands = (Array.isArray(result) ? result : [result]) as ArrayLike<number>[];
   const bands = rawBands.map((band) => Float32Array.from(band));
 
@@ -139,22 +187,46 @@ export function writeRasterData(raster: RasterData): ArrayBuffer {
 
 /** Encode all bands of a {@link RasterData} as a Float32 GeoTIFF. */
 export function writeRasterBands(raster: RasterData): ArrayBuffer {
-  const bandCount = raster.bands.length;
+  return writeInterleaved(raster, raster.bands, Float32Array);
+}
+
+/**
+ * Encode 8-bit bands with a raster's georeferencing as a uint8 GeoTIFF, e.g. a
+ * class-code raster or an RGB rendering. Each band holds `width * height`
+ * values; `nodata` (when given) is written as the GDAL NoData value.
+ *
+ * @param grid Size, georeferencing and GeoKeys to copy (its own bands are ignored).
+ * @param bands The 8-bit bands to write.
+ * @param nodata NoData value, or null for none.
+ */
+export function writeUint8Bands(
+  grid: RasterData,
+  bands: Uint8Array[],
+  nodata: number | null,
+): ArrayBuffer {
+  return writeInterleaved({ ...grid, nodata }, bands, Uint8Array);
+}
+
+function writeInterleaved<T extends Float32Array | Uint8Array>(
+  raster: RasterData,
+  bands: T[],
+  ArrayType: { new (length: number): T },
+): ArrayBuffer {
+  const bandCount = bands.length;
   // Interleave bands into a single flat array the writer can consume (it infers
   // band count from `values.length / (width * height)`).
-  let values: Float32Array;
+  let values: T;
   if (bandCount === 1) {
-    values = raster.bands[0];
+    values = bands[0];
   } else {
     const pixels = raster.width * raster.height;
-    values = new Float32Array(pixels * bandCount);
+    values = new ArrayType(pixels * bandCount);
     for (let p = 0; p < pixels; p += 1) {
       for (let b = 0; b < bandCount; b += 1) {
-        values[p * bandCount + b] = raster.bands[b][p];
+        values[p * bandCount + b] = bands[b][p];
       }
     }
   }
-
   const metadata: Record<string, unknown> = {
     width: raster.width,
     height: raster.height,
@@ -166,9 +238,8 @@ export function writeRasterBands(raster: RasterData): ArrayBuffer {
     const value = raster.geoKeys[key];
     if (value != null) metadata[key] = value;
   }
-
   // The geotiff writer's metadata type is broad; the runtime accepts the fields
-  // set above (it derives SampleFormat/BitsPerSample from the Float32Array).
+  // set above (it derives SampleFormat/BitsPerSample from the typed array).
   const bytes: ArrayBuffer = writeArrayBuffer(
     values,
     metadata as Parameters<typeof writeArrayBuffer>[1],

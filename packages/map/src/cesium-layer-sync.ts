@@ -1,4 +1,4 @@
-import { cesiumKmlSource, isCesiumKmlLayer } from "@geolibre/core";
+import { cesiumKmlSource, isCesiumKmlLayer, installCogTilerDatumShift } from "@geolibre/core";
 import { bindDocumentOpacity } from "./cesium-document-opacity";
 import { imageryColorAdjustments } from "./raster-color-adjustments";
 import {
@@ -47,7 +47,8 @@ import {
 import { getZarrStore } from "./zarr-source";
 import { PointCloudStreamer } from "./cesium-point-cloud-stream";
 import { createFeatureStyleResolver, type FeatureStyleResolver } from "./feature-style";
-import { createCesiumLabeler, pickLabelPart } from "./cesium-labels";
+import { createCesiumLabeler, labelBaseColors, pickLabelPart } from "./cesium-labels";
+import { horizonDepthDistance } from "./cesium-horizon";
 import {
   buildPointCloudCollection,
   isSplatTilesetUrl,
@@ -472,9 +473,30 @@ const CREDENTIAL_PROXY = {
   },
 };
 
+/** An ArcGIS REST export template (`MapServer/export?`, `ImageServer/exportImage?`). */
+const ARCGIS_REST_EXPORT = /\/(?:Map|Image)Server\/export(?:Image)?\?/i;
+
+/** A `{z}`/`{level}` placeholder: a `source.url` that is a tile template. */
+const TILE_TEMPLATE = /\{(?:z|level)\}/;
+
+/**
+ * A raster layer's first tile template, in the `{z}/{x}/{y}` form Cesium's
+ * template provider reads.
+ *
+ * `source.tiles` is the usual home. A raster record whose `source.url` is
+ * itself a template is read too, as the ArcGIS renderer reads it: the Esri
+ * Wayback control mirrors its release that way, with Esri's
+ * `{level}/{row}/{col}` placeholders, which are rewritten here.
+ */
 function firstTile(layer: GeoLibreLayer): string | undefined {
   const tiles = layer.source.tiles;
-  return Array.isArray(tiles) ? str(tiles[0]) : undefined;
+  const tile = Array.isArray(tiles) ? str(tiles[0]) : undefined;
+  const url = layer.type === "raster" ? str(layer.source.url) : undefined;
+  const template = tile ?? (url && TILE_TEMPLATE.test(url) ? url : undefined);
+  return template
+    ?.replaceAll("{level}", "{z}")
+    .replaceAll("{row}", "{y}")
+    .replaceAll("{col}", "{x}");
 }
 
 function tilesetUrl(layer: GeoLibreLayer): string | undefined {
@@ -2237,6 +2259,7 @@ export class CesiumLayerSync {
       this.deps.loadCogTiler ??
       (async () => {
         const module = await import("cog-tiler-wasm");
+        installCogTilerDatumShift(module);
         const { default: wasmUrl } = await import("lerc/lerc-wasm.wasm?url");
         module.configureLercDecoder({ wasmUrl });
         return module;
@@ -2622,7 +2645,8 @@ export class CesiumLayerSync {
         outlineColor: Cesium.Color.fromCssColorString(style.strokeColor),
         outlineWidth: style.strokeWidth,
         heightReference,
-        disableDepthTestDistance: Number.POSITIVE_INFINITY,
+        // Over terrain on the near side, hidden by the Earth on the far side.
+        disableDepthTestDistance: horizonDepthDistance(Cesium, viewer).property,
       };
       entity.billboard = undefined;
       entity.point = (
@@ -2890,7 +2914,7 @@ export class CesiumLayerSync {
         resolver,
         this.effectiveOpacity(entry),
         zoom,
-        { scene: viewer.scene, clampToGround },
+        { scene: viewer.scene, clampToGround, horizon: horizonDepthDistance(Cesium, viewer) },
       );
       viewer.scene.primitives.add(collection);
       entry.handle = collection;
@@ -2914,8 +2938,12 @@ export class CesiumLayerSync {
     const plan = planPointRendering(entry.layer);
     entry.plan = plan;
     if (!plan.cluster || !dataSource.clustering?.clusterEvent) return;
-    entry.cluster = configureClustering(this.Cesium, dataSource, plan, () =>
-      clusterAppearance(entry.layer, this.effectiveOpacity(entry)),
+    entry.cluster = configureClustering(
+      this.Cesium,
+      dataSource,
+      plan,
+      () => clusterAppearance(entry.layer, this.effectiveOpacity(entry)),
+      horizonDepthDistance(this.Cesium, this.viewer),
     );
     entry.zoomCluster = true;
     entry.cluster.setEnabled(clusterActiveAtZoom(plan, this.cameraZoom()));
@@ -3035,7 +3063,12 @@ export class CesiumLayerSync {
       // avoid. Defer to the tile template whenever it names a protocol, so the
       // layer falls through to the bridge below (nothing between here and it
       // matches a WMS layer).
-      !protocolScheme(firstTile(layer) ?? "")
+      !protocolScheme(firstTile(layer) ?? "") &&
+      // A "wms" record whose tile is an ArcGIS REST export draws from that
+      // template: Earthdata GIS records an ImageServer as `source.url` and its
+      // `exportImage?bbox={bbox-epsg-3857}` as the tile, so a WMS provider
+      // pointed at the url would request GetMap from a REST endpoint.
+      !ARCGIS_REST_EXPORT.test(firstTile(layer) ?? "")
     ) {
       return { isAsync: false, provider: wmsImageryProvider(Cesium, layer, makeResource) };
     } else if (wmtsCaps) {
@@ -3986,6 +4019,17 @@ export class CesiumLayerSync {
     // Point pins and marker sprites keep their baked-in colour; multiplying by
     // white+alpha only fades them.
     const marker = Cesium.Color.WHITE.withAlpha(opacity);
+    // A data-defined label opacity replaces the layer opacity but still
+    // follows a story fade, scaled by how far the fade has taken the layer
+    // from its own opacity (a fade to 0 hides it).
+    const story = this.storyOpacities.get(entry.layer.id);
+    const storyFactor = !story
+      ? 1
+      : entry.layer.opacity > 0
+        ? story.currentOpacity / entry.layer.opacity
+        : story.currentOpacity > 0
+          ? 1
+          : 0;
     const isExtruded = Boolean(style.extrusionEnabled);
     const extColorVal = isExtruded ? extrusionColorValue(style) : null;
     const extColorStr =
@@ -4097,8 +4141,17 @@ export class CesiumLayerSync {
           entity.billboard.color = new Cesium.ConstantProperty(marker);
         }
         if (entity.label) {
-          entity.label.fillColor = new Cesium.ConstantProperty(labelFill);
-          entity.label.outlineColor = new Cesium.ConstantProperty(labelOutline);
+          // A label built with per-feature colours or a data-defined opacity
+          // keeps them; only the layer opacity is reapplied.
+          const base = labelBaseColors.get(entity);
+          const alpha =
+            base?.opacity === undefined ? opacity : Math.min(1, base.opacity * storyFactor);
+          entity.label.fillColor = new Cesium.ConstantProperty(
+            base ? base.fill.withAlpha(base.fill.alpha * alpha) : labelFill,
+          );
+          entity.label.outlineColor = new Cesium.ConstantProperty(
+            base ? base.outline.withAlpha(base.outline.alpha * alpha) : labelOutline,
+          );
         }
       }
     } finally {
