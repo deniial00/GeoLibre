@@ -34,8 +34,16 @@ dash = ["dash>=2.16"]
 pointcloud = ["laspy[lazrs]>=2.5", "numpy>=1.24", "whitebox-workflows>=2.0.2"]
 # The MCP server (geolibre.mcp) is the only thing that imports the SDK, so it
 # stays optional: the widget and the project builders work without it.
-mcp = ["mcp>=2.0"]
-dev = ["pytest", "build", "anywidget[dev]", "jupyter-server", "mcp>=2.0", "dash>=2.16"]
+mcp = ["mcp>=2.0", "httpcore[asyncio]>=1.0.9,<2"]
+dev = [
+  "pytest",
+  "build",
+  "anywidget[dev]",
+  "jupyter-server",
+  "mcp>=2.0",
+  "httpcore[asyncio]>=1.0.9,<2",
+  "dash>=2.16",
+]
 
 [project.scripts]
 # geolibre.mcp:main, not geolibre.mcp.server:main — the package-level wrapper

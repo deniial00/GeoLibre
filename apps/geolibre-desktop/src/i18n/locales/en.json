@@ -1,4 +1,19 @@
 {
+  "mcpPreview": {
+    "networkConsent": {
+      "previewLabel": "GeoLibre map preview",
+      "title": "Allow map connections?",
+      "description": "Review the external servers this map needs before connecting.",
+      "servers_one": "{{count}} server",
+      "servers_other": "{{count}} servers",
+      "privacy": "Requests come from your GeoLibre Python server. These servers see that machine’s IP address, which may differ from your browser’s.",
+      "scope": "Public servers only. Approval applies only to this preview.",
+      "allowed": "Allowed",
+      "blocked": "Blocked",
+      "allowAll": "Allow all",
+      "blockAll": "Block all"
+    }
+  },
   "projectHistory": {
     "title": "Project History",
     "description": "Browse autosaved snapshots stored on this device.",

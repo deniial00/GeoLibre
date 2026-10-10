@@ -95,7 +95,7 @@ def table_keys(body: str) -> set[str]:
     }
 
 
-def parameters(node: ast.FunctionDef) -> list[tuple[str, str | None]]:
+def parameters(node: ast.FunctionDef | ast.AsyncFunctionDef) -> list[tuple[str, str | None]]:
     """Return a function's parameters as ``(name, default source)`` pairs.
 
     Annotations are dropped: the reference documents call shapes for an agent,
@@ -142,7 +142,7 @@ def parameters(node: ast.FunctionDef) -> list[tuple[str, str | None]]:
     return collected
 
 
-def registers_a_tool(node: ast.FunctionDef) -> bool:
+def registers_a_tool(node: ast.FunctionDef | ast.AsyncFunctionDef) -> bool:
     """Whether a function is decorated as an MCP tool.
 
     Both spellings count: the server's own ``@server.tool()``, and the
@@ -177,7 +177,7 @@ def mcp_tool_signatures() -> dict[str, list[tuple[str, str | None]]]:
     return {
         node.name: parameters(node)
         for node in ast.walk(ast.parse(source))
-        if isinstance(node, ast.FunctionDef) and registers_a_tool(node)
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and registers_a_tool(node)
     }
 
 

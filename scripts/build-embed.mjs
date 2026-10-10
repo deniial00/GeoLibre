@@ -12,8 +12,8 @@
 //     builds CDN-load it too by default; override with `GEOLIBRE_PGLITE_CDN=0`
 //     on any target to force-bundle it for a fully offline build.
 //
-// Output: apps/geolibre-desktop/dist-embed/ -> copied to
-// python/src/geolibre/static/app/.
+// Output: apps/geolibre-desktop/dist-embed/ -> python/src/geolibre/static/app/
+// and apps/geolibre-mcp-app/dist/show-map.html -> python/src/geolibre/static/mcp/.
 
 import { spawnSync } from "node:child_process";
 import { cpSync, mkdirSync, readdirSync, readFileSync, rmSync } from "node:fs";
@@ -104,3 +104,28 @@ mkdirSync(staticDir, { recursive: true });
 cpSync(distDir, staticDir, { recursive: true });
 
 console.log(`[build-embed] Staged embed build into ${staticDir}`);
+
+const mcpResult = spawnSync("npm", ["run", "build:mcp-app"], {
+  cwd: repoRoot,
+  shell: process.platform === "win32",
+  stdio: "inherit",
+});
+if (mcpResult.status !== 0) {
+  process.exit(mcpResult.status ?? 1);
+}
+const mcpDistDir = resolve(repoRoot, "apps/geolibre-mcp-app/dist");
+const mcpFindings = scanForCredentials(mcpDistDir);
+if (mcpFindings.length > 0) {
+  console.error(
+    `[build-embed] Refusing to stage: ${mcpFindings.length} credential(s) in the MCP App build.\n` +
+      mcpFindings.map((finding) => `  - ${finding}`).join("\n") +
+      `\n\n${REMEDIATION}`,
+  );
+  process.exit(1);
+}
+console.log("[build-embed] MCP App credential scan clean.");
+const mcpStaticDir = resolve(repoRoot, "python/src/geolibre/static/mcp");
+rmSync(mcpStaticDir, { recursive: true, force: true });
+mkdirSync(mcpStaticDir, { recursive: true });
+cpSync(resolve(mcpDistDir, "show-map.html"), resolve(mcpStaticDir, "show-map.html"));
+console.log(`[build-embed] Staged MCP App view into ${mcpStaticDir}`);

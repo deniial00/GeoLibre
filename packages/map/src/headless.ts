@@ -170,3 +170,8 @@ export {
   type FeatureSelectionShape,
 } from "./feature-selection";
 export { isPlaceholderLayer, placeholderMessage } from "./placeholders";
+export { identifyStyleLayerIds } from "./identify-layer-ids";
+export { createIdentifyPopupElement, type IdentifyPopupOptions } from "./feature-popup";
+export { createBlankMapStyle, resolveMapStyle } from "./basemap-style";
+export { classifyLayer, layerKindSupport } from "./layer-kind";
+export { MAPLIBRE_SUPPORTED_LAYER_KINDS } from "./maplibre-layer-kinds";

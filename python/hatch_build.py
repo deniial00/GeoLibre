@@ -35,6 +35,7 @@ except ModuleNotFoundError:  # pragma: no cover - always present during a build
 
 PACKAGE_ROOT = Path(__file__).parent
 STATIC_APP = PACKAGE_ROOT / "src" / "geolibre" / "static" / "app"
+STATIC_MCP_APP = PACKAGE_ROOT / "src" / "geolibre" / "static" / "mcp" / "show-map.html"
 # The Python package lives at <repo>/python, so the monorepo root is one level up.
 REPO_ROOT = PACKAGE_ROOT.parent
 BUILD_SCRIPT = REPO_ROOT / "scripts" / "build-embed.mjs"
@@ -146,15 +147,20 @@ class CustomBuildHook(BuildHookInterface):
         Raises:
             RuntimeError: If any credential is found in the staged assets.
         """
-        if not STATIC_APP.is_dir():
-            return
-        findings = scan_for_credentials(STATIC_APP)
+        directories = [
+            directory for directory in (STATIC_APP, STATIC_MCP_APP.parent) if directory.is_dir()
+        ]
+        findings = [
+            f"{directory}: {finding}"
+            for directory in directories
+            for finding in scan_for_credentials(directory)
+        ]
         if not findings:
             self.app.display_info("Credential scan clean.")
             return
         listed = "\n".join(f"  - {f}" for f in findings)
         raise RuntimeError(
-            f"Refusing to package: {len(findings)} credential(s) found in {STATIC_APP}.\n"
+            f"Refusing to package: {len(findings)} credential(s) found in the staged assets.\n"
             f"{listed}\n\n"
             "The wheel is redistributed, so it must not carry your keys. This is\n"
             "usually a stale static/app from an earlier local `npm run build:embed`\n"
@@ -171,7 +177,7 @@ class CustomBuildHook(BuildHookInterface):
             RuntimeError: If the assets cannot be produced.
         """
         force = os.environ.get("GEOLIBRE_FORCE_JS_BUILD") == "1"
-        have_assets = (STATIC_APP / "index.html").is_file()
+        have_assets = (STATIC_APP / "index.html").is_file() and STATIC_MCP_APP.is_file()
 
         if have_assets and not force:
             return
@@ -204,4 +210,8 @@ class CustomBuildHook(BuildHookInterface):
         if not (STATIC_APP / "index.html").is_file():
             raise RuntimeError(
                 f"The embed build completed but produced no index.html at {STATIC_APP}."
+            )
+        if not STATIC_MCP_APP.is_file():
+            raise RuntimeError(
+                f"The embed build completed but produced no MCP App view at {STATIC_MCP_APP}."
             )

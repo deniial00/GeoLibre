@@ -7,7 +7,8 @@
   "types": "./src/index.ts",
   "exports": {
     ".": "./src/index.ts",
-    "./globals.css": "./src/globals.css"
+    "./globals.css": "./src/globals.css",
+    "./theme.css": "./src/theme.css"
   },
   "dependencies": {
     "@radix-ui/react-dialog": "^1.1.23",

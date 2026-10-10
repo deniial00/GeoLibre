@@ -24,6 +24,7 @@ mcp = pytest.importorskip("mcp", reason="the mcp SDK is an optional extra")
 
 from mcp.server.mcpserver.exceptions import ToolError  # noqa: E402 - after the skip guard
 
+import geolibre.mcp.server as server_module  # noqa: E402 - after the skip guard
 from geolibre.mcp.server import (  # noqa: E402 - after the skip guard
     _reports_its_errors,
     build_server,
@@ -206,7 +207,7 @@ def test_every_tool_reports_its_own_validation_errors(server):
     bare = [
         node.name
         for node in ast.walk(ast.parse(source))
-        if isinstance(node, ast.FunctionDef)
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
         and any("server.tool" in ast.unparse(d) for d in node.decorator_list)
     ]
     assert not bare, f"tools registered without the error-reporting wrapper: {bare}"
@@ -216,21 +217,15 @@ def test_every_tool_reports_its_own_validation_errors(server):
     assert "map.txt" in message or "suffix" in message.lower()
 
 
-def test_an_async_tool_is_refused_rather_than_registered_unreported():
-    """A coroutine tool cannot be wrapped, so it is rejected where it is wrapped.
-
-    The wrapper is synchronous: an ``async def`` tool would hand the SDK an
-    unawaited coroutine, and the ``ValueError`` inside it would be raised after
-    the wrapper's ``try`` had exited, putting the tool right back to answering
-    with "Error executing tool <name>". Failing at registration keeps that from
-    reaching a caller unnoticed.
-    """
+def test_an_async_tool_reports_its_validation_error():
+    """The async wrapper awaits work inside the ToolError translation boundary."""
 
     async def make_map():
-        raise ValueError("never reached: the wrapper refuses this function")
+        raise ValueError("async validation rejected")
 
-    with pytest.raises(TypeError, match="async"):
-        _reports_its_errors(make_map)
+    wrapped = _reports_its_errors(make_map)
+    with pytest.raises(ToolError, match="async validation rejected"):
+        asyncio.run(wrapped())
 
 
 def test_create_project_writes_a_file(server, tmp_path):
@@ -1083,3 +1078,102 @@ def test_renderer_tools_persist_pane_kinds(server, tmp_path):
     saved = json.loads(Path(path).read_text())
     assert saved["primaryRenderer"] == "cesium"
     assert saved["secondaryMapViews"][0]["viewKind"] == "cesium"
+
+
+# -- in-chat preview (MCP Apps) -----------------------------------------------
+
+
+def test_show_map_links_ui_resource_and_registers_app_network_tools(server):
+    tools = {tool.name: tool for tool in asyncio.run(server.list_tools())}
+    assert tools["show_map"].model_dump(by_alias=True)["_meta"] == {
+        "ui": {"resourceUri": "ui://geolibre/show-map.html"}
+    }
+    assert tools["get_map_preview"].model_dump(by_alias=True)["_meta"] == {
+        "ui": {"visibility": ["app"]}
+    }
+    assert {"approve_map_origin", "fetch_map_resource", "close_map_preview"} <= set(tools)
+    assert all(
+        tools[name].model_dump(by_alias=True)["_meta"]["ui"]["visibility"] == ["app"]
+        for name in ("approve_map_origin", "fetch_map_resource", "close_map_preview")
+    )
+
+
+def test_show_map_view_resource_csp_has_no_external_domains(server, monkeypatch, tmp_path):
+    view = tmp_path / "view.html"
+    view.write_text("<!doctype html><title>x</title>", encoding="utf-8")
+    monkeypatch.setattr(server_module, "SHOW_MAP_HTML", view)
+    resources = asyncio.run(server.list_resources())
+    resource = next(item for item in resources if str(item.uri) == "ui://geolibre/show-map.html")
+    ui = resource.model_dump(by_alias=True)["_meta"]["ui"]
+    assert ui["csp"]["connectDomains"] == []
+    assert ui["csp"]["resourceDomains"] == []
+
+
+def test_show_map_view_is_an_mcp_app_resource(server, monkeypatch, tmp_path):
+    view = tmp_path / "view.html"
+    view.write_text("<!doctype html><title>x</title>", encoding="utf-8")
+    monkeypatch.setattr(server_module, "SHOW_MAP_HTML", view)
+    [content] = asyncio.run(server.read_resource("ui://geolibre/show-map.html"))
+    assert content.mime_type == "text/html;profile=mcp-app"
+    assert content.content == view.read_text(encoding="utf-8")
+
+
+def test_show_map_view_reports_a_missing_build(server, monkeypatch, tmp_path):
+    monkeypatch.setattr(server_module, "SHOW_MAP_HTML", tmp_path / "missing.html")
+    with pytest.raises(Exception, match="build:embed"):
+        asyncio.run(server.read_resource("ui://geolibre/show-map.html"))
+
+
+@pytest.mark.parametrize("scheme", ["http", "https"])
+def test_show_map_preview_is_consent_gated_and_does_not_modify_project(
+    server,
+    project_path,
+    tmp_path,
+    scheme,
+):
+    call(server, "add_geojson_layer", path=project_path, name="Points", data=json.dumps(POINT_FC))
+    call(
+        server,
+        "add_ogc_layer",
+        path=project_path,
+        name="External WMS",
+        service="wms",
+        endpoint=f"{scheme}://maps.example.com/wms?api_key=SECRET123",
+        layers="demo:roads",
+    )
+    file = tmp_path / project_path
+    before = file.read_bytes()
+
+    summary = call(server, "show_map", path=project_path)
+    preview = call(server, "get_map_preview", path=project_path)
+
+    assert summary["layerCount"] == 2
+    assert "features" not in json.dumps(summary)
+    assert "SECRET123" not in json.dumps(summary)
+    assert preview["previewId"]
+    preview_json = json.dumps(preview)
+    assert f"{scheme}://maps.example.com/wms" in preview_json
+    assert "SECRET123" not in preview_json
+    assert preview["project"]["layers"][0]["geojson"]["features"] == POINT_FC["features"]
+    assert file.read_bytes() == before
+    error = call_error(
+        server,
+        "fetch_map_resource",
+        preview_id=preview["previewId"],
+        grant="unapproved",
+        url=f"{scheme}://maps.example.com/wms",
+    )
+    assert "consent grant" in error
+    assert call(server, "close_map_preview", preview_id=preview["previewId"]) == {"closed": True}
+    assert call(server, "close_map_preview", preview_id=preview["previewId"]) == {"closed": True}
+
+
+@pytest.mark.parametrize("tool", ["show_map", "get_map_preview"])
+def test_show_map_refuses_paths_outside_the_workspace(server, tool):
+    assert "outside this server's workspace" in call_error(server, tool, path="/etc/hosts")
+
+
+@pytest.mark.parametrize("tool", ["show_map", "get_map_preview"])
+def test_show_map_refuses_non_projects(server, tmp_path, tool):
+    (tmp_path / "package.json").write_text('{"name": "x"}', encoding="utf-8")
+    assert "missing version, mapView" in call_error(server, tool, path="package.json")
