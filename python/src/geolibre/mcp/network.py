@@ -152,7 +152,10 @@ def _canonical_origin(url: str, *, require_origin: bool = False) -> tuple[str, s
         for key, _ in parse_qsl(parsed.query, keep_blank_values=True):
             normalized = key.lower().replace("-", "").replace("_", "")
             if normalized.startswith(("xamz", "xgoog")) or normalized in _CREDENTIAL_QUERY_NAMES:
-                raise ValueError
+                raise PreviewNetworkError(
+                    "Credential-like query parameters are not supported; "
+                    "use a public URL without authentication parameters."
+                )
         expected_host = f"[{host}]" if ":" in host else host
         expected_netloc = expected_host + (f":{port}" if parsed.port is not None else "")
         if parsed.netloc.lower() != expected_netloc.lower():
@@ -168,6 +171,8 @@ def _canonical_origin(url: str, *, require_origin: bool = False) -> tuple[str, s
             f":{port}" if port != (443 if scheme == "https" else 80) else ""
         )
         return origin, host, port
+    except PreviewNetworkError:
+        raise
     except (ValueError, UnicodeError):
         raise PreviewNetworkError("Invalid or unsafe preview resource URL.") from None
 
@@ -239,10 +244,12 @@ class PreviewSessions:
             for origin, grant in list(session.grants.items()):
                 if grant.expires_at <= now:
                     del session.grants[origin]
-            if isinstance(token, str) and not token.isascii():
-                raise PreviewNetworkError("No valid consent grant for this map preview.")
-            if not isinstance(token, str) or not any(
-                secrets.compare_digest(grant.token, token) for grant in session.grants.values()
+            if (
+                not isinstance(token, str)
+                or not token.isascii()
+                or not any(
+                    secrets.compare_digest(grant.token, token) for grant in session.grants.values()
+                )
             ):
                 raise PreviewNetworkError("No valid consent grant for this map preview.")
             origin, host, port = _canonical_origin(url)
@@ -343,7 +350,7 @@ async def fetch_resource(
     def reauthorize() -> None:
         sessions.authorize(preview_id, grant, url)
 
-    ssl_context = ssl.create_default_context()
+    ssl_context = httpcore.default_ssl_context()
     pool = httpcore.AsyncConnectionPool(
         ssl_context=ssl_context,
         max_connections=1,
@@ -383,6 +390,8 @@ async def fetch_resource(
                 encoding = headers.get(b"content-encoding", b"identity").strip().lower()
                 if encoding not in {b"", b"identity"}:
                     raise PreviewNetworkError("Compressed resource responses are not supported.")
+                if int(headers.get(b"content-length", b"0")) > MAX_RESPONSE_BYTES:
+                    raise PreviewNetworkError("The resource response exceeds the 4 MiB limit.")
                 async for chunk in response.aiter_stream():
                     if time.monotonic() - started > TOTAL_TIMEOUT:
                         raise PreviewNetworkError("The resource response exceeded its time limit.")

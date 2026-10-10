@@ -106,6 +106,13 @@ preview session. Do not call those tools directly; full feature data is not
 part of `show_map`'s model-visible result. Hosts without this capability show
 an explanation rather than receiving feature data through the summary.
 
+App-only tool visibility requires a compliant host that honors
+`ui.visibility: ["app"]`. It is not server-side authentication: a client that
+ignores this metadata can expose the redacted project and approval/fetch tools
+to the model. The consent UI is therefore not an independent server-side
+security boundary. Grant, public-address, and resource-limit checks remain
+enforced by the server regardless of the caller.
+
 ### Network access
 
 The preview supports public HTTP and HTTPS resources, including WMS endpoints
@@ -135,19 +142,33 @@ renewed only for origins already allowed in that preview. Closing the preview
 revokes its grants. Call `show_map` again to choose differently or reopen an
 expired session.
 
+The server allows at most 64 active preview sessions. It refuses new sessions
+at that limit rather than evicting a live preview and revoking its grants.
+Closing a preview frees its slot; abandoned sessions retain theirs until the
+30-minute expiry.
+
 The server checks DNS addresses and connects only to the checked public IPs,
-with normal HTTPS certificate/hostname verification. Loopback, private/LAN,
-link-local, reserved, and multicast targets are rejected, even after approval;
-**private-network services are not supported by this preview**. Credentials
-in project URLs and source configuration are redacted before the App receives
-them, and credential-bearing resource URLs are rejected. No cookies, caller
-headers, environment proxies, or browser credentials are forwarded.
+with HTTPS certificate/hostname verification using system trust plus certifi's
+public CA bundle. Loopback, private/LAN, link-local, reserved, and multicast
+targets are rejected, even after approval; **private-network services are not
+supported by this preview**.
+
+Known credentials in project URLs and source configuration are redacted before
+the App receives them, and known credential-like resource URL parameters are
+rejected. These name-based checks are heuristic, not a guarantee that every
+vendor-specific secret is detected. Conservative keys such as `key` and `sr`
+are rejected even when used for a non-secret value; use a public URL without
+these parameters. Do not preview projects containing secrets in custom fields
+or URL parameters. No cookies, caller headers, environment proxies, or browser
+credentials are forwarded.
 
 Redirects fail closed: use and approve the direct destination URL instead.
-Each response is limited to 4 MiB and a 15-second network deadline. The server
-requests identity encoding and rejects compressed responses. Video sources
-inside a fetched style are removed because MapLibre loads video outside the
-consent-controlled request path.
+Each resource body is limited to 4 MiB (about 5.3 MiB when base64-encoded for
+transport) and a 15-second network deadline. An oversized `Content-Length` is
+rejected before reading the body; the streaming limit also applies when the
+length is missing or understated. The server requests identity encoding and
+rejects compressed responses. Video sources inside a fetched style are removed
+because MapLibre loads video outside the consent-controlled request path.
 
 After updating a checkout, install its updated MCP extra and rebuild the
 bundled view:

@@ -7,7 +7,10 @@ import base64
 import http.server
 import ipaddress
 import json
+import shutil
 import socket
+import ssl
+import subprocess
 import threading
 import time
 from contextlib import contextmanager
@@ -16,6 +19,7 @@ import pytest
 
 pytest.importorskip("mcp", reason="the MCP preview server is an optional extra")
 
+import certifi
 import httpcore
 
 from geolibre.mcp import network
@@ -29,6 +33,7 @@ class _Handler(http.server.BaseHTTPRequestHandler):
     status: int = 200
     response_headers: dict[str, str] = {}
     delay = 0.0
+    send_length = True
 
     def do_GET(self):
         if self.path == "/slow":
@@ -43,7 +48,10 @@ class _Handler(http.server.BaseHTTPRequestHandler):
         for key, value in self.response_headers.items():
             if key.lower() != "content-type":
                 self.send_header(key, value)
-        self.send_header("Content-Length", str(len(payload)))
+        if self.send_length and not any(
+            key.lower() == "content-length" for key in self.response_headers
+        ):
+            self.send_header("Content-Length", str(len(payload)))
         self.send_header("Connection", "close")
         self.end_headers()
         self.wfile.write(payload)
@@ -53,13 +61,23 @@ class _Handler(http.server.BaseHTTPRequestHandler):
 
 
 @contextmanager
-def resource_server(*, payload=b"ok", status=200, headers=None, delay=0.0):
+def resource_server(
+    *, payload=b"ok", status=200, headers=None, delay=0.0, send_length=True, ssl_context=None
+):
     handler = type(
         "PreviewTestHandler",
         (_Handler,),
-        {"payload": payload, "status": status, "response_headers": headers or {}, "delay": delay},
+        {
+            "payload": payload,
+            "status": status,
+            "response_headers": headers or {},
+            "delay": delay,
+            "send_length": send_length,
+        },
     )
     server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), handler)
+    if ssl_context is not None:
+        server.socket = ssl_context.wrap_socket(server.socket, server_side=True)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
     try:
@@ -110,6 +128,109 @@ def authorized_session(clock=time.monotonic):
     preview = sessions.create()
     grant = sessions.approve(preview, "http://tiles.example.test")["grant"]
     return sessions, preview, grant
+
+
+@pytest.fixture
+def tls_resource_server(tmp_path, request):
+    """Serve HTTPS with a test certificate, without relying on system trust."""
+    openssl = shutil.which("openssl")
+    if openssl is None:
+        pytest.skip("the local HTTPS fixture requires openssl")
+    hostname = request.param
+    certificate = tmp_path / "certificate.pem"
+    key = tmp_path / "key.pem"
+    subprocess.run(
+        [
+            openssl,
+            "req",
+            "-x509",
+            "-newkey",
+            "rsa:2048",
+            "-nodes",
+            "-keyout",
+            str(key),
+            "-out",
+            str(certificate),
+            "-days",
+            "1",
+            "-subj",
+            f"/CN={hostname}",
+            "-addext",
+            f"subjectAltName=DNS:{hostname}",
+        ],
+        check=True,
+        capture_output=True,
+    )
+    context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+    context.load_cert_chain(certificate, key)
+    with resource_server(payload=b"verified HTTPS tile", ssl_context=context) as port:
+        yield port, certificate, hostname
+
+
+@pytest.mark.parametrize(
+    ("tls_resource_server", "trusted"),
+    [
+        ("tiles.example.test", True),
+        ("tiles.example.test", False),
+        ("wrong.example.test", True),
+    ],
+    indirect=["tls_resource_server"],
+)
+def test_https_uses_bundle_without_system_cas_and_verifies_hostname(
+    monkeypatch, tls_resource_server, trusted
+):
+    port, certificate, hostname = tls_resource_server
+    patch_public_dns(monkeypatch, port)
+    # Simulate a Python installation whose default context has no CA certificates.
+    monkeypatch.setattr(
+        network.ssl,
+        "create_default_context",
+        lambda: ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT),
+    )
+    if trusted:
+        monkeypatch.setattr(certifi, "where", lambda: str(certificate))
+    sessions = network.PreviewSessions()
+    preview = sessions.create()
+    grant = sessions.approve(preview, "https://tiles.example.test")["grant"]
+    request = network.fetch_resource(sessions, preview, grant, "https://tiles.example.test/tile")
+    if trusted and hostname == "tiles.example.test":
+        result = asyncio.run(request)
+        assert base64.b64decode(result["data"]) == b"verified HTTPS tile"
+    else:
+        with pytest.raises(network.PreviewNetworkError, match="fetched safely"):
+            asyncio.run(request)
+
+
+def test_oversized_content_length_is_rejected_before_reading_body(monkeypatch):
+    with resource_server(
+        payload=b"", headers={"Content-Length": str(network.MAX_RESPONSE_BYTES + 1)}
+    ) as port:
+        patch_public_dns(monkeypatch, port)
+        sessions, preview, grant = authorized_session()
+        with pytest.raises(network.PreviewNetworkError, match="4 MiB"):
+            asyncio.run(
+                network.fetch_resource(sessions, preview, grant, "http://tiles.example.test/tile")
+            )
+
+
+def test_response_at_the_size_limit_is_accepted(monkeypatch):
+    payload = b"x" * network.MAX_RESPONSE_BYTES
+    with resource_server(payload=payload) as port:
+        patch_public_dns(monkeypatch, port)
+        sessions, preview, grant = authorized_session()
+        result = asyncio.run(
+            network.fetch_resource(sessions, preview, grant, "http://tiles.example.test/tile")
+        )
+        assert base64.b64decode(result["data"]) == payload
+
+
+def test_credential_like_query_rejection_is_actionable_and_does_not_echo_values():
+    sessions, preview, grant = authorized_session()
+    query = "api_key=PRIVATE_SECRET"
+    with pytest.raises(network.PreviewNetworkError, match="Credential-like") as error:
+        sessions.authorize(preview, grant, f"http://tiles.example.test/tile?{query}")
+    assert query not in str(error.value)
+    assert "PRIVATE_SECRET" not in str(error.value)
 
 
 def test_fetches_real_binary_and_json_responses(monkeypatch):
@@ -316,7 +437,9 @@ def test_compressed_and_oversized_responses_are_rejected(monkeypatch):
             asyncio.run(
                 network.fetch_resource(sessions, preview, grant, "http://tiles.example.test/a")
             )
-    with resource_server(payload=b"x" * (network.MAX_RESPONSE_BYTES + 1)) as port:
+    with resource_server(
+        payload=b"x" * (network.MAX_RESPONSE_BYTES + 1), send_length=False
+    ) as port:
         patch_public_dns(monkeypatch, port)
         sessions, preview, grant = authorized_session()
         with pytest.raises(network.PreviewNetworkError, match="4 MiB"):
