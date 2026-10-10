@@ -2018,7 +2018,7 @@ def build_server(workspace: Workspace) -> MCPServer:
         if not SHOW_MAP_HTML.is_file():
             raise ResourceError(
                 f"The map preview view is not built ({SHOW_MAP_HTML} is missing). "
-                "Run `npm run build:embed` from a GeoLibre checkout, or install a geolibre wheel."
+                "Run `npm run build:mcp-app` from a GeoLibre checkout, or install a geolibre wheel."
             )
         return SHOW_MAP_HTML.read_text(encoding="utf-8")
 

@@ -645,17 +645,24 @@ writes opens in the widget (and in the desktop and web apps) unchanged. See
 ## Building from source
 
 The package lives in [`python/`](https://github.com/opengeos/GeoLibre/tree/main/python).
-The bundled app is produced from the monorepo with:
+The two bundled frontends are built independently from the monorepo root:
 
 ```bash
-npm run build:embed      # builds the app and stages it into the wheel
-python -m build          # builds the wheel
-python -m twine upload dist/*  # upload to PyPI
-pip install -e python    # editable install for development
+npm install
+npm run build:embed      # builds and stages the Jupyter/web app
+npm run build:mcp-app    # builds and stages the standalone MCP App
+python -m build python  # builds the wheel and sdist
+python -m twine upload python/dist/*  # upload to PyPI
+pip install -e python   # editable install for development
 ```
 
-Changes to the Python code are picked up on kernel restart. Changes to the app
-(TypeScript) require re-running `npm run build:embed` and restarting the kernel.
+The packaging hook runs only the frontend builds whose staged outputs are
+missing. Set `GEOLIBRE_FORCE_JS_BUILD=1` to refresh both when building from a
+full checkout; a prebuilt sdist needs neither Node nor the monorepo sources.
+
+Changes to Python code are picked up on kernel restart. Changes to the Jupyter
+app require re-running `npm run build:embed` and restarting the kernel. For MCP
+preview changes, run `npm run build:mcp-app` and restart the MCP client.
 
 ## Rendering engines and mixed pane layouts
 

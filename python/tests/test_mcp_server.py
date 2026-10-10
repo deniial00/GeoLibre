@@ -22,7 +22,7 @@ from geolibre.mcp.workspace import Workspace, WorkspaceError
 
 mcp = pytest.importorskip("mcp", reason="the mcp SDK is an optional extra")
 
-from mcp.server.mcpserver.exceptions import ToolError  # noqa: E402 - after the skip guard
+from mcp.server.mcpserver.exceptions import ResourceError, ToolError  # noqa: E402
 
 import geolibre.mcp.server as server_module  # noqa: E402 - after the skip guard
 from geolibre.mcp.server import (  # noqa: E402 - after the skip guard
@@ -1148,7 +1148,7 @@ def test_show_map_view_is_an_mcp_app_resource(server, monkeypatch, tmp_path):
 
 def test_show_map_view_reports_a_missing_build(server, monkeypatch, tmp_path):
     monkeypatch.setattr(server_module, "SHOW_MAP_HTML", tmp_path / "missing.html")
-    with pytest.raises(Exception, match="build:embed"):
+    with pytest.raises(ResourceError):
         asyncio.run(server.read_resource("ui://geolibre/show-map.html"))
 
 

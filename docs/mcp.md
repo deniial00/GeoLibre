@@ -175,7 +175,7 @@ bundled view:
 
 ```bash
 python -m pip install -e "python[mcp]"
-npm run build:embed
+npm run build:mcp-app
 ```
 
 Use the Python executable configured in your desktop client's MCP server
@@ -185,10 +185,15 @@ an already-mounted preview can retain the previous HTML and tool definitions.
 ### Building from a checkout
 
 Published wheels include `geolibre/static/mcp/show-map.html`. From a checkout,
-run `npm install` and `npm run build:embed` to build and stage both the Jupyter
-app and the single-file MCP App. `npm run build:mcp-app` builds only the preview
-workspace and does not stage it into Python. Both build outputs and pre-staged
-wheel assets are scanned for credentials before packaging.
+run `npm install` and `npm run build:mcp-app` to build, scan, and stage the
+single-file MCP App without building the Jupyter app. `npm run build:embed`
+independently builds and stages the Jupyter/web app.
+
+The Python packaging hook runs each frontend build only when its own staged
+output is missing. Set `GEOLIBRE_FORCE_JS_BUILD=1` to rebuild both from a full
+checkout. Prebuilt sdists can produce wheels without Node or the monorepo
+sources. Both frontend build outputs and pre-staged package assets are scanned
+for credentials before packaging.
 
 ## The workspace
 

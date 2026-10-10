@@ -1,19 +1,16 @@
-"""Hatchling build hook that bundles the GeoLibre web app into the wheel.
+"""Hatchling build hook that bundles both GeoLibre frontend apps.
 
-The Python package serves the built GeoLibre single-page app from
-``geolibre/static/app``. That directory is produced by the JavaScript build
-(``npm run build:embed``) and is intentionally git-ignored, so it must be
-materialized at build time. This hook runs the embed build when the assets are
-missing (or ``GEOLIBRE_FORCE_JS_BUILD=1`` is set) and the JavaScript sources are
-available next to the package (i.e. building from a checkout of the monorepo).
+The Jupyter/web app and standalone MCP App are built and staged independently
+by ``npm run build:embed`` and ``npm run build:mcp-app``. Their git-ignored
+outputs live in ``geolibre/static/app`` and ``geolibre/static/mcp``.
 
-It then scans the staged assets for credentials before packaging. That scan is
-the load-bearing one, because of the early-return path below: when the assets are
-already present and ``GEOLIBRE_FORCE_JS_BUILD`` is unset, a ``python -m build``
-packages whatever ``static/app`` an earlier local ``npm run build:embed`` left
-behind. No JavaScript runs at all on that path, so a guard living only in
-``scripts/build-embed.mjs`` would never fire. This one runs on every build, fresh
-or stale, and needs no Node.
+This hook runs each build whose assets are missing, or both builds when
+``GEOLIBRE_FORCE_JS_BUILD=1`` and the JavaScript sources are available.
+Prebuilt sdists can produce wheels without Node or the monorepo sources.
+
+The staged assets are scanned for credentials on every packaging run,
+including when an earlier frontend build left them present and no JavaScript
+runs. The build-script scans alone cannot cover that pre-staged path.
 """
 
 from __future__ import annotations
@@ -39,6 +36,7 @@ STATIC_MCP_APP = PACKAGE_ROOT / "src" / "geolibre" / "static" / "mcp" / "show-ma
 # The Python package lives at <repo>/python, so the monorepo root is one level up.
 REPO_ROOT = PACKAGE_ROOT.parent
 BUILD_SCRIPT = REPO_ROOT / "scripts" / "build-embed.mjs"
+MCP_BUILD_SCRIPT = REPO_ROOT / "scripts" / "build-mcp-app.mjs"
 # Shared with scripts/scan-credentials.mjs so the JS and Python scanners cannot
 # drift. Ships inside the sdist (see [tool.hatch.build.targets.sdist] force-include)
 # so an sdist -> wheel build is gated too.
@@ -131,7 +129,7 @@ def scan_for_credentials(directory: Path) -> list[str]:
 
 
 class CustomBuildHook(BuildHookInterface):
-    """Build the embedded web app before packaging the wheel/sdist."""
+    """Build both frontend apps before packaging the wheel/sdist."""
 
     def initialize(self, version: str, build_data: dict) -> None:
         self._materialize_assets()
@@ -163,7 +161,7 @@ class CustomBuildHook(BuildHookInterface):
             f"Refusing to package: {len(findings)} credential(s) found in the staged assets.\n"
             f"{listed}\n\n"
             "The wheel is redistributed, so it must not carry your keys. This is\n"
-            "usually a stale static/app from an earlier local `npm run build:embed`\n"
+            "usually stale static assets from an earlier local frontend build\n"
             "that absorbed your shell's GOOGLE_MAPS_API_KEY / MAPBOX_TOKEN /\n"
             "CESIUM_TOKEN exports. Rebuild with GEOLIBRE_FORCE_JS_BUILD=1, or\n"
             "delete the directory and rerun. Wheel users supply their own tokens at\n"
@@ -171,47 +169,45 @@ class CustomBuildHook(BuildHookInterface):
         )
 
     def _materialize_assets(self) -> None:
-        """Builds the embedded web app when the staged assets are missing or stale.
+        """Run each frontend build independently when its staged output is missing.
 
         Raises:
-            RuntimeError: If the assets cannot be produced.
+            RuntimeError: If the required assets cannot be produced.
         """
         force = os.environ.get("GEOLIBRE_FORCE_JS_BUILD") == "1"
-        have_assets = (STATIC_APP / "index.html").is_file() and STATIC_MCP_APP.is_file()
+        builds = (
+            (STATIC_APP / "index.html", BUILD_SCRIPT, "build:embed"),
+            (STATIC_MCP_APP, MCP_BUILD_SCRIPT, "build:mcp-app"),
+        )
+        for asset, script, command in builds:
+            have_asset = asset.is_file()
+            if have_asset and not force:
+                continue
+            if not script.is_file():
+                if have_asset:
+                    continue
+                raise RuntimeError(
+                    f"GeoLibre assets are missing at {asset}, and the JavaScript build "
+                    f"script was not found at {script}. Build from a full checkout "
+                    f"of the monorepo, or run `npm run {command}` first."
+                )
 
-        if have_assets and not force:
-            return
+            self.app.display_info(f"Building GeoLibre assets (npm run {command})...")
+            try:
+                subprocess.run(
+                    ["npm", "run", command],
+                    cwd=REPO_ROOT,
+                    check=True,
+                    shell=os.name == "nt",
+                    timeout=600,  # 10 minutes; fail loudly rather than hang pip forever
+                )
+            except FileNotFoundError as exc:
+                raise RuntimeError(
+                    "npm was not found. Install Node.js and run `npm ci` from the "
+                    "repository root before building the wheel."
+                ) from exc
 
-        if not BUILD_SCRIPT.is_file():
-            if have_assets:
-                return
-            raise RuntimeError(
-                "GeoLibre web assets are missing and the JavaScript build "
-                f"script was not found at {BUILD_SCRIPT}. Build the wheel from "
-                "a full checkout of the GeoLibre monorepo, or run "
-                "`npm run build:embed` first."
-            )
-
-        self.app.display_info("Building embedded GeoLibre web app (npm run build:embed)...")
-        try:
-            subprocess.run(
-                ["npm", "run", "build:embed"],
-                cwd=REPO_ROOT,
-                check=True,
-                shell=os.name == "nt",
-                timeout=600,  # 10 minutes; fail loudly rather than hang pip forever
-            )
-        except FileNotFoundError as exc:
-            raise RuntimeError(
-                "npm was not found. Install Node.js and run `npm ci` from the "
-                "repository root before building the wheel."
-            ) from exc
-
-        if not (STATIC_APP / "index.html").is_file():
-            raise RuntimeError(
-                f"The embed build completed but produced no index.html at {STATIC_APP}."
-            )
-        if not STATIC_MCP_APP.is_file():
-            raise RuntimeError(
-                f"The embed build completed but produced no MCP App view at {STATIC_MCP_APP}."
-            )
+            if not asset.is_file():
+                raise RuntimeError(
+                    f"The {command} build completed but produced no staged asset at {asset}."
+                )

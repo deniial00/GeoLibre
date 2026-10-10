@@ -1247,10 +1247,11 @@ and every guard below blocks one of them.
    the one we cannot fix is `@clerk/shared`'s `getEnvVariable.mjs`, which does
    `import.meta.env[name]` with a computed name, so the inlined record lands in
    the `ClerkGate-*.js` chunk.
-3. `python/hatch_build.py` skips the JS build when `static/app` already exists
-   and `GEOLIBRE_FORCE_JS_BUILD` is unset. A local `python -m build` therefore
-   packages whatever an earlier `npm run build:embed` left staged, with no
-   JavaScript running at all.
+3. `python/hatch_build.py` skips each frontend build when its staged output
+   (`static/app/index.html` or `static/mcp/show-map.html`) already exists and
+   `GEOLIBRE_FORCE_JS_BUILD` is unset. A local `python -m build` can therefore
+   package assets left by earlier `npm run build:embed` / `npm run build:mcp-app`
+   runs, with no JavaScript running at all.
 
 ### The rules now
 
