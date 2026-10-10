@@ -190,7 +190,7 @@ class _Session:
 
 
 class PreviewSessions:
-    """Bounded, in-memory preview sessions and exact-origin grant tokens."""
+    """Bounded preview sessions with an idle timeout and exact-origin grants."""
 
     def __init__(self, clock: Any = time.monotonic):
         self._clock = clock
@@ -234,6 +234,7 @@ class PreviewSessions:
             # Refresh consent without invalidating tiles already using the live grant.
             token = grant.token if grant is not None else secrets.token_urlsafe(32)
             session.grants[origin] = _Grant(token, now + GRANT_TTL)
+            session.expires_at = now + SESSION_TTL
             return {"grant": token, "expiresIn": GRANT_TTL}
 
     def authorize(self, preview_id: str, token: str, url: str) -> tuple[str, str, int]:
@@ -258,6 +259,7 @@ class PreviewSessions:
                 raise PreviewNetworkError(
                     "This resource origin is not approved for this map preview."
                 )
+            session.expires_at = now + SESSION_TTL
             return origin, host, port
 
     def close(self, preview_id: str) -> dict[str, bool]:

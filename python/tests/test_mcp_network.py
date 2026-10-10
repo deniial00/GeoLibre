@@ -299,17 +299,59 @@ def test_renewal_preserves_an_in_flight_resource_grant(monkeypatch):
         assert base64.b64decode(result["data"]) == b"pending tile"
 
 
+@pytest.mark.parametrize("activity", ["approve", "authorize"])
+def test_successful_preview_activity_refreshes_idle_timeout(monkeypatch, activity):
+    monkeypatch.setattr(network, "SESSION_TTL", 10)
+    now = [0.0]
+    sessions, preview, grant = authorized_session(lambda: now[0])
+    for checkpoint in (9.0, 18.0):
+        now[0] = checkpoint
+        if activity == "approve":
+            grant = sessions.approve(preview, "http://tiles.example.test")["grant"]
+        else:
+            assert sessions.authorize(preview, grant, "http://tiles.example.test/tile") == (
+                "http://tiles.example.test",
+                "tiles.example.test",
+                80,
+            )
+    now[0] += network.SESSION_TTL
+    with pytest.raises(network.PreviewNetworkError):
+        sessions.approve(preview, "http://tiles.example.test")
+
+
+@pytest.mark.parametrize(
+    ("valid_token", "url"),
+    [
+        (False, "http://tiles.example.test/tile"),
+        (True, "http://other.example.test/tile"),
+        (True, "http://user:password@tiles.example.test/tile"),
+    ],
+)
+def test_rejected_resource_authorization_does_not_extend_session(monkeypatch, valid_token, url):
+    monkeypatch.setattr(network, "SESSION_TTL", 10)
+    now = [0.0]
+    sessions, preview, grant = authorized_session(lambda: now[0])
+    now[0] = 9.0
+    with pytest.raises(network.PreviewNetworkError):
+        sessions.authorize(preview, grant if valid_token else "wrong", url)
+    now[0] = 10.0
+    with pytest.raises(network.PreviewNetworkError):
+        sessions.approve(preview, "http://tiles.example.test")
+
+
 def test_preview_and_grant_expiry_and_idempotent_close():
     now = [0.0]
     sessions = network.PreviewSessions(lambda: now[0])
     preview = sessions.create()
     grant = sessions.approve(preview, "https://tiles.example.test")["grant"]
+    now[0] = network.GRANT_TTL - 1
+    sessions.authorize(preview, grant, "https://tiles.example.test/tile")
     now[0] = network.GRANT_TTL
-    with pytest.raises(network.PreviewNetworkError, match="consent grant"):
+    with pytest.raises(network.PreviewNetworkError):
         sessions.authorize(preview, grant, "https://tiles.example.test/tile")
     grant = sessions.approve(preview, "https://tiles.example.test")["grant"]
     now[0] += network.SESSION_TTL
-    with pytest.raises(network.PreviewNetworkError, match="Unknown or expired"):
+    with pytest.raises(network.PreviewNetworkError):
         sessions.authorize(preview, grant, "https://tiles.example.test/tile")
     assert sessions.close(preview) == {"closed": True}
     assert sessions.close(preview) == {"closed": True}

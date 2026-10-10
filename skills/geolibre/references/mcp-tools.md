@@ -318,9 +318,11 @@ authentication. A client ignoring that metadata can expose the redacted
 project and approval tools to the model. Server-side grant and public-address
 checks still apply.
 
-Consent is not persisted. Preview sessions expire after 30 minutes; origin
-grants last five minutes and renew only for already-approved origins. Closing
-the preview revokes its grants. Private/LAN/loopback/link-local destinations,
+Consent is not persisted. Preview sessions expire after 30 minutes of
+inactivity; successful origin approval and resource authorization refresh the
+idle timeout. Origin grants still last five minutes and renew only for
+already-approved origins. Closing the preview revokes its grants.
+Private/LAN/loopback/link-local destinations,
 known credential-like URL parameters, redirects, compressed responses, and
 resource bodies larger than 4 MiB or slower than 15 seconds are rejected. Use
 the direct destination URL for a redirect. Reopen with `show_map` to change

@@ -194,7 +194,20 @@ def _build_layer(
 
 
 def _reports_its_errors(fn: Callable[..., Any]) -> Callable[..., Any]:
-    """Restate anticipated synchronous and asynchronous tool errors for the caller."""
+    """Expose anticipated validation failures for synchronous and async tools.
+
+    The MCP SDK hides unexpected exception messages from clients. Our builders,
+    workspace checks, and preview checks raise ValueError for anticipated input
+    failures, with explanations the caller needs to correct the request.
+    Restating those as ToolError preserves their messages across the SDK
+    boundary. Other exceptions remain unexpected and keep the SDK's masking.
+
+    Args:
+        fn: The synchronous or asynchronous tool function to wrap.
+
+    Returns:
+        A wrapper preserving the function's metadata and sync/async behavior.
+    """
     if inspect.iscoroutinefunction(fn):
 
         @functools.wraps(fn)

@@ -137,15 +137,16 @@ wildcard-CSP normalization do not govern these resource requests. The host
 must still permit the App's server-tool calls.
 
 Consent is scoped to one preview and is not persisted. Server-side previews
-expire after 30 minutes; origin grants expire after five minutes and are
-renewed only for origins already allowed in that preview. Closing the preview
-revokes its grants. Call `show_map` again to choose differently or reopen an
-expired session.
+expire after 30 minutes of inactivity; successful origin approval and resource
+authorization refresh that idle timeout. Origin grants still expire after five
+minutes and are renewed only for origins already allowed in that preview.
+Closing the preview revokes its grants. Call `show_map` again to choose
+differently or reopen an idle-expired session.
 
 The server allows at most 64 active preview sessions. It refuses new sessions
 at that limit rather than evicting a live preview and revoking its grants.
 Closing a preview frees its slot; abandoned sessions retain theirs until the
-30-minute expiry.
+30-minute idle expiry.
 
 The server checks DNS addresses and connects only to the checked public IPs,
 with HTTPS certificate/hostname verification using system trust plus certifi's
@@ -170,12 +171,14 @@ length is missing or understated. The server requests identity encoding and
 rejects compressed responses. Video sources inside a fetched style are removed
 because MapLibre loads video outside the consent-controlled request path.
 
-After updating a checkout, install its updated MCP extra and rebuild the
-bundled view:
+After updating a checkout, run these commands from the monorepo root.
+Install JavaScript dependencies and rebuild the view before the editable Python
+install, whose build hook can build any missing frontend assets:
 
 ```bash
-python -m pip install -e "python[mcp]"
+npm install
 npm run build:mcp-app
+python -m pip install -e "python[mcp]"
 ```
 
 Use the Python executable configured in your desktop client's MCP server
