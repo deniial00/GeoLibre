@@ -171,7 +171,13 @@ export {
 } from "./feature-selection";
 export { isPlaceholderLayer, placeholderMessage } from "./placeholders";
 export { identifyStyleLayerIds } from "./identify-layer-ids";
-export { createIdentifyPopupElement, type IdentifyPopupOptions } from "./feature-popup";
+export {
+  createIdentifyPopupElement,
+  identifyPopupShellMaxWidth,
+  type IdentifyPopupOptions,
+} from "./feature-popup";
+export { nativeLayerIdPrefix } from "./style-layer-ids";
+export { globeSafeMaxZoom } from "./globe-fit-bounds";
 export { createBlankMapStyle, resolveMapStyle } from "./basemap-style";
 export { classifyLayer, layerKindSupport } from "./layer-kind";
 export { MAPLIBRE_SUPPORTED_LAYER_KINDS } from "./maplibre-layer-kinds";

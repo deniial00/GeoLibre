@@ -8,12 +8,14 @@ import {
   proportionalSizeBounds,
 } from "../apps/geolibre-desktop/src/lib/vector-style-classification";
 import {
-  GRADUATED_CLASSIFICATION_SCHEMES,
-  graduatedSchemeLabelKey,
   MANUAL_CLASSIFICATION_SCHEME,
   normalizeClassificationScheme,
   regeneratingClassificationScheme,
 } from "../apps/geolibre-desktop/src/components/panels/style-panel/classification-helpers";
+import {
+  GRADUATED_CLASSIFICATION_SCHEMES,
+  graduatedSchemeLabelKey,
+} from "../apps/geolibre-desktop/src/lib/classification-schemes";
 
 const tiledLayer = {};
 

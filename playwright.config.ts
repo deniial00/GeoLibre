@@ -131,7 +131,13 @@ export default defineConfig({
     // a deployed site; each has its own config and job.
     {
       name: "features",
-      testIgnore: [...coreMatch, ...coreEnginesMatch, "**/enterprise-sso/**", "**/preview/**"],
+      testIgnore: [
+        ...coreMatch,
+        ...coreEnginesMatch,
+        "**/enterprise-sso/**",
+        "**/preview/**",
+        "**/mcp-app/**",
+      ],
       use: chromium,
     },
   ],

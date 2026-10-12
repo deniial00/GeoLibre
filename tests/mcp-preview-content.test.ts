@@ -3,6 +3,8 @@ import { describe, it } from "node:test";
 import { DEFAULT_LAYER_STYLE, parseProject, type GeoLibreLayer } from "@geolibre/core";
 import {
   previewableLayers,
+  previewLayerUnsupportedReason,
+  type PreviewLayerUnsupportedReason,
   previewOrigins,
   unsupportedContent,
 } from "../apps/geolibre-mcp-app/src/unsupported-content";
@@ -33,6 +35,33 @@ function project(layers: GeoLibreLayer[]) {
 }
 
 describe("MCP preview omitted content", () => {
+  it("reports eligibility independently of visibility with stable precedence", () => {
+    const candidates: [GeoLibreLayer, PreviewLayerUnsupportedReason | undefined][] = [
+      [layer("video"), "video"],
+      [layer("pmtiles"), "pmtiles"],
+      [layer("mbtiles"), "desktop-local"],
+      [layer("geojson", { geojson: undefined }), "missing-geojson"],
+      [layer("xyz", { source: { type: "raster" } }), "missing-tile-url"],
+      [layer("image", { source: { type: "image" } }), "missing-image-source"],
+      [layer("wms"), undefined],
+      [layer("wms", { metadata: { externalNativeLayer: true } }), "plugin-owned"],
+    ];
+    for (const [candidate, reason] of candidates) {
+      assert.equal(previewLayerUnsupportedReason(candidate), reason);
+      assert.equal(previewLayerUnsupportedReason({ ...candidate, visible: false }), reason);
+    }
+    assert.deepEqual(previewableLayers(project([layer("wms", { visible: false })])), []);
+    assert.equal(
+      previewLayerUnsupportedReason(
+        layer("video", {
+          sourcePath: "file:///private/video",
+          metadata: { externalNativeLayer: true },
+        }),
+      ),
+      "video",
+    );
+  });
+
   it("keeps WMS sources while rejecting plugin archives, video, and desktop sources", () => {
     const saved = project([
       layer("wms", { sourcePath: "https://maps.example.com/wms" }),

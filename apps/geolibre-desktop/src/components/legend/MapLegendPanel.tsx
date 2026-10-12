@@ -21,7 +21,7 @@ import {
 } from "@geolibre/core";
 import type { MapEngine } from "@geolibre/map";
 import { colormapColors, warmColormapColors } from "@geolibre/plugins";
-import { cn } from "@geolibre/ui";
+import { cn } from "@geolibre/ui/utils";
 import {
   ArrowDown,
   ArrowUp,
@@ -66,23 +66,27 @@ import {
   toggleLegendItemHidden,
 } from "../../lib/print-legend";
 import { useMapPanelControl } from "../../hooks/useMapPanelControl";
-import { graduatedSchemeLabelKey } from "../panels/style-panel/classification-helpers";
-import { GeometrySwatch, GradientBar, MarkerSwatch } from "./LegendSwatch";
-
-/** Class the recorder's MAP_PANEL_SELECTOR matches to burn the panel into videos. */
-export const LEGEND_PANEL_CLASS = "geolibre-legend-panel";
+import { graduatedSchemeLabelKey } from "../../lib/classification-schemes";
+import {
+  clamp,
+  LEGEND_PANEL_CLASS,
+  LegendEmpty,
+  LegendEntryCaptions,
+  LegendEntryChip,
+  LegendEntryDisplay,
+  LegendEntryGradient,
+  LegendEntryList,
+  LegendPanelFrame,
+  LegendRowSwatch,
+  legendEntryMaxRowSize,
+  legendPanelStyle,
+  MAX_PANEL_WIDTH,
+  MIN_PANEL_HEIGHT,
+  MIN_PANEL_WIDTH,
+  useMapPanelMaxHeight,
+} from "./LegendDisplay";
 
 const POSITIONS: LegendPanelPosition[] = ["top-left", "top-right", "bottom-left", "bottom-right"];
-
-/** Manual-resize clamps (px). Height is further capped to the map's height. */
-const MIN_PANEL_WIDTH = 200;
-const MAX_PANEL_WIDTH = 520;
-const MIN_PANEL_HEIGHT = 140;
-
-function clamp(value: number, min: number, max: number): number {
-  return Math.min(max, Math.max(min, value));
-}
-
 /** Uncontrolled inline text editor committing on blur / Enter. */
 function InlineEdit({
   value,
@@ -149,30 +153,6 @@ function IconButton({
   );
 }
 
-/** The heading chip for an entry: marker, single-symbol swatch, or glyph. */
-function EntryChip({ entry }: { entry: AutoLegendEntry }) {
-  if (entry.headerSwatch?.marker) {
-    return <MarkerSwatch marker={entry.headerSwatch.marker} opacity={entry.opacity} />;
-  }
-  if (entry.headerSwatch) {
-    return (
-      <GeometrySwatch
-        shape={entry.shape}
-        color={entry.headerSwatch.color}
-        opacity={entry.opacity}
-      />
-    );
-  }
-  if (entry.shape === "raster") {
-    return <GeometrySwatch shape="raster" color="" />;
-  }
-  // Classed entries: a muted chip in the first visible class color.
-  const first = entry.rows.find((row) => !row.hidden) ?? entry.rows[0];
-  return (
-    <GeometrySwatch shape={entry.shape} color={first?.color ?? "#94a3b8"} opacity={entry.opacity} />
-  );
-}
-
 export function MapLegendPanel({
   mapControllerRef,
   mapReadyGeneration,
@@ -204,9 +184,6 @@ export function MapLegendPanel({
   // Bumped when an async sprite-colormap sample resolves, so gradients rebuild.
   const [colormapGeneration, setColormapGeneration] = useState(0);
   const panelRef = useRef<HTMLDivElement | null>(null);
-  // Vertical space available inside the map for the auto-fitting panel.
-  const [maxHeight, setMaxHeight] = useState<number | null>(null);
-  const maxHeightRef = useRef<number | null>(null);
   // Live size while a corner handle is being dragged (committed on release).
   const [dragSize, setDragSize] = useState<{
     width: number;
@@ -222,23 +199,7 @@ export function MapLegendPanel({
     `${LEGEND_PANEL_CLASS} maplibregl-ctrl`,
     mapReadyGeneration,
   );
-
-  // Track the map's height so the panel can auto-expand to its content but
-  // never past the map (minus a margin for the corner controls' spacing).
-  useEffect(() => {
-    if (!host) return;
-    const mapElement = host.closest(".maplibregl-map, .mapboxgl-map");
-    if (!mapElement) return;
-    const update = () => {
-      const available = Math.max(MIN_PANEL_HEIGHT, mapElement.clientHeight - 24);
-      maxHeightRef.current = available;
-      setMaxHeight(available);
-    };
-    update();
-    const observer = new ResizeObserver(update);
-    observer.observe(mapElement);
-    return () => observer.disconnect();
-  }, [host]);
+  const { maxHeight, maxHeightRef } = useMapPanelMaxHeight(host);
 
   // Warm named raster colormaps (sprite-sampled, async) referenced by layers so
   // colormapColors resolves synchronously inside the derivation.
@@ -488,40 +449,19 @@ export function MapLegendPanel({
   const width = dragSize?.width ?? legend.panelWidth;
   const height = dragSize?.height ?? legend.panelHeight;
   const panel = (
-    // /95 rather than the geolens /90: bright map content bleeding through the
-    // translucent panel washed the item text out in dark theme. Height is
-    // auto (fit to content) up to the map's height unless the user resized;
-    // a flex column keeps header/footer fixed while the entry list scrolls.
-    <div
-      ref={panelRef}
-      className="relative flex w-64 flex-col overflow-hidden rounded-lg border border-border/50 map-glass text-foreground shadow-lg"
-      style={{
-        maxHeight: maxHeight ?? undefined,
-        ...(width !== undefined ? { width: clamp(width, MIN_PANEL_WIDTH, MAX_PANEL_WIDTH) } : {}),
-        // A collapsed panel hugs its header; the resized height only applies
-        // when expanded.
-        ...(height !== undefined && !panelCollapsed
-          ? { height: clamp(height, MIN_PANEL_HEIGHT, maxHeight ?? height) }
-          : {}),
-      }}
-    >
-      {/* `group` reveals the edit/close buttons on hover or keyboard focus,
-          keeping the header quiet while reading the legend. */}
-      <div
-        className={cn(
-          "group flex shrink-0 items-center gap-1 px-3 py-2",
-          !panelCollapsed && "border-b border-border/50",
-        )}
-      >
-        <IconButton
-          label={panelCollapsed ? t("legendPanel.expandPanel") : t("legendPanel.collapsePanel")}
-          onClick={togglePanelCollapsed}
-        >
-          <ChevronRight
-            className={cn("h-3 w-3 transition-transform", !panelCollapsed && "rotate-90")}
-          />
-        </IconButton>
-        {editing ? (
+    <LegendPanelFrame
+      panelRef={panelRef}
+      style={legendPanelStyle({
+        maxHeight,
+        width,
+        height,
+        collapsed: panelCollapsed,
+      })}
+      collapsed={panelCollapsed}
+      onToggleCollapsed={togglePanelCollapsed}
+      toggleLabel={panelCollapsed ? t("legendPanel.expandPanel") : t("legendPanel.collapsePanel")}
+      title={
+        editing ? (
           <InlineEdit
             value={legend.title}
             ariaLabel={t("legendPanel.renameTitle")}
@@ -530,13 +470,10 @@ export function MapLegendPanel({
           />
         ) : (
           <h2 className="min-w-0 flex-1 truncate text-sm font-semibold">{legend.title}</h2>
-        )}
-        <span
-          className={cn(
-            "flex shrink-0 items-center gap-1 opacity-0 transition-opacity group-focus-within:opacity-100 group-hover:opacity-100",
-            editing && "opacity-100",
-          )}
-        >
+        )
+      }
+      actions={
+        <span className="flex shrink-0 items-center gap-1 opacity-0 transition-opacity group-focus-within:opacity-100 group-hover:opacity-100">
           {!panelCollapsed && (
             <IconButton
               label={editing ? t("legendPanel.done") : t("legendPanel.edit")}
@@ -552,17 +489,12 @@ export function MapLegendPanel({
             <X className="h-3.5 w-3.5" />
           </IconButton>
         </span>
-      </div>
-
-      {panelCollapsed ? null : displayed.length === 0 ? (
-        <p className="px-3 py-4 text-xs text-muted-foreground">{t("legendPanel.empty")}</p>
+      }
+    >
+      {displayed.length === 0 ? (
+        <LegendEmpty>{t("legendPanel.empty")}</LegendEmpty>
       ) : (
-        <ul
-          // Opt the entries (not the header or edit controls) into View →
-          // Color vision preview, so swatches match the filtered map.
-          data-cvd-filter=""
-          className="min-h-0 flex-1 divide-y divide-border/50 overflow-y-auto"
-        >
+        <LegendEntryList>
           {displayed.map((entry) => (
             <LegendEntryRow
               key={entry.id}
@@ -578,7 +510,7 @@ export function MapLegendPanel({
               onUpdateCustom={(updater) => updateCustom(entry.id, updater)}
             />
           ))}
-        </ul>
+        </LegendEntryList>
       )}
 
       {editing && (
@@ -707,7 +639,7 @@ export function MapLegendPanel({
           </div>
         </>
       )}
-    </div>
+    </LegendPanelFrame>
   );
 
   return createPortal(panel, host);
@@ -742,10 +674,7 @@ function LegendEntryRow({
   // The entry's largest proportional symbol, so every row scales by one factor
   // (see GeometrySwatch). Taken over all rows, not just the visible ones, so
   // hiding a class does not resize the ones left behind.
-  const maxRowSize = entry.rows.reduce(
-    (largest, row) => (row.size !== undefined && row.size > largest ? row.size : largest),
-    0,
-  );
+  const maxRowSize = legendEntryMaxRowSize(entry);
   const editingCustom = editing && entry.custom && customEntry;
   const schemeLabelKey = entry.classification
     ? graduatedSchemeLabelKey(entry.classification.scheme)
@@ -757,6 +686,16 @@ function LegendEntryRow({
           count: entry.classification.classCount,
         })
       : null;
+  if (!editing) {
+    return (
+      <LegendEntryDisplay
+        entry={entry}
+        classificationLabel={classificationLabel}
+        lowLabel={t("legendPanel.low")}
+        highLabel={t("legendPanel.high")}
+      />
+    );
+  }
   const hasBody = Boolean(
     entry.fieldLabel ||
     classificationLabel ||
@@ -782,7 +721,7 @@ function LegendEntryRow({
             />
           </IconButton>
         )}
-        <EntryChip entry={entry} />
+        <LegendEntryChip entry={entry} />
         {editing ? (
           <InlineEdit
             value={entry.name}
@@ -852,21 +791,8 @@ function LegendEntryRow({
         )}
       </div>
 
-      {!bodyCollapsed && entry.fieldLabel && (
-        <div className="ms-6 mt-1 truncate text-[10px] font-medium text-muted-foreground">
-          {entry.fieldLabel}
-        </div>
-      )}
-
-      {!bodyCollapsed && classificationLabel && (
-        <div
-          className={cn(
-            "ms-6 truncate text-[10px] text-muted-foreground",
-            !entry.fieldLabel && "mt-1",
-          )}
-        >
-          {classificationLabel}
-        </div>
+      {!bodyCollapsed && (
+        <LegendEntryCaptions entry={entry} classificationLabel={classificationLabel} />
       )}
 
       {bodyCollapsed ? null : editingCustom ? (
@@ -952,15 +878,12 @@ function LegendEntryRow({
         )
       )}
 
-      {!bodyCollapsed && entry.gradient && !editingCustom && (
-        <div className="ms-6 mt-1.5">
-          <GradientBar
-            colors={entry.gradient.colors}
-            minLabel={entry.gradient.minLabel ?? t("legendPanel.low")}
-            maxLabel={entry.gradient.maxLabel ?? t("legendPanel.high")}
-            opacity={entry.opacity}
-          />
-        </div>
+      {!bodyCollapsed && !editingCustom && (
+        <LegendEntryGradient
+          entry={entry}
+          lowLabel={t("legendPanel.low")}
+          highLabel={t("legendPanel.high")}
+        />
       )}
     </li>
   );
@@ -992,22 +915,7 @@ function LegendClassRow({
         </div>
       )}
       <div className="flex items-center gap-1.5">
-        {row.marker ? (
-          <MarkerSwatch
-            marker={row.marker}
-            size={row.size}
-            maxSize={maxRowSize > 0 ? maxRowSize : undefined}
-            opacity={entry.opacity}
-          />
-        ) : (
-          <GeometrySwatch
-            shape={row.shape}
-            color={row.color}
-            size={row.size}
-            maxSize={maxRowSize > 0 ? maxRowSize : undefined}
-            opacity={entry.opacity}
-          />
-        )}
+        <LegendRowSwatch row={row} entry={entry} maxRowSize={maxRowSize} />
         {editing ? (
           <>
             <InlineEdit

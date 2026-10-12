@@ -27,6 +27,9 @@ export interface IdentifyPopupOptions {
   feature?: Feature | null;
   /** Map zoom for `["zoom"]` in the title/body expressions. */
   zoom?: number;
+  /** Text-only previews omit image loading and link navigation. */
+  contentPolicy?: "default" | "text-only";
+  noAttributesLabel?: string;
 }
 
 /**
@@ -106,11 +109,18 @@ function openPopupImageViewer(source: string, alt: string): void {
 /**
  * Draw one resolved value into its cell. `"auto"` keeps the historical
  * behavior (sanitized KML description markup, inline base64 images as
- * thumbnails, everything else as text); the explicit kinds render what the
- * author asked for, and fall back to text when the value cannot support it
- * (a `link` whose value is not an http(s) URL, an `image` that is not one).
+ * thumbnails, everything else as text); text-only previews preserve safe
+ * structure while rendering image/link values as text without navigation.
  */
-function renderPopupValue(cell: HTMLElement, row: PopupRow): void {
+function renderPopupValue(
+  cell: HTMLElement,
+  row: PopupRow,
+  contentPolicy: IdentifyPopupOptions["contentPolicy"],
+): void {
+  if (contentPolicy === "text-only" && row.kind !== "auto") {
+    cell.textContent = row.text;
+    return;
+  }
   if (row.kind === "image") {
     if (isSafePopupUrl(row.value, true)) {
       const source = row.value.trim();
@@ -179,14 +189,14 @@ function renderPopupValue(cell: HTMLElement, row: PopupRow): void {
       typeof row.value === "string" &&
       /<(?:a|b|br|div|em|i|p|span|strong|table|tbody|td|th|thead|tr)\b/i.test(row.value)
     ) {
-      appendSanitizedKmlDescription(cell, row.value);
+      appendSanitizedKmlDescription(cell, row.value, contentPolicy);
       return;
     }
     // Render inline image data URLs (e.g. a geotagged-photo or field-collection
     // thumbnail) as an actual thumbnail rather than a multi-kilobyte string.
     // Match base64 raster images only, excluding SVG (which can carry scripts)
     // so an untrusted GeoJSON value can't smuggle one in.
-    if (isInlineImageValue(row.value)) {
+    if (contentPolicy !== "text-only" && isInlineImageValue(row.value)) {
       const image = document.createElement("img");
       image.src = row.value;
       image.alt = row.field;
@@ -288,7 +298,7 @@ export function createIdentifyPopupElement(
   return root;
 }
 
-/** Build the attribute rows shared by per-layer and all-layer Identify popups. */
+/** Build shared attribute rows using semantic definition-list elements. */
 export function createIdentifyPopupRows(
   properties: Record<string, unknown>,
   featureId?: string | number,
@@ -318,18 +328,20 @@ export function createIdentifyPopupRows(
   }
 
   const appendRow = (row: PopupRow) => {
-    const rowElement = document.createElement("div");
-    rowElement.className = "grid grid-cols-[minmax(5rem,0.45fr)_1fr] gap-2 border-t py-1";
+    const rowElement = document.createElement("dl");
+    rowElement.className =
+      "geolibre-identify-popup-row grid grid-cols-[minmax(5rem,0.45fr)_1fr] gap-2 border-t py-1";
     if (row.kind === "image") rowElement.classList.add("geolibre-identify-popup-image-row");
 
-    const keyCell = document.createElement("div");
-    keyCell.className = "break-words font-medium text-muted-foreground";
+    const keyCell = document.createElement("dt");
+    keyCell.className =
+      "geolibre-identify-popup-label break-words font-medium text-muted-foreground";
     keyCell.textContent = row.label;
 
-    const valueCell = document.createElement("div");
-    valueCell.className = "break-words text-foreground";
+    const valueCell = document.createElement("dd");
+    valueCell.className = "geolibre-identify-popup-value break-words text-foreground";
     if (row.kind === "image") valueCell.classList.add("geolibre-popup-image-cell");
-    renderPopupValue(valueCell, row);
+    renderPopupValue(valueCell, row, options.contentPolicy);
 
     rowElement.append(keyCell, valueCell);
     rows.appendChild(rowElement);
@@ -358,7 +370,7 @@ export function createIdentifyPopupRows(
   if (resolved.length === 0 && !showFeatureId) {
     const empty = document.createElement("div");
     empty.className = "text-muted-foreground";
-    empty.textContent = "No attributes";
+    empty.textContent = options.noAttributesLabel ?? "No attributes";
     rows.appendChild(empty);
   } else {
     for (const row of resolved) appendRow(row);
@@ -450,7 +462,11 @@ const KML_DESCRIPTION_TAGS = new Set([
 ]);
 
 /** Render useful KML description markup while dropping scripts and attributes. */
-function appendSanitizedKmlDescription(target: HTMLElement, html: string): void {
+function appendSanitizedKmlDescription(
+  target: HTMLElement,
+  html: string,
+  contentPolicy: IdentifyPopupOptions["contentPolicy"],
+): void {
   const parsed = new DOMParser().parseFromString(html, "text/html");
   const copy = (node: Node, parent: Node) => {
     if (node.nodeType === Node.TEXT_NODE) {
@@ -465,7 +481,7 @@ function appendSanitizedKmlDescription(target: HTMLElement, html: string): void 
       return;
     }
     const element = document.createElement(tag);
-    if (tag === "a") {
+    if (tag === "a" && contentPolicy !== "text-only") {
       const href = node.getAttribute("href")?.trim();
       if (href && /^(https?:|mailto:)/i.test(href)) {
         element.setAttribute("href", href);

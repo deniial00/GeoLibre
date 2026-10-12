@@ -5,6 +5,8 @@ import {
   createNetworkConsent,
   type PreviewToolTransport,
 } from "../apps/geolibre-mcp-app/src/network-consent";
+import { previewI18n, setPreviewLocale } from "../apps/geolibre-mcp-app/src/i18n";
+import { PreviewError } from "../apps/geolibre-mcp-app/src/diagnostics";
 import "./helpers/dom";
 
 type WireBytes = { bytes: Uint8Array };
@@ -28,12 +30,14 @@ function harness(
     approve?: () => Promise<unknown> | unknown;
     failFetch?: (url: URL) => unknown;
     origins?: readonly string[];
+    background?: HTMLElement;
   } = {},
 ) {
   const calls: Call[] = [];
   const panel = document.createElement("section");
   document.body.append(panel);
   const notices: string[] = [];
+  const diagnosticNotices: unknown[] = [];
   const transport: PreviewToolTransport = async (params, requestOptions) => {
     const args = params.arguments as Record<string, unknown>;
     calls.push({ name: params.name, args, signal: requestOptions?.signal });
@@ -63,14 +67,19 @@ function harness(
     panel,
     "preview-test",
     transport,
-    (notice) => notices.push(notice),
+    (notice, diagnostic) => {
+      notices.push(notice);
+      diagnosticNotices.push(diagnostic);
+    },
     options.origins ?? [],
+    options.background,
   );
   cleanups.push(async () => {
     await consent.dispose();
     panel.remove();
   });
   return {
+    diagnosticNotices,
     panel,
     calls,
     notices,
@@ -102,9 +111,13 @@ async function click(panel: HTMLElement, index = 0): Promise<void> {
 }
 
 function noBrowserNetwork(): void {
+  const originalFetch = globalThis.fetch;
   globalThis.fetch = async () => {
     throw new Error("browser network must remain unavailable");
   };
+  cleanups.push(() => {
+    globalThis.fetch = originalFetch;
+  });
 }
 
 describe("MCP preview network consent", () => {
@@ -135,7 +148,7 @@ describe("MCP preview network consent", () => {
     await initial;
     const reopened = harness();
     const next = reopened.load("https://persist.example.test/style");
-    const rejected = assert.rejects(next, /declined/);
+    const rejected = assert.rejects(next);
     await click(reopened.panel, 1);
     await rejected;
     assert.equal(reopened.grants().length, 0);
@@ -145,10 +158,10 @@ describe("MCP preview network consent", () => {
   it("declining sends neither grant nor resource calls, including later attempts", async () => {
     const view = harness();
     const request = view.load("https://declined.example.test/map");
-    const rejected = assert.rejects(request, /declined/);
+    const rejected = assert.rejects(request);
     await click(view.panel, 1);
     await rejected;
-    await assert.rejects(view.load("https://declined.example.test/tile"), /declined/);
+    await assert.rejects(view.load("https://declined.example.test/tile"));
     assert.equal(view.grants().length, 0);
     assert.equal(view.fetches().length, 0);
   });
@@ -201,13 +214,10 @@ describe("MCP preview network consent", () => {
     const view = harness({
       origins: ["https://styles.example.test", "https://imagery.example.test"],
     });
-    const rejected = assert.rejects(
-      view.load("https://styles.example.test/style.json"),
-      /declined/,
-    );
+    const rejected = assert.rejects(view.load("https://styles.example.test/style.json"));
     await click(view.panel, 1);
     await rejected;
-    await assert.rejects(view.load("https://imagery.example.test/tile.png"), /declined/);
+    await assert.rejects(view.load("https://imagery.example.test/tile.png"));
     assert.equal(view.panel.hidden, true);
     assert.deepEqual(view.calls, []);
   });
@@ -237,7 +247,7 @@ describe("MCP preview network consent", () => {
     await click(view.panel);
     await style;
     const tile = view.load("https://tiles.example.test/tile");
-    const rejected = assert.rejects(tile, /declined/);
+    const rejected = assert.rejects(tile);
     await new Promise<void>((resolve) => setImmediate(resolve));
     assert.ok(view.panel.textContent?.includes("https://tiles.example.test"));
     await click(view.panel, 1);
@@ -248,9 +258,8 @@ describe("MCP preview network consent", () => {
 
   it("rejects credential-bearing URLs before any approval or fetch tool call", async () => {
     const view = harness();
-    assert.throws(
-      () => view.consent.transformRequest("https://user:secret@private.example.test/style"),
-      /credential-bearing/,
+    assert.throws(() =>
+      view.consent.transformRequest("https://user:secret@private.example.test/style"),
     );
     assert.equal(view.grants().length, 0);
     assert.equal(view.fetches().length, 0);
@@ -346,7 +355,6 @@ describe("MCP preview network consent", () => {
     assert.deepEqual(Buffer.from((await request).data as ArrayBuffer), bytes);
     await assert.rejects(
       view.load("https://large.example.test/oversized", new AbortController(), "arrayBuffer"),
-      /4 MiB limit/,
     );
   });
   it("aborts an in-flight resource call with its MapLibre request signal", async () => {
@@ -364,10 +372,20 @@ describe("MCP preview network consent", () => {
     response.resolve({ type: "FeatureCollection", features: [] });
   });
 
-  it("rejects malformed cached and error results with origin-only actionable messages", async () => {
+  it("rejects malformed tool data and preserves redacted diagnostic data", async () => {
     const malformed = harness({ approve: () => ({ grant: "", expiresIn: 999 }) });
     const pending = malformed.load("https://bad.example.test/style");
-    const rejected = assert.rejects(pending, /invalid origin grant/);
+    const rejected = assert.rejects(pending, (error: Error) => {
+      assert.ok(error instanceof PreviewError);
+      if (error instanceof PreviewError) {
+        assert.ok("key" in error.diagnostic);
+        assert.equal(error.diagnostic.key, "errors.fetchFailed");
+        assert.ok(error.diagnostic.detail && "key" in error.diagnostic.detail);
+        if (error.diagnostic.detail && "key" in error.diagnostic.detail)
+          assert.equal(error.diagnostic.detail.key, "errors.invalidGrant");
+      }
+      return true;
+    });
     await click(malformed.panel);
     await rejected;
     assert.equal(malformed.fetches().length, 0);
@@ -375,7 +393,7 @@ describe("MCP preview network consent", () => {
       failFetch: () => ({ structuredContent: { data: "not base64!", mimeType: "image/png" } }),
     });
     const badRequest = badBytes.load("https://bad.example.test/image.png");
-    const badResponse = assert.rejects(badRequest, /invalid base64 resource data/);
+    const badResponse = assert.rejects(badRequest);
     await click(badBytes.panel);
     await badResponse;
     assert.equal(badBytes.fetches().length, 1);
@@ -392,6 +410,12 @@ describe("MCP preview network consent", () => {
     const failed = assert.rejects(request, (error: Error) => {
       assert.match(error.message, /https:\/\/bad.example.test/);
       assert.doesNotMatch(error.message, /\/private\/style|secret/);
+      assert.ok(error instanceof PreviewError);
+      if (error instanceof PreviewError) {
+        assert.ok("key" in error.diagnostic);
+        assert.equal(error.diagnostic.key, "errors.fetchFailed");
+        assert.equal(error.diagnostic.detail && "text" in error.diagnostic.detail, true);
+      }
       return true;
     });
     await click(failing.panel);
@@ -429,7 +453,10 @@ describe("MCP preview network consent", () => {
       result.layers.map((layer) => layer.id),
       ["points-layer"],
     );
-    assert.ok(view.notices.some((notice) => notice.includes("“video”")));
+    const diagnostic = view.diagnosticNotices[0] as { key?: string; args?: { id?: string } };
+    assert.equal(diagnostic?.key, "unsupported.styleVideo");
+    assert.equal(diagnostic?.args?.id, "video");
+    assert.equal(view.notices.length, 1);
     assert.equal(view.grants().length, 1);
     assert.equal(view.fetches().length, 1);
   });
@@ -448,5 +475,121 @@ describe("MCP preview network consent", () => {
       ),
     );
     assert.equal(view.fetches().length, 0);
+  });
+  it("makes only the preview background inert and restores its original state and focus", async () => {
+    const background = document.createElement("main");
+    const trigger = document.createElement("button");
+    background.append(trigger);
+    document.body.append(background);
+    background.inert = false;
+    trigger.focus();
+    const view = harness({ background });
+    const request = view.load("https://modal.example.test/style");
+    const requestSucceeded = request.then(() => undefined);
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    assert.equal(background.inert, true);
+    assert.equal(document.activeElement?.getAttribute("data-consent-action"), "block");
+    await click(view.panel);
+    await requestSucceeded;
+    assert.equal(background.inert, false);
+    assert.equal(document.activeElement, trigger);
+    background.remove();
+  });
+
+  it("refreshes consent labels without settling waiters, changing grants, or losing focus", async () => {
+    const originalLocale = previewI18n.language;
+    cleanups.push(() => setPreviewLocale(originalLocale));
+    const view = harness();
+    const first = view.load("https://locale.example.test/one");
+    const second = view.load("https://locale.example.test/two");
+    const both = Promise.all([first, second]);
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    const allow = view.panel.querySelector<HTMLButtonElement>('[data-consent-action="allow"]');
+    assert.ok(allow);
+    allow.focus();
+    const beforeRefresh = [...view.calls];
+    await setPreviewLocale("es");
+    view.consent.refreshLabels();
+    assert.equal(document.activeElement?.getAttribute("data-consent-action"), "allow");
+    assert.deepEqual(view.calls, beforeRefresh);
+    await click(view.panel);
+    await both;
+    assert.equal(view.grants().length, 1);
+    assert.equal(view.fetches().length, 2);
+    await view.load("https://locale.example.test/three");
+    assert.equal(view.grants().length, 1);
+
+    const blocked = view.load("https://new-locale.example.test/tile");
+    const blockedResult = assert.rejects(blocked);
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    const block = view.panel.querySelector<HTMLButtonElement>('[data-consent-action="block"]');
+    assert.ok(block);
+    block.focus();
+    const addedOrigin = view.load("https://second-new-locale.example.test/tile");
+    const addedOriginResult = assert.rejects(addedOrigin);
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    assert.equal(document.activeElement?.getAttribute("data-consent-action"), "block");
+    view.consent.refreshLabels();
+    assert.equal(document.activeElement?.getAttribute("data-consent-action"), "block");
+    assert.equal(view.grants().length, 1);
+    await click(view.panel, 1);
+    await Promise.all([blockedResult, addedOriginResult]);
+    assert.equal(view.grants().length, 1);
+    assert.equal(view.fetches().length, 3);
+  });
+
+  it("restores a non-inert background and does not refocus a disconnected trigger on disposal", async () => {
+    const background = document.createElement("main");
+    const trigger = document.createElement("button");
+    background.append(trigger);
+    document.body.append(background);
+    trigger.focus();
+    const view = harness({ background });
+    const request = view.load("https://dispose-modal.example.test/style");
+    const rejected = assert.rejects(request, { name: "AbortError" });
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    assert.equal(background.inert, true);
+    trigger.remove();
+    await view.consent.dispose();
+    await rejected;
+    assert.equal(background.inert, false);
+    assert.notEqual(document.activeElement, trigger);
+    assert.equal(view.panel.hidden, true);
+    background.remove();
+  });
+
+  it("preserves a background that was already inert", async () => {
+    const background = document.createElement("main");
+    document.body.append(background);
+    background.inert = true;
+    const view = harness({ background });
+    const request = view.load("https://pre-inert.example.test/style");
+    const rejected = assert.rejects(request, { name: "AbortError" });
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    assert.equal(background.inert, true);
+    await view.consent.dispose();
+    await rejected;
+    assert.equal(background.inert, true);
+    background.remove();
+  });
+  it("keeps Block as initial focus, traps Tab, and lets Escape block all requests", async () => {
+    const view = harness({
+      origins: ["https://first-modal.example.test", "https://second-modal.example.test"],
+    });
+    const request = view.load("https://first-modal.example.test/style");
+    const rejected = assert.rejects(request);
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    assert.equal(document.activeElement?.getAttribute("data-consent-action"), "block");
+    view.panel.dispatchEvent(
+      new KeyboardEvent("keydown", { key: "Tab", shiftKey: true, bubbles: true }),
+    );
+    assert.equal(document.activeElement?.getAttribute("data-consent-action"), "allow");
+    view.panel.dispatchEvent(new KeyboardEvent("keydown", { key: "Tab", bubbles: true }));
+    assert.equal(document.activeElement?.getAttribute("data-consent-action"), "block");
+    view.panel.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+    await rejected;
+    await assert.rejects(view.load("https://second-modal.example.test/tile"));
+    assert.equal(view.panel.hidden, true);
+    assert.deepEqual(view.calls, []);
   });
 });

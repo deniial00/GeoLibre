@@ -7,6 +7,9 @@
   "types": "./src/index.ts",
   "exports": {
     ".": "./src/index.ts",
+    "./button-variants": "./src/components/button-variants.ts",
+    "./utils": "./src/lib/utils.ts",
+    "./map-glass.css": "./src/map-glass.css",
     "./globals.css": "./src/globals.css",
     "./theme.css": "./src/theme.css"
   },

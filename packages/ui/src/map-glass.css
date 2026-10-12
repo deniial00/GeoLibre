@@ -1,0 +1,38 @@
+/* Map-floating chrome, a.k.a. "instrument glass".
+
+   The distinction this encodes: chrome docked BESIDE the map (top toolbar,
+   status bar, side panels) is fully opaque, while panels that hover OVER the
+   map are translucent and blurred so the data reads through them. Translucency
+   is the signal for "this floats above your map" — which is why it must not
+   spread to docked chrome or to dialogs, which sit on a dimmed overlay rather
+   than on the map.
+
+   Codified here because the recipe was already in use across 11 components
+   with drifted values — bg-background/90 vs /95, and backdrop-blur-sm vs -md vs
+   bare backdrop-blur — so tuning the look meant finding every copy. Components
+   keep their own radius, border, shadow and padding; this owns only the surface
+   itself.
+
+   Must be an `@utility`, i.e. inside Tailwind's utilities layer — NOT an
+   unlayered plain class. Unlayered CSS beats every layered declaration for the
+   same property, and cascade-layer precedence is resolved *before* specificity,
+   so an unlayered `.map-glass { background-color }` also silently beats
+   `hover:bg-accent`. That killed the hover fill on MapGrid's pane buttons and
+   the CollaborationStatusBadge toggle — verified dead, not theoretical. Inside
+   the layer, `.hover\\:bg-accent:hover` (0,2,0) outranks `.map-glass` (0,1,0)
+   and hover works again.
+
+   The @supports fallback is nested so it stays in the layer too; hoisting it
+   out would reintroduce exactly the same bug for browsers without
+   backdrop-filter. Without the blur, 85% over live imagery is unreadable.
+
+   The saturate() boost keeps basemap imagery from going muddy under the blur. */
+@utility map-glass {
+  background-color: hsl(var(--background) / 0.85);
+  -webkit-backdrop-filter: blur(12px) saturate(140%);
+  backdrop-filter: blur(12px) saturate(140%);
+
+  @supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+    background-color: hsl(var(--background) / 0.97);
+  }
+}

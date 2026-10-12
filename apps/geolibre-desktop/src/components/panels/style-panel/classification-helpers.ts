@@ -7,6 +7,7 @@ import {
   type VectorStyleStop,
 } from "@geolibre/core";
 import type { ParseKeys, TFunction } from "i18next";
+import { GRADUATED_CLASSIFICATION_SCHEMES } from "../../../lib/classification-schemes";
 import {
   chooseGraduatedProperty,
   clampClassCount,
@@ -23,24 +24,6 @@ const VECTOR_STYLE_COLORS = ["#2563eb", "#16a34a", "#f59e0b", "#dc2626", "#7c3ae
 
 export const VECTOR_STYLE_CLASS_COUNTS = Array.from({ length: 12 }, (_, index) => index + 1);
 
-export const GRADUATED_CLASSIFICATION_SCHEMES: ReadonlyArray<{
-  value: string;
-  labelKey: ParseKeys;
-}> = [
-  { value: "equal-interval", labelKey: "style.symbology.schemeEqualInterval" },
-  { value: "quantile", labelKey: "style.symbology.schemeQuantile" },
-  { value: "natural-breaks", labelKey: "style.symbology.schemeNaturalBreaks" },
-  { value: "standard-deviation", labelKey: "style.symbology.schemeStandardDeviation" },
-  { value: "geometric-interval", labelKey: "style.symbology.schemeGeometricInterval" },
-  { value: "manual", labelKey: "style.symbology.schemeManual" },
-];
-
-/**
- * The graduated scheme recorded once the user edits, adds or removes a class
- * break by hand, so the legend never names a method that did not produce the
- * breaks on the map. It computes no breaks itself: regenerating from it (a new
- * class count, ramp or attribute) classifies by equal interval.
- */
 export const MANUAL_CLASSIFICATION_SCHEME = "manual";
 
 /**
@@ -49,16 +32,6 @@ export const MANUAL_CLASSIFICATION_SCHEME = "manual";
  */
 export function regeneratingClassificationScheme(scheme: string): string {
   return scheme === MANUAL_CLASSIFICATION_SCHEME ? "equal-interval" : scheme;
-}
-
-/**
- * The i18n label key of a graduated layer's classification scheme, or null
- * when the scheme is not one the Style panel offers.
- */
-export function graduatedSchemeLabelKey(scheme: string): ParseKeys | null {
-  return (
-    GRADUATED_CLASSIFICATION_SCHEMES.find((option) => option.value === scheme)?.labelKey ?? null
-  );
 }
 
 export const CATEGORIZED_CLASSIFICATION_SCHEMES: ReadonlyArray<{

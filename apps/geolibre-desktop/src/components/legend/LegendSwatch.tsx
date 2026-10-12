@@ -6,6 +6,7 @@
  * Adapted from the GeoLens viewer legend design (Apache-2.0) to GeoLibre's
  * layer model.
  */
+import * as React from "react";
 import { drawMarkerPath, resolveSvgSource, type MarkerShape } from "@geolibre/core";
 import { Image as RasterIcon } from "lucide-react";
 import { useEffect, useRef } from "react";

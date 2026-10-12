@@ -3,11 +3,24 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>GeoLibre map preview</title>
+    <title></title>
   </head>
   <body>
-    <div id="map"></div>
-    <div id="status" role="status" hidden></div>
+    <main id="preview">
+      <div id="toolbar">
+        <span id="read-only"></span>
+        <button id="identify" type="button" aria-pressed="false" disabled></button>
+        <button id="reload" type="button" aria-describedby="reload-help" disabled><span id="reload-label"></span></button>
+        <span id="reload-help"></span>
+      </div>
+      <div id="workspace">
+        <div id="map" role="region"></div>
+      </div>
+      <footer id="diagnostics">
+        <div id="status" role="status" hidden></div>
+        <ul id="diagnostics-list"></ul>
+      </footer>
+    </main>
     <section id="network-consent" role="dialog" aria-modal="true" aria-labelledby="consent-title" aria-describedby="consent-description consent-privacy consent-scope" hidden></section>
     <script type="module" src="./src/main.ts"></script>
   </body>

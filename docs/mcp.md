@@ -79,8 +79,27 @@ into a virtualenv), give the interpreter instead:
 Call `show_map(path="city.geolibre.json")` after creating or changing a project.
 Clients supporting [MCP Apps](https://apps.extensions.modelcontextprotocol.io/)
 render an interactive, **read-only** map inline: saved camera, GeoLibre layer
-styling, pan/zoom, and click-to-identify. Other clients receive a text/structured
-summary without inlined feature data. Neither preview tool writes the project.
+styling, pan/zoom, layer visibility, Zoom to layer, and click-targeted Identify.
+Activate Identify to use a crosshair cursor, then click a feature; activation
+does not inspect the map center. Other clients receive a text/structured summary without
+inlined feature data. Preview changes are not saved, and no inspection action
+writes the project or updates the model context.
+
+The on-map layer-control button starts collapsed on every host width. It opens
+GeoLibre's normal layer control, with project rows topmost first and Show All /
+Hide All limited to supported layers. Visibility is local to the preview;
+it can override a hidden saved group while retaining that group's opacity.
+Zoom does not show a hidden layer or request an extent. It uses saved geometry,
+image corners, advertised bounds, or already-loaded TileJSON bounds; otherwise
+the action is disabled with an explanation.
+
+Saved root legends and structured Components legends/colorbars appear as native
+on-map controls without activating plugins. The root legend uses the shared
+desktop presentation and honors its saved map position, size, and collapsed
+state. Components control placement, labels, units, ranges, and orientations are
+preserved. Hidden and unsupported layer entries remain absent from the root
+legend, while standalone sections remain visible. Unknown color ramps get an
+unavailable notice, never a replacement palette.
 
 The App uses the workspace `@geolibre/core` and `@geolibre/map/headless`
 renderer, not a hosted-viewer iframe. It draws MapLibre-native layers (inline
@@ -88,16 +107,46 @@ GeoJSON, raster/WMS/WMTS/XYZ tiles, vector tiles, and image overlays). Everythin
 else in the project is named in a status notice instead of silently missing:
 plugin-rendered layers (point clouds, 3D Tiles, COG, ArcGIS, PMTiles, DuckDB,
 deck.gl), desktop-local sources (MBTiles, `file:` paths), video overlays,
-Z-elevated GeoJSON, active plugins, legends, map controls, additional map views,
-and a non-MapLibre primary renderer. Mapbox basemaps are blank because
-credentials are stripped. Configured popup image fields show their URL as text,
-because the shared popup renderer would load the image outside the approval
-gate below.
+Z-elevated GeoJSON, active plugins, map controls, additional map views, and a
+non-MapLibre primary renderer. Mapbox basemaps are blank because credentials are
+stripped. Custom SVG markers, SVG fill patterns, and saved legend icons are
+omitted because their loaders bypass the approval gate below; ordinary safe
+geometry still renders. Identify keeps configured labels, formatting, and hidden
+fields in a property panel sized to the map viewport. Its content scrolls, and
+the Close button stays above map navigation controls. Remote images/links appear
+as non-navigable text, and sanitized KML descriptions cannot navigate or load
+images.
 
-The status bar shows loading progress, and failures that need action: a failed
-project load, a basemap style that could not load (the preview falls back to a
-blank background and still draws the project's layers), and per-source tile
-errors, counted rather than repeated. Rendered content stays visible.
+The diagnostics footer shows loading progress and failures that need action:
+a failed project load, a basemap style that could not load (the preview falls
+back to a blank background and still draws the project's layers), and counted
+per-source tile errors. Rendered content stays visible, and failures remain until
+**Reload preview**. Reload closes the old session, retrieves the saved project
+again, resets camera and visibility, clears old diagnostics, and asks again
+before external connections. It is also the retry path for a failed layer or
+expired session.
+
+The root legend panel and Components controls occupy their saved map positions;
+there is no separate inspection rail, so the map uses the full workspace width.
+The root legend can be collapsed locally without changing the saved project.
+The layer control retains its native checkboxes, static type symbols, and
+per-row Zoom buttons; no editing, opacity, ordering, removal, or
+saved-configuration actions are available. Toolbar buttons reuse the shared
+`@geolibre/ui` variants, and the React legend reuses the desktop presentation
+without initializing the desktop store. Desktop targets are compact, with 44px
+visibility/Zoom targets for coarse pointers; MapLibre retains its normal desktop
+navigation controls.
+Icon actions keep their full accessible labels and tooltips. Reload's reset
+explanation remains available through its tooltip and accessible description
+instead of occupying another toolbar line.
+
+Controls support keyboard use; pending network consent makes the preview
+background inert. Host locale/theme/size changes preserve local interaction
+state. Closing consent restores focus to its previous control, or to the
+inspector toggle if a resize collapsed that control's panel. Preview copy is
+bundled from the English catalog; other recognized host locales use English
+text fallback with locale-aware numerical formatting and text direction,
+without downloading language packs.
 
 The host must support App-to-server tool calls (`serverTools`): the preview
 loads the credential-redacted project through app-only `get_map_preview`, then
@@ -135,13 +184,15 @@ back through app-only MCP tool calls. The bundled view declares no external
 CSP origins, so browser CORS, mixed-content restrictions, and desktop hosts'
 wildcard-CSP normalization do not govern these resource requests. The host
 must still permit the App's server-tool calls.
+Schema validation uses Zod's non-eval mode, so strict script policies do not
+need `unsafe-eval`.
 
 Consent is scoped to one preview and is not persisted. Server-side previews
 expire after 30 minutes of inactivity; successful origin approval and resource
 authorization refresh that idle timeout. Origin grants still expire after five
 minutes and are renewed only for origins already allowed in that preview.
-Closing the preview revokes its grants. Call `show_map` again to choose
-differently or reopen an idle-expired session.
+Closing the preview revokes its grants. Use **Reload preview** to choose
+differently or reopen an idle-expired session; a fresh `show_map` call also works.
 
 The server allows at most 64 active preview sessions. It refuses new sessions
 at that limit rather than evicting a live preview and revoking its grants.
@@ -200,6 +251,33 @@ for credentials before packaging.
 
 The consent panel uses a named vanilla Lucide icon rendered directly into SVG
 DOM nodes, keeping React's server renderer out of the single-file preview.
+
+Run `npm run test:e2e:mcp-app` to build and exercise the staged resource in an
+official MCP Apps SDK host fixture. This dedicated suite checks actual MapLibre
+pixels, inspection controls, network consent and recovery, responsive/RTL
+layout, keyboard focus, accessibility, and absence of outbound browser requests.
+It is separate from the desktop Playwright suite and needs Chromium.
+
+For manual inspection from the repository root, run:
+
+```bash
+npm run build:mcp-app && node e2e/mcp-app/serve.mjs
+```
+
+Open `http://localhost:4186/?fixture=overlap`. Other fixture names are `bounds`,
+`legends`, `legend-order`, `properties`, `empty-controls`, and
+`registration-failure`. The last
+contains hidden malformed inline GeoJSON to exercise real registration rejection,
+without a mocked renderer or external request. Add `width=320&height=480`,
+`locale=ar`, or `theme=dark` to exercise narrow, RTL, or dark layouts. Preview
+text still uses the English fallback. The TileJSON fixture uses the existing
+vector-tile renderer; URL-only raster TileJSON is not supported by the native
+raster renderer, which requires saved `source.tiles` templates.
+
+Use `npm run test:e2e:mcp-app -- --headed` to watch the browser suite. Stop the
+manual server first if `CI` is set; otherwise the suite reuses that local
+server. Restart the manual server after changing the host or fixture files,
+because its host bundle is built once at startup.
 
 ## The workspace
 

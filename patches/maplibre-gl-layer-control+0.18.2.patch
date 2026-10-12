@@ -1,0 +1,1662 @@
+diff --git a/node_modules/maplibre-gl-layer-control/dist/index.cjs b/node_modules/maplibre-gl-layer-control/dist/index.cjs
+index a86b6dc..e39e9ba 100644
+--- a/node_modules/maplibre-gl-layer-control/dist/index.cjs
++++ b/node_modules/maplibre-gl-layer-control/dist/index.cjs
+@@ -2,6 +2,7 @@
+ var __defProp = Object.defineProperty;
+ var __defNormalProp = (obj, key, value) => key in obj ? __defProp(obj, key, { enumerable: true, configurable: true, writable: true, value }) : obj[key] = value;
+ var __publicField = (obj, key, value) => __defNormalProp(obj, typeof key !== "symbol" ? key + "" : key, value);
++var layerControlIdCounter = 0;
+ Object.defineProperty(exports, Symbol.toStringTag, { value: "Module" });
+ class CustomLayerRegistry {
+   constructor() {
+@@ -109,11 +110,9 @@ class CustomLayerRegistry {
+    */
+   setOpacity(layerId, opacity) {
+     const adapter = this.getAdapterForLayer(layerId);
+-    if (adapter) {
+-      adapter.setOpacity(layerId, opacity);
+-      return true;
+-    }
+-    return false;
++    if (!adapter || typeof adapter.setOpacity !== "function") return false;
++    adapter.setOpacity(layerId, opacity);
++    return true;
+   }
+   /**
+    * Get the symbol type for a custom layer (for UI display).
+@@ -1068,6 +1067,18 @@ class LayerControl {
+     __publicField(this, "widthFrame", null);
+     // Exact-opacity input popup
+     __publicField(this, "opacityInputEl", null);
++    __publicField(this, "autoDetect");
++    __publicField(this, "showZoomButton");
++    __publicField(this, "onZoomToLayer");
++    __publicField(this, "labels");
++    __publicField(this, "rowReferences", /* @__PURE__ */ new Map());
++    __publicField(this, "removed", false);
++    __publicField(this, "timers", /* @__PURE__ */ new Set());
++    __publicField(this, "frames", /* @__PURE__ */ new Set());
++    __publicField(this, "documentClickHandler", null);
++    __publicField(this, "styleDataHandler", null);
++    __publicField(this, "dataHandler", null);
++    __publicField(this, "sourceDataHandler", null);
+     // Panel edge-drag resizing (handles on both the left and right edges)
+     __publicField(this, "resizeHandleEls", []);
+     /** Which edge is anchored to the control corner (the other edge is "free") */
+@@ -1092,6 +1103,15 @@ class LayerControl {
+     __publicField(this, "enableBackgroundPresets");
+     __publicField(this, "backgroundPresetStorageKey");
+     __publicField(this, "onBackgroundPresetsChange");
++    this.autoDetect = options.autoDetect !== false;
++    this.showZoomButton = options.showZoomButton === true;
++    this.onZoomToLayer = options.onZoomToLayer;
++    this.labels = {
++      control: "Layer Control", layers: "Layers", showAll: "Show All",
++      hideAll: "Hide All", emptyLayers: "No layers found",
++      showLayer: (name) => `Show ${name}`, zoomToLayer: (name) => `Zoom to ${name}`,
++      layerType: (type) => `Layer type: ${type}`, ...(options.labels || {})
++    };
+     this.minPanelWidth = options.panelMinWidth || 240;
+     this.maxPanelWidth = options.panelMaxWidth || 960;
+     this.initialPanelWidth = options.panelWidth || 350;
+@@ -1159,7 +1179,7 @@ class LayerControl {
+   onAdd(map) {
+     this.map = map;
+     this.mapContainer = map.getContainer();
+-    const style = this.map.getStyle();
++    const style = this.autoDetect ? this.map.getStyle() : null;
+     if (style && style.sources) {
+       this.initialSourceIds = new Set(Object.keys(style.sources));
+     } else {
+@@ -1173,6 +1193,7 @@ class LayerControl {
+     this.container = this.createContainer();
+     this.button = this.createToggleButton();
+     this.panel = this.createPanel();
++    this.panel.id = `layer-control-panel-${++layerControlIdCounter}`;
+     this.container.appendChild(this.button);
+     this.mapContainer.appendChild(this.panel);
+     if (this.enableContextMenu) {
+@@ -1180,13 +1201,15 @@ class LayerControl {
+       this.mapContainer.appendChild(this.contextMenuEl);
+     }
+     this.setupEventListeners();
+-    if (this.basemapStyleUrl && !this.basemapLayerIds) {
++    if (this.autoDetect && this.basemapStyleUrl && !this.basemapLayerIds) {
+       this.fetchBasemapStyle().then(() => {
++        if (this.removed) return;
+         if (Object.keys(this.state.layerStates).length === 0) {
+           this.autoDetectLayers();
+         }
+         this.buildLayerItems();
+       }).catch((error) => {
++        if (this.removed) return;
+         console.warn(
+           "Failed to fetch basemap style, falling back to heuristic detection:",
+           error
+@@ -1197,14 +1220,17 @@ class LayerControl {
+         this.buildLayerItems();
+       });
+     } else {
+-      if (Object.keys(this.state.layerStates).length === 0) {
++      if (!this.autoDetect || Object.keys(this.state.layerStates).length === 0) {
+         this.autoDetectLayers();
+       }
+       this.buildLayerItems();
+     }
++    this.button.setAttribute("aria-controls", this.panel.id);
++    this.button.setAttribute("aria-expanded", String(!this.state.collapsed));
++    this.setLabels({});
+     if (!this.state.collapsed) {
+-      requestAnimationFrame(() => {
+-        this.updatePanelPosition();
++      this.scheduleFrame(() => {
++        if (!this.removed) this.updatePanelPosition();
+       });
+     }
+     return this.container;
+@@ -1241,6 +1267,8 @@ class LayerControl {
+    * Called when the control is removed from the map
+    */
+   onRemove() {
++    if (this.removed) return;
++    this.removed = true;
+     var _a, _b, _c;
+     if (this.customLayerUnsubscribe) {
+       this.customLayerUnsubscribe();
+@@ -1263,14 +1291,35 @@ class LayerControl {
+       this.contextMenuEl = null;
+     }
+     this.hideOpacityInput();
++    this.dragListenerCleanup?.();
++    this.dragListenerCleanup = null;
+     this.cleanupDragState();
+     (_b = this.panel.parentNode) == null ? void 0 : _b.removeChild(this.panel);
+     (_c = this.container.parentNode) == null ? void 0 : _c.removeChild(this.container);
++    this.documentClickHandler && document.removeEventListener("click", this.documentClickHandler);
++    this.map.off("styledata", this.styleDataHandler);
++    this.map.off("data", this.dataHandler);
++    this.map.off("sourcedata", this.sourceDataHandler);
++    for (const timer of this.timers) clearTimeout(timer);
++    if (this.widthFrame) cancelAnimationFrame(this.widthFrame);
++    for (const frame of this.frames) cancelAnimationFrame(frame);
++    this.timers.clear();
++    this.frames.clear();
++    this.rowReferences.clear();
+   }
+   /**
+    * Auto-detect layers from the map and populate layerStates
+    */
+   autoDetectLayers() {
++    if (!this.autoDetect) {
++      this.state.layerStates = Object.create(null);
++      this.targetLayers = this.customLayerRegistry ? this.customLayerRegistry.getAllLayerIds() : [];
++      for (const layerId of this.targetLayers) {
++        const customState = this.customLayerRegistry.getLayerState(layerId);
++        if (customState) this.state.layerStates[layerId] = { ...customState, isCustomLayer: true, customLayerType: this.customLayerRegistry.getSymbolType(layerId) || void 0 };
++      }
++      return;
++    }
+     const style = this.map.getStyle();
+     if (!style || !style.layers) {
+       return;
+@@ -1371,9 +1420,7 @@ class LayerControl {
+         const customState = this.customLayerRegistry.getLayerState(layerId);
+         if (customState) {
+           this.state.layerStates[layerId] = {
+-            visible: customState.visible,
+-            opacity: customState.opacity,
+-            name: customState.name,
++            ...customState,
+             isCustomLayer: true,
+             customLayerType: this.customLayerRegistry.getSymbolType(layerId) || void 0
+           };
+@@ -1750,12 +1797,17 @@ class LayerControl {
+     const edgeMargin = 8;
+     const isTopAnchored = position === "top-left" || position === "top-right";
+     const occupiedFromEdge = isTopAnchored ? buttonTop + buttonRect.height + panelGap : buttonBottom + buttonRect.height + panelGap;
+-    const availableHeight = Math.max(
+-      120,
+-      Math.round(mapRect.height - occupiedFromEdge - edgeMargin)
+-    );
+-    const maxHeight = this.maxPanelHeight != null ? Math.min(this.maxPanelHeight, availableHeight) : availableHeight;
+-    this.panel.style.maxHeight = `${maxHeight}px`;
++    const remaining = Math.round(mapRect.height - occupiedFromEdge - edgeMargin);
++    if (!this.autoDetect && remaining < 120) {
++      this.panel.style.top = "8px";
++      this.panel.style.bottom = "";
++      this.panel.style.maxHeight = `${Math.max(1, Math.round(mapRect.height - 16))}px`;
++    } else {
++      const availableHeight = Math.max(120, remaining);
++      const maxHeight = this.maxPanelHeight != null ? Math.min(this.maxPanelHeight, availableHeight) : availableHeight;
++      this.panel.style.maxHeight = `${maxHeight}px`;
++    }
++    if (!this.autoDetect) this.panel.style.maxWidth = `${Math.max(1, Math.round(mapRect.width - 16))}px`;
+   }
+   /**
+    * Create action buttons for Show All / Hide All
+@@ -1785,26 +1837,114 @@ class LayerControl {
+     container.appendChild(hideAllBtn);
+     return container;
+   }
++  setLabels(labels) {
++    if (this.removed) return;
++    this.labels = { ...this.labels, ...labels };
++    if (this.button) {
++      this.button.title = this.labels.control;
++      this.button.setAttribute("aria-label", this.labels.control);
++    }
++    const title = this.panel?.querySelector(".layer-control-panel-title");
++    if (title) title.textContent = this.labels.layers;
++    const buttons = this.panel?.querySelectorAll(".layer-control-action-btn");
++    if (buttons?.[0]) buttons[0].textContent = this.labels.showAll;
++    if (buttons?.[1]) buttons[1].textContent = this.labels.hideAll;
++    if (buttons?.[0]) buttons[0].title = this.labels.showAll;
++    if (buttons?.[1]) buttons[1].title = this.labels.hideAll;
++    const empty = this.panel?.querySelector(".layer-control-empty");
++    if (empty) empty.textContent = this.labels.emptyLayers;
++    this.rowReferences.forEach((refs, id) => {
++      refs.checkbox.setAttribute("aria-label", this.labels.showLayer(refs.name.textContent));
++      const zoom = refs.item.querySelector(".layer-control-zoom");
++      if (zoom) {
++        zoom.title = this.labels.zoomToLayer(refs.name.textContent);
++        zoom.setAttribute("aria-label", zoom.title);
++      }
++      const symbol = refs.item.querySelector(".layer-control-symbol");
++      if (symbol) symbol.title = this.labels.layerType(this.state.layerStates[id]?.customLayerType || (this.autoDetect ? this.map.getLayer(id)?.type : null) || "custom");
++    });
++  }
++  refreshCustomLayers() {
++    if (!this.customLayerRegistry || this.removed || this.customVisibilityBatch) return;
++    const ids = this.customLayerRegistry.getAllLayerIds();
++    const current = this.customLayerOrder || [];
++    if (ids.length !== current.length || ids.some((id, index) => id !== current[index])) {
++      this.state.layerStates = this.autoDetect
++        ? Object.fromEntries(Object.entries(this.state.layerStates).filter(([, state]) => !state.isCustomLayer))
++        : Object.create(null);
++      for (const id of ids) {
++        const state = this.customLayerRegistry.getLayerState(id);
++        if (state) this.state.layerStates[id] = { ...state, isCustomLayer: true, customLayerType: this.customLayerRegistry.getSymbolType(id) || void 0 };
++      }
++      if (!this.autoDetect) this.targetLayers = ids;
++      this.rowReferences.clear();
++      this.buildLayerItems();
++      return;
++    }
++    for (const id of ids) {
++      const state = this.customLayerRegistry.getLayerState(id);
++      if (!state) continue;
++      const previousType = this.state.layerStates[id]?.customLayerType;
++      this.state.layerStates[id] = { ...state, isCustomLayer: true, customLayerType: this.customLayerRegistry.getSymbolType(id) || void 0 };
++      const refs = this.rowReferences.get(id);
++      if (!refs) continue;
++      const symbol = refs.item.querySelector(".layer-control-symbol");
++      const symbolType = this.state.layerStates[id].customLayerType || "custom-raster";
++      if (symbol) {
++        if (previousType !== this.state.layerStates[id].customLayerType) symbol.innerHTML = createLayerSymbolSVG(symbolType, "#4a90d9");
++        symbol.title = this.labels.layerType(symbolType);
++      }
++      refs.checkbox.checked = !!state.visible;
++      refs.checkbox.disabled = !!state.disabled;
++      refs.name.textContent = state.name || id;
++      refs.name.title = state.name || id;
++      refs.checkbox.setAttribute("aria-label", this.labels.showLayer(state.name || id));
++      let reason = refs.item.querySelector(".layer-control-explanation");
++      if (state.disabledReason || state.zoomDisabledReason) {
++        if (!reason) {
++          reason = document.createElement("div");
++          reason.className = "layer-control-explanation";
++          reason.id = `layer-control-reason-${++layerControlIdCounter}`;
++          refs.item.appendChild(reason);
++        }
++        reason.textContent = [...new Set([state.disabledReason, state.zoomDisabledReason].filter(Boolean))].join(" ");
++        if (state.disabledReason) refs.checkbox.setAttribute("aria-describedby", reason.id);
++        else refs.checkbox.removeAttribute("aria-describedby");
++      } else {
++        reason?.remove();
++        refs.checkbox.removeAttribute("aria-describedby");
++      }
++      const zoom = refs.item.querySelector(".layer-control-zoom");
++      if (zoom) {
++        zoom.title = this.labels.zoomToLayer(state.name || id);
++        zoom.setAttribute("aria-label", zoom.title);
++        zoom.disabled = !!state.disabled || !!state.zoomDisabled;
++        if ((state.zoomDisabledReason || state.disabled && state.disabledReason) && reason) zoom.setAttribute("aria-describedby", reason.id);
++        else zoom.removeAttribute("aria-describedby");
++      }
++    }
++  }
+   /**
+    * Set visibility of all layers
+    */
+   setAllLayersVisibility(visible) {
+-    this.groupStates.forEach((_group, groupId) => {
+-      this.setGroupVisibility(groupId, visible);
+-    });
+-    Object.keys(this.state.layerStates).forEach((layerId) => {
+-      this.toggleLayerVisibility(layerId, visible);
+-      const itemEl = this.panel.querySelector(`[data-layer-id="${layerId}"]`);
+-      if (itemEl) {
+-        const checkbox = itemEl.querySelector(
+-          ".layer-control-checkbox"
+-        );
+-        if (checkbox) {
+-          checkbox.checked = visible;
+-          checkbox.indeterminate = false;
++    if (this.removed) return;
++    this.groupStates.forEach((_group, groupId) => this.setGroupVisibility(groupId, visible));
++    if (!this.autoDetect) {
++      this.customVisibilityBatch = true;
++      try {
++        for (const layerId of this.customLayerRegistry?.getAllLayerIds() || []) {
++          const state = this.customLayerRegistry.getLayerState(layerId);
++          if (!state || state.disabled) continue;
++          this.customLayerRegistry.setVisibility(layerId, visible);
+         }
++      } finally {
++        this.customVisibilityBatch = false;
++        this.refreshCustomLayers();
+       }
+-    });
++      return;
++    }
++    for (const layerId of Object.keys(this.state.layerStates)) this.toggleLayerVisibility(layerId, visible);
+   }
+   /**
+    * Create the panel header with the title. Panel width is adjusted by
+@@ -1838,7 +1978,7 @@ class LayerControl {
+     if (this.widthFrame) {
+       cancelAnimationFrame(this.widthFrame);
+     }
+-    this.widthFrame = requestAnimationFrame(() => {
++    this.widthFrame = this.scheduleFrame(() => {
+       applyWidth();
+       this.widthFrame = null;
+     });
+@@ -1848,66 +1988,65 @@ class LayerControl {
+    */
+   setupEventListeners() {
+     this.button.addEventListener("click", () => this.toggle());
+-    document.addEventListener("click", (e2) => {
+-      const target = e2.target;
+-      if (this.contextMenuEl && this.state.contextMenu.visible) {
+-        if (!this.contextMenuEl.contains(target)) {
+-          this.hideContextMenu();
+-        }
+-      }
+-      if (!this.container.contains(target) && !this.panel.contains(target)) {
++    this.documentClickHandler = (event) => {
++      if (this.removed) return;
++      const target = event.target;
++      if (this.contextMenuEl && this.state.contextMenu.visible && !this.contextMenuEl.contains(target)) this.hideContextMenu();
++      if (!this.container.contains(target) && !this.panel.contains(target)) this.collapse();
++    };
++    document.addEventListener("click", this.documentClickHandler);
++    this.panel.addEventListener("keydown", (event) => {
++      if (event.key === "Escape") {
++        event.preventDefault();
+         this.collapse();
++        this.button.focus();
+       }
+     });
+-    this.resizeHandler = () => {
+-      if (!this.state.collapsed) {
+-        this.updatePanelPosition();
+-      }
+-    };
++    this.resizeHandler = () => { if (!this.removed && !this.state.collapsed) this.updatePanelPosition(); };
+     window.addEventListener("resize", this.resizeHandler);
+-    this.mapResizeHandler = () => {
+-      if (!this.state.collapsed) {
+-        this.updatePanelPosition();
+-      }
+-    };
++    this.mapResizeHandler = () => { if (!this.removed && !this.state.collapsed) this.updatePanelPosition(); };
+     this.map.on("resize", this.mapResizeHandler);
+     this.setupLayerChangeListeners();
+   }
+-  /**
+-   * Setup listeners for map layer changes
+-   */
++  schedule(callback, delay) {
++    if (this.removed) return;
++    const timer = setTimeout(() => {
++      this.timers.delete(timer);
++      if (!this.removed) callback();
++    }, delay);
++    this.timers.add(timer);
++    return timer;
++  }
++  scheduleFrame(callback) {
++    if (this.removed) return;
++    const frame = requestAnimationFrame(() => {
++      this.frames.delete(frame);
++      if (!this.removed) callback();
++    });
++    this.frames.add(frame);
++    return frame;
++  }
+   setupLayerChangeListeners() {
+-    this.map.on("styledata", () => {
+-      setTimeout(() => {
+-        this.updateLayerStatesFromMap();
++    this.styleDataHandler = () => this.schedule(() => {
++      if (this.autoDetect) this.updateLayerStatesFromMap();
++      this.checkForNewLayers();
++    }, 100);
++    this.dataHandler = (event) => {
++      if (event.sourceDataType === "content") this.schedule(() => {
++        if (this.autoDetect) this.updateLayerStatesFromMap();
+         this.checkForNewLayers();
+       }, 100);
++    };
++    this.sourceDataHandler = (event) => {
++      if (event.sourceDataType === "metadata") this.schedule(() => this.checkForNewLayers(), 150);
++    };
++    this.map.on("styledata", this.styleDataHandler);
++    this.map.on("data", this.dataHandler);
++    this.map.on("sourcedata", this.sourceDataHandler);
++    if (this.customLayerRegistry) this.customLayerUnsubscribe = this.customLayerRegistry.onChange((event, layerId) => {
++      if (event === "add" && layerId) this.removedCustomLayerIds.delete(layerId);
++      this.schedule(() => this.autoDetect ? this.checkForNewLayers() : this.refreshCustomLayers(), 100);
+     });
+-    this.map.on("data", (e2) => {
+-      if (e2.sourceDataType === "content") {
+-        setTimeout(() => {
+-          this.updateLayerStatesFromMap();
+-          this.checkForNewLayers();
+-        }, 100);
+-      }
+-    });
+-    this.map.on("sourcedata", (e2) => {
+-      if (e2.sourceDataType === "metadata") {
+-        setTimeout(() => {
+-          this.checkForNewLayers();
+-        }, 150);
+-      }
+-    });
+-    if (this.customLayerRegistry) {
+-      this.customLayerUnsubscribe = this.customLayerRegistry.onChange(
+-        (event, layerId) => {
+-          if (event === "add" && layerId) {
+-            this.removedCustomLayerIds.delete(layerId);
+-          }
+-          setTimeout(() => this.checkForNewLayers(), 100);
+-        }
+-      );
+-    }
+   }
+   /**
+    * Toggle panel expanded/collapsed state
+@@ -1925,6 +2064,7 @@ class LayerControl {
+   expand() {
+     this.state.collapsed = false;
+     this.panel.classList.add("expanded");
++    this.button?.setAttribute("aria-expanded", "true");
+     this.updatePanelPosition();
+   }
+   /**
+@@ -1933,16 +2073,20 @@ class LayerControl {
+   collapse() {
+     this.state.collapsed = true;
+     this.panel.classList.remove("expanded");
++    this.button?.setAttribute("aria-expanded", "false");
+   }
+   /**
+    * Build layer items (called initially and when layers change)
+    */
+   buildLayerItems() {
+     var _a;
++    this.customLayerOrder = this.customLayerRegistry?.getAllLayerIds() || [];
+     const existingItems = this.panel.querySelectorAll(
+       ".layer-control-item, .layer-control-group"
+     );
+     existingItems.forEach((item) => item.remove());
++    this.rowReferences.clear();
++    this.panel.querySelector(".layer-control-empty")?.remove();
+     this.styleEditors.clear();
+     const orderedLayerIds = this.getUserLayerIdsInMapOrder();
+     const captured = new Set(orderedLayerIds);
+@@ -1951,7 +2095,7 @@ class LayerControl {
+         orderedLayerIds.push(layerId);
+       }
+     }
+-    if (this.state.layerStates["Background"]) {
++    if (this.autoDetect && this.state.layerStates["Background"]) {
+       orderedLayerIds.push("Background");
+     }
+     this.groupStates = new Map(
+@@ -1976,6 +2120,12 @@ class LayerControl {
+         this.addLayerItem(layerId, state, container);
+       }
+     });
++    if (!this.autoDetect && orderedLayerIds.length === 0) {
++      const empty = document.createElement("p");
++      empty.className = "layer-control-empty";
++      empty.textContent = this.labels.emptyLayers;
++      this.panel.appendChild(empty);
++    }
+   }
+   /**
+    * Get the ID of the group a layer belongs to, ignoring a group ID that no
+@@ -2184,7 +2334,7 @@ class LayerControl {
+     if (element) this.updateGroupElement(element, group);
+     this.state.isStyleOperationInProgress = true;
+     (_a = this.customLayerRegistry) == null ? void 0 : _a.setGroupVisibility(groupId, visible);
+-    setTimeout(() => {
++    this.schedule(() => {
+       this.state.isStyleOperationInProgress = false;
+     }, 200);
+   }
+@@ -2202,7 +2352,7 @@ class LayerControl {
+     if (element) this.updateGroupElement(element, group);
+     this.state.isStyleOperationInProgress = true;
+     (_a = this.customLayerRegistry) == null ? void 0 : _a.setGroupOpacity(groupId, opacity);
+-    setTimeout(() => {
++    this.schedule(() => {
+       this.state.isStyleOperationInProgress = false;
+     }, 200);
+   }
+@@ -2268,27 +2418,54 @@ class LayerControl {
+     checkbox.type = "checkbox";
+     checkbox.className = "layer-control-checkbox";
+     checkbox.checked = state.visible;
+-    checkbox.addEventListener("change", () => {
+-      this.toggleLayerVisibility(layerId, checkbox.checked);
+-    });
++    checkbox.disabled = !!state.disabled;
++    checkbox.addEventListener("change", () => this.toggleLayerVisibility(layerId, checkbox.checked));
+     const displayName = this.state.customLayerNames.get(layerId) || state.name || layerId;
+     const name = document.createElement("span");
+     name.className = "layer-control-name";
+     name.textContent = displayName;
+     name.title = displayName;
+-    row.appendChild(checkbox);
++    const visibility = !this.autoDetect && state.isCustomLayer ? document.createElement("label") : null;
++    if (visibility) visibility.className = "layer-control-visibility";
++    const target = visibility || row;
++    target.appendChild(checkbox);
+     if (this.showLayerSymbol) {
+-      if (layerId === "Background") {
+-        const symbol = this.createBackgroundGroupSymbol();
+-        row.appendChild(symbol);
+-      } else {
+-        const symbol = this.createLayerSymbol(layerId);
+-        if (symbol) {
+-          row.appendChild(symbol);
++      const symbol = this.autoDetect && layerId === "Background" ? this.createBackgroundGroupSymbol() : this.createLayerSymbol(layerId);
++      if (symbol) target.appendChild(symbol);
++    }
++    target.appendChild(name);
++    if (visibility) row.appendChild(visibility);
++    if (this.showZoomButton) {
++      const zoom = document.createElement("button");
++      zoom.type = "button";
++      zoom.className = "layer-control-zoom";
++      zoom.setAttribute("aria-label", this.labels.zoomToLayer(displayName));
++      zoom.disabled = !!state.disabled || !!state.zoomDisabled;
++      zoom.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="6"/><path d="M12 2v4m0 12v4M2 12h4m12 0h4"/></svg>';
++      zoom.addEventListener("click", () => {
++        if (this.removed) return;
++        const fresh = this.customLayerRegistry?.getLayerState(layerId) || this.state.layerStates[layerId];
++        if (fresh?.disabled || fresh?.zoomDisabled) {
++          this.refreshCustomLayers();
++          return;
+         }
+-      }
+-    }
+-    row.appendChild(name);
++        if (this.onZoomToLayer) this.onZoomToLayer(layerId);
++        else this.zoomToLayer(layerId);
++      });
++      row.appendChild(zoom);
++    }
++    if (state.disabledReason || state.zoomDisabledReason) {
++      const reason = document.createElement("div");
++      reason.className = "layer-control-explanation";
++      const id = `layer-control-reason-${++layerControlIdCounter}`;
++      reason.id = id;
++      reason.textContent = [...new Set([state.disabledReason, state.zoomDisabledReason].filter(Boolean))].join(" ");
++      if (state.disabledReason) checkbox.setAttribute("aria-describedby", id);
++      const zoom = row.querySelector(".layer-control-zoom");
++      if (zoom && (state.zoomDisabledReason || state.disabled && state.disabledReason)) zoom.setAttribute("aria-describedby", id);
++      item.appendChild(reason);
++    }
++    this.rowReferences.set(layerId, { item, checkbox, name });
+     if (this.showOpacitySlider) {
+       const opacity = document.createElement("input");
+       opacity.type = "range";
+@@ -2325,7 +2502,7 @@ class LayerControl {
+         }
+       }
+     }
+-    item.appendChild(row);
++    item.prepend(row);
+     if (this.enableContextMenu && layerId !== "Background") {
+       row.addEventListener("contextmenu", (e2) => {
+         e2.preventDefault();
+@@ -2349,7 +2526,7 @@ class LayerControl {
+       const symbolContainer2 = document.createElement("span");
+       symbolContainer2.className = "layer-control-symbol";
+       symbolContainer2.innerHTML = svgMarkup2;
+-      symbolContainer2.title = `Layer type: ${symbolType}`;
++      symbolContainer2.title = this.labels.layerType(symbolType);
+       return symbolContainer2;
+     }
+     const layer = this.map.getLayer(layerId);
+@@ -2361,7 +2538,7 @@ class LayerControl {
+     const symbolContainer = document.createElement("span");
+     symbolContainer.className = "layer-control-symbol";
+     symbolContainer.innerHTML = svgMarkup;
+-    symbolContainer.title = `Layer type: ${layerType}`;
++    symbolContainer.title = this.labels.layerType(layerType);
+     return symbolContainer;
+   }
+   /**
+@@ -2379,7 +2556,7 @@ class LayerControl {
+     const symbolContainer = document.createElement("span");
+     symbolContainer.className = "background-legend-layer-symbol";
+     symbolContainer.innerHTML = svgMarkup;
+-    symbolContainer.title = `Layer type: ${layer.type}`;
++    symbolContainer.title = this.labels.layerType(layer.type);
+     return symbolContainer;
+   }
+   /**
+@@ -2399,17 +2576,24 @@ class LayerControl {
+    * Toggle layer visibility
+    */
+   toggleLayerVisibility(layerId, visible) {
++    if (this.removed) return;
+     var _a;
+-    if (layerId === "Background") {
++    if (this.autoDetect && layerId === "Background") {
+       this.toggleBackgroundVisibility(visible);
+       return;
+     }
++    const adapterState = this.customLayerRegistry?.getLayerState(layerId);
++    if (adapterState) {
++      if (!adapterState.disabled) this.customLayerRegistry.setVisibility(layerId, visible);
++      this.refreshCustomLayers();
++      return;
++    }
+     this.state.isStyleOperationInProgress = true;
+     if (this.state.layerStates[layerId]) {
+       this.state.layerStates[layerId].visible = visible;
+     }
+     if ((_a = this.customLayerRegistry) == null ? void 0 : _a.setVisibility(layerId, visible)) {
+-      setTimeout(() => {
++      this.schedule(() => {
+         this.state.isStyleOperationInProgress = false;
+       }, 200);
+       return;
+@@ -2419,7 +2603,7 @@ class LayerControl {
+       "visibility",
+       visible ? "visible" : "none"
+     );
+-    setTimeout(() => {
++    this.schedule(() => {
+       this.state.isStyleOperationInProgress = false;
+     }, 200);
+   }
+@@ -2525,7 +2709,7 @@ class LayerControl {
+       this.state.layerStates[layerId].opacity = opacity;
+     }
+     if ((_a = this.customLayerRegistry) == null ? void 0 : _a.setOpacity(layerId, opacity)) {
+-      setTimeout(() => {
++      this.schedule(() => {
+         this.state.isStyleOperationInProgress = false;
+       }, 200);
+       return;
+@@ -2534,7 +2718,7 @@ class LayerControl {
+     if (layerType) {
+       setLayerOpacity(this.map, layerId, layerType, opacity);
+     }
+-    setTimeout(() => {
++    this.schedule(() => {
+       this.state.isStyleOperationInProgress = false;
+     }, 200);
+   }
+@@ -2677,7 +2861,7 @@ class LayerControl {
+       button.setAttribute("aria-expanded", "true");
+       button.classList.add("active");
+     }
+-    setTimeout(() => {
++    this.schedule(() => {
+       legendPanel == null ? void 0 : legendPanel.scrollIntoView({ behavior: "smooth", block: "nearest" });
+     }, 50);
+   }
+@@ -3232,7 +3416,7 @@ class LayerControl {
+           itemEl.appendChild(editor3);
+           this.styleEditors.set(layerId, editor3);
+           this.state.activeStyleEditor = layerId;
+-          setTimeout(() => {
++          this.schedule(() => {
+             editor3.scrollIntoView({ behavior: "smooth", block: "nearest" });
+           }, 50);
+           return;
+@@ -3242,7 +3426,7 @@ class LayerControl {
+       itemEl.appendChild(editor2);
+       this.styleEditors.set(layerId, editor2);
+       this.state.activeStyleEditor = layerId;
+-      setTimeout(() => {
++      this.schedule(() => {
+         editor2.scrollIntoView({ behavior: "smooth", block: "nearest" });
+       }, 50);
+       return;
+@@ -3258,7 +3442,7 @@ class LayerControl {
+     itemEl.appendChild(editor);
+     this.styleEditors.set(layerId, editor);
+     this.state.activeStyleEditor = layerId;
+-    setTimeout(() => {
++    this.schedule(() => {
+       editor.scrollIntoView({ behavior: "smooth", block: "nearest" });
+     }, 50);
+   }
+@@ -4122,6 +4306,10 @@ class LayerControl {
+       return;
+     }
+     try {
++      if (!this.autoDetect) {
++        this.refreshCustomLayers();
++        return;
++      }
+       const style = this.map.getStyle();
+       if (!style || !style.layers) {
+         return;
+@@ -4475,7 +4663,7 @@ class LayerControl {
+     const layerState = this.state.layerStates[layerId];
+     if ((layerState == null ? void 0 : layerState.isCustomLayer) && this.customLayerRegistry) {
+       const bounds = this.customLayerRegistry.getBounds(layerId);
+-      if (bounds) {
++      if (Array.isArray(bounds) && bounds.length === 4 && bounds.every(Number.isFinite) && bounds[0] <= bounds[2] && bounds[1] <= bounds[3]) {
+         this.map.fitBounds(bounds, {
+           padding: 50
+         });
+@@ -4495,8 +4683,10 @@ class LayerControl {
+       features.forEach((feature) => {
+         if (!feature.geometry) return;
+         const processCoords = (coords) => {
++          if (!Array.isArray(coords)) return;
+           if (typeof coords[0] === "number") {
+             const [lng, lat] = coords;
++            if (!Number.isFinite(lng) || !Number.isFinite(lat)) return;
+             minLng = Math.min(minLng, lng);
+             minLat = Math.min(minLat, lat);
+             maxLng = Math.max(maxLng, lng);
+@@ -4538,6 +4728,7 @@ class LayerControl {
+    */
+   getUserLayerIdsInMapOrder() {
+     var _a;
++    if (!this.autoDetect) return [...(this.customLayerRegistry?.getAllLayerIds() || [])].reverse();
+     const style = this.map.getStyle();
+     if (!(style == null ? void 0 : style.layers)) return [];
+     const mapLayerIds = style.layers.map((l2) => l2.id);
+@@ -4894,7 +5085,7 @@ class LayerControl {
+     confirmEl.appendChild(message);
+     confirmEl.appendChild(buttons);
+     container.appendChild(confirmEl);
+-    requestAnimationFrame(() => {
++    this.scheduleFrame(() => {
+       confirmEl.scrollIntoView({ behavior: "smooth", block: "nearest" });
+     });
+   }
+@@ -4939,7 +5130,7 @@ class LayerControl {
+     }
+     this.pruneEmptyGroups();
+     (_b = this.onLayerRemove) == null ? void 0 : _b.call(this, layerId);
+-    setTimeout(() => {
++    this.schedule(() => {
+       this.state.isStyleOperationInProgress = false;
+     }, 200);
+   }
+@@ -5015,12 +5206,16 @@ class LayerControl {
+     clone.style.top = `${rect.top}px`;
+     document.body.appendChild(clone);
+     this.state.drag.draggedElement = clone;
+-    const onMove = (moveE) => this.onDragMove(moveE);
++    const onMove = (moveE) => { if (!this.removed) this.onDragMove(moveE); };
+     const onEnd = (endE) => {
++      this.dragListenerCleanup?.();
++      this.dragListenerCleanup = null;
++      if (!this.removed) this.endDrag(endE);
++    };
++    this.dragListenerCleanup = () => {
+       document.removeEventListener("pointermove", onMove);
+       document.removeEventListener("pointerup", onEnd);
+       document.removeEventListener("pointercancel", onEnd);
+-      this.endDrag(endE);
+     };
+     document.addEventListener("pointermove", onMove);
+     document.addEventListener("pointerup", onEnd);
+@@ -5144,7 +5339,7 @@ class LayerControl {
+       } catch (e2) {
+       }
+     }
+-    setTimeout(() => {
++    this.schedule(() => {
+       this.state.isStyleOperationInProgress = false;
+     }, 200);
+   }
+diff --git a/node_modules/maplibre-gl-layer-control/dist/index.mjs b/node_modules/maplibre-gl-layer-control/dist/index.mjs
+index 25ea438..00e17c8 100644
+--- a/node_modules/maplibre-gl-layer-control/dist/index.mjs
++++ b/node_modules/maplibre-gl-layer-control/dist/index.mjs
+@@ -1,6 +1,7 @@
+ var __defProp = Object.defineProperty;
+ var __defNormalProp = (obj, key, value) => key in obj ? __defProp(obj, key, { enumerable: true, configurable: true, writable: true, value }) : obj[key] = value;
+ var __publicField = (obj, key, value) => __defNormalProp(obj, typeof key !== "symbol" ? key + "" : key, value);
++var layerControlIdCounter = 0;
+ class CustomLayerRegistry {
+   constructor() {
+     __publicField(this, "adapters", /* @__PURE__ */ new Map());
+@@ -107,11 +108,9 @@ class CustomLayerRegistry {
+    */
+   setOpacity(layerId, opacity) {
+     const adapter = this.getAdapterForLayer(layerId);
+-    if (adapter) {
+-      adapter.setOpacity(layerId, opacity);
+-      return true;
+-    }
+-    return false;
++    if (!adapter || typeof adapter.setOpacity !== "function") return false;
++    adapter.setOpacity(layerId, opacity);
++    return true;
+   }
+   /**
+    * Get the symbol type for a custom layer (for UI display).
+@@ -1066,6 +1065,18 @@ class LayerControl {
+     __publicField(this, "widthFrame", null);
+     // Exact-opacity input popup
+     __publicField(this, "opacityInputEl", null);
++    __publicField(this, "autoDetect");
++    __publicField(this, "showZoomButton");
++    __publicField(this, "onZoomToLayer");
++    __publicField(this, "labels");
++    __publicField(this, "rowReferences", /* @__PURE__ */ new Map());
++    __publicField(this, "removed", false);
++    __publicField(this, "timers", /* @__PURE__ */ new Set());
++    __publicField(this, "frames", /* @__PURE__ */ new Set());
++    __publicField(this, "documentClickHandler", null);
++    __publicField(this, "styleDataHandler", null);
++    __publicField(this, "dataHandler", null);
++    __publicField(this, "sourceDataHandler", null);
+     // Panel edge-drag resizing (handles on both the left and right edges)
+     __publicField(this, "resizeHandleEls", []);
+     /** Which edge is anchored to the control corner (the other edge is "free") */
+@@ -1090,6 +1101,15 @@ class LayerControl {
+     __publicField(this, "enableBackgroundPresets");
+     __publicField(this, "backgroundPresetStorageKey");
+     __publicField(this, "onBackgroundPresetsChange");
++    this.autoDetect = options.autoDetect !== false;
++    this.showZoomButton = options.showZoomButton === true;
++    this.onZoomToLayer = options.onZoomToLayer;
++    this.labels = {
++      control: "Layer Control", layers: "Layers", showAll: "Show All",
++      hideAll: "Hide All", emptyLayers: "No layers found",
++      showLayer: (name) => `Show ${name}`, zoomToLayer: (name) => `Zoom to ${name}`,
++      layerType: (type) => `Layer type: ${type}`, ...(options.labels || {})
++    };
+     this.minPanelWidth = options.panelMinWidth || 240;
+     this.maxPanelWidth = options.panelMaxWidth || 960;
+     this.initialPanelWidth = options.panelWidth || 350;
+@@ -1157,7 +1177,7 @@ class LayerControl {
+   onAdd(map) {
+     this.map = map;
+     this.mapContainer = map.getContainer();
+-    const style = this.map.getStyle();
++    const style = this.autoDetect ? this.map.getStyle() : null;
+     if (style && style.sources) {
+       this.initialSourceIds = new Set(Object.keys(style.sources));
+     } else {
+@@ -1171,6 +1191,7 @@ class LayerControl {
+     this.container = this.createContainer();
+     this.button = this.createToggleButton();
+     this.panel = this.createPanel();
++    this.panel.id = `layer-control-panel-${++layerControlIdCounter}`;
+     this.container.appendChild(this.button);
+     this.mapContainer.appendChild(this.panel);
+     if (this.enableContextMenu) {
+@@ -1178,13 +1199,15 @@ class LayerControl {
+       this.mapContainer.appendChild(this.contextMenuEl);
+     }
+     this.setupEventListeners();
+-    if (this.basemapStyleUrl && !this.basemapLayerIds) {
++    if (this.autoDetect && this.basemapStyleUrl && !this.basemapLayerIds) {
+       this.fetchBasemapStyle().then(() => {
++        if (this.removed) return;
+         if (Object.keys(this.state.layerStates).length === 0) {
+           this.autoDetectLayers();
+         }
+         this.buildLayerItems();
+       }).catch((error) => {
++        if (this.removed) return;
+         console.warn(
+           "Failed to fetch basemap style, falling back to heuristic detection:",
+           error
+@@ -1195,14 +1218,17 @@ class LayerControl {
+         this.buildLayerItems();
+       });
+     } else {
+-      if (Object.keys(this.state.layerStates).length === 0) {
++      if (!this.autoDetect || Object.keys(this.state.layerStates).length === 0) {
+         this.autoDetectLayers();
+       }
+       this.buildLayerItems();
+     }
++    this.button.setAttribute("aria-controls", this.panel.id);
++    this.button.setAttribute("aria-expanded", String(!this.state.collapsed));
++    this.setLabels({});
+     if (!this.state.collapsed) {
+-      requestAnimationFrame(() => {
+-        this.updatePanelPosition();
++      this.scheduleFrame(() => {
++        if (!this.removed) this.updatePanelPosition();
+       });
+     }
+     return this.container;
+@@ -1239,6 +1265,8 @@ class LayerControl {
+    * Called when the control is removed from the map
+    */
+   onRemove() {
++    if (this.removed) return;
++    this.removed = true;
+     var _a, _b, _c;
+     if (this.customLayerUnsubscribe) {
+       this.customLayerUnsubscribe();
+@@ -1261,14 +1289,35 @@ class LayerControl {
+       this.contextMenuEl = null;
+     }
+     this.hideOpacityInput();
++    this.dragListenerCleanup?.();
++    this.dragListenerCleanup = null;
+     this.cleanupDragState();
+     (_b = this.panel.parentNode) == null ? void 0 : _b.removeChild(this.panel);
+     (_c = this.container.parentNode) == null ? void 0 : _c.removeChild(this.container);
++    this.documentClickHandler && document.removeEventListener("click", this.documentClickHandler);
++    this.map.off("styledata", this.styleDataHandler);
++    this.map.off("data", this.dataHandler);
++    this.map.off("sourcedata", this.sourceDataHandler);
++    for (const timer of this.timers) clearTimeout(timer);
++    if (this.widthFrame) cancelAnimationFrame(this.widthFrame);
++    for (const frame of this.frames) cancelAnimationFrame(frame);
++    this.timers.clear();
++    this.frames.clear();
++    this.rowReferences.clear();
+   }
+   /**
+    * Auto-detect layers from the map and populate layerStates
+    */
+   autoDetectLayers() {
++    if (!this.autoDetect) {
++      this.state.layerStates = Object.create(null);
++      this.targetLayers = this.customLayerRegistry ? this.customLayerRegistry.getAllLayerIds() : [];
++      for (const layerId of this.targetLayers) {
++        const customState = this.customLayerRegistry.getLayerState(layerId);
++        if (customState) this.state.layerStates[layerId] = { ...customState, isCustomLayer: true, customLayerType: this.customLayerRegistry.getSymbolType(layerId) || void 0 };
++      }
++      return;
++    }
+     const style = this.map.getStyle();
+     if (!style || !style.layers) {
+       return;
+@@ -1369,9 +1418,7 @@ class LayerControl {
+         const customState = this.customLayerRegistry.getLayerState(layerId);
+         if (customState) {
+           this.state.layerStates[layerId] = {
+-            visible: customState.visible,
+-            opacity: customState.opacity,
+-            name: customState.name,
++            ...customState,
+             isCustomLayer: true,
+             customLayerType: this.customLayerRegistry.getSymbolType(layerId) || void 0
+           };
+@@ -1748,12 +1795,17 @@ class LayerControl {
+     const edgeMargin = 8;
+     const isTopAnchored = position === "top-left" || position === "top-right";
+     const occupiedFromEdge = isTopAnchored ? buttonTop + buttonRect.height + panelGap : buttonBottom + buttonRect.height + panelGap;
+-    const availableHeight = Math.max(
+-      120,
+-      Math.round(mapRect.height - occupiedFromEdge - edgeMargin)
+-    );
+-    const maxHeight = this.maxPanelHeight != null ? Math.min(this.maxPanelHeight, availableHeight) : availableHeight;
+-    this.panel.style.maxHeight = `${maxHeight}px`;
++    const remaining = Math.round(mapRect.height - occupiedFromEdge - edgeMargin);
++    if (!this.autoDetect && remaining < 120) {
++      this.panel.style.top = "8px";
++      this.panel.style.bottom = "";
++      this.panel.style.maxHeight = `${Math.max(1, Math.round(mapRect.height - 16))}px`;
++    } else {
++      const availableHeight = Math.max(120, remaining);
++      const maxHeight = this.maxPanelHeight != null ? Math.min(this.maxPanelHeight, availableHeight) : availableHeight;
++      this.panel.style.maxHeight = `${maxHeight}px`;
++    }
++    if (!this.autoDetect) this.panel.style.maxWidth = `${Math.max(1, Math.round(mapRect.width - 16))}px`;
+   }
+   /**
+    * Create action buttons for Show All / Hide All
+@@ -1783,26 +1835,114 @@ class LayerControl {
+     container.appendChild(hideAllBtn);
+     return container;
+   }
++  setLabels(labels) {
++    if (this.removed) return;
++    this.labels = { ...this.labels, ...labels };
++    if (this.button) {
++      this.button.title = this.labels.control;
++      this.button.setAttribute("aria-label", this.labels.control);
++    }
++    const title = this.panel?.querySelector(".layer-control-panel-title");
++    if (title) title.textContent = this.labels.layers;
++    const buttons = this.panel?.querySelectorAll(".layer-control-action-btn");
++    if (buttons?.[0]) buttons[0].textContent = this.labels.showAll;
++    if (buttons?.[1]) buttons[1].textContent = this.labels.hideAll;
++    if (buttons?.[0]) buttons[0].title = this.labels.showAll;
++    if (buttons?.[1]) buttons[1].title = this.labels.hideAll;
++    const empty = this.panel?.querySelector(".layer-control-empty");
++    if (empty) empty.textContent = this.labels.emptyLayers;
++    this.rowReferences.forEach((refs, id) => {
++      refs.checkbox.setAttribute("aria-label", this.labels.showLayer(refs.name.textContent));
++      const zoom = refs.item.querySelector(".layer-control-zoom");
++      if (zoom) {
++        zoom.title = this.labels.zoomToLayer(refs.name.textContent);
++        zoom.setAttribute("aria-label", zoom.title);
++      }
++      const symbol = refs.item.querySelector(".layer-control-symbol");
++      if (symbol) symbol.title = this.labels.layerType(this.state.layerStates[id]?.customLayerType || (this.autoDetect ? this.map.getLayer(id)?.type : null) || "custom");
++    });
++  }
++  refreshCustomLayers() {
++    if (!this.customLayerRegistry || this.removed || this.customVisibilityBatch) return;
++    const ids = this.customLayerRegistry.getAllLayerIds();
++    const current = this.customLayerOrder || [];
++    if (ids.length !== current.length || ids.some((id, index) => id !== current[index])) {
++      this.state.layerStates = this.autoDetect
++        ? Object.fromEntries(Object.entries(this.state.layerStates).filter(([, state]) => !state.isCustomLayer))
++        : Object.create(null);
++      for (const id of ids) {
++        const state = this.customLayerRegistry.getLayerState(id);
++        if (state) this.state.layerStates[id] = { ...state, isCustomLayer: true, customLayerType: this.customLayerRegistry.getSymbolType(id) || void 0 };
++      }
++      if (!this.autoDetect) this.targetLayers = ids;
++      this.rowReferences.clear();
++      this.buildLayerItems();
++      return;
++    }
++    for (const id of ids) {
++      const state = this.customLayerRegistry.getLayerState(id);
++      if (!state) continue;
++      const previousType = this.state.layerStates[id]?.customLayerType;
++      this.state.layerStates[id] = { ...state, isCustomLayer: true, customLayerType: this.customLayerRegistry.getSymbolType(id) || void 0 };
++      const refs = this.rowReferences.get(id);
++      if (!refs) continue;
++      const symbol = refs.item.querySelector(".layer-control-symbol");
++      const symbolType = this.state.layerStates[id].customLayerType || "custom-raster";
++      if (symbol) {
++        if (previousType !== this.state.layerStates[id].customLayerType) symbol.innerHTML = createLayerSymbolSVG(symbolType, "#4a90d9");
++        symbol.title = this.labels.layerType(symbolType);
++      }
++      refs.checkbox.checked = !!state.visible;
++      refs.checkbox.disabled = !!state.disabled;
++      refs.name.textContent = state.name || id;
++      refs.name.title = state.name || id;
++      refs.checkbox.setAttribute("aria-label", this.labels.showLayer(state.name || id));
++      let reason = refs.item.querySelector(".layer-control-explanation");
++      if (state.disabledReason || state.zoomDisabledReason) {
++        if (!reason) {
++          reason = document.createElement("div");
++          reason.className = "layer-control-explanation";
++          reason.id = `layer-control-reason-${++layerControlIdCounter}`;
++          refs.item.appendChild(reason);
++        }
++        reason.textContent = [...new Set([state.disabledReason, state.zoomDisabledReason].filter(Boolean))].join(" ");
++        if (state.disabledReason) refs.checkbox.setAttribute("aria-describedby", reason.id);
++        else refs.checkbox.removeAttribute("aria-describedby");
++      } else {
++        reason?.remove();
++        refs.checkbox.removeAttribute("aria-describedby");
++      }
++      const zoom = refs.item.querySelector(".layer-control-zoom");
++      if (zoom) {
++        zoom.title = this.labels.zoomToLayer(state.name || id);
++        zoom.setAttribute("aria-label", zoom.title);
++        zoom.disabled = !!state.disabled || !!state.zoomDisabled;
++        if ((state.zoomDisabledReason || state.disabled && state.disabledReason) && reason) zoom.setAttribute("aria-describedby", reason.id);
++        else zoom.removeAttribute("aria-describedby");
++      }
++    }
++  }
+   /**
+    * Set visibility of all layers
+    */
+   setAllLayersVisibility(visible) {
+-    this.groupStates.forEach((_group, groupId) => {
+-      this.setGroupVisibility(groupId, visible);
+-    });
+-    Object.keys(this.state.layerStates).forEach((layerId) => {
+-      this.toggleLayerVisibility(layerId, visible);
+-      const itemEl = this.panel.querySelector(`[data-layer-id="${layerId}"]`);
+-      if (itemEl) {
+-        const checkbox = itemEl.querySelector(
+-          ".layer-control-checkbox"
+-        );
+-        if (checkbox) {
+-          checkbox.checked = visible;
+-          checkbox.indeterminate = false;
++    if (this.removed) return;
++    this.groupStates.forEach((_group, groupId) => this.setGroupVisibility(groupId, visible));
++    if (!this.autoDetect) {
++      this.customVisibilityBatch = true;
++      try {
++        for (const layerId of this.customLayerRegistry?.getAllLayerIds() || []) {
++          const state = this.customLayerRegistry.getLayerState(layerId);
++          if (!state || state.disabled) continue;
++          this.customLayerRegistry.setVisibility(layerId, visible);
+         }
++      } finally {
++        this.customVisibilityBatch = false;
++        this.refreshCustomLayers();
+       }
+-    });
++      return;
++    }
++    for (const layerId of Object.keys(this.state.layerStates)) this.toggleLayerVisibility(layerId, visible);
+   }
+   /**
+    * Create the panel header with the title. Panel width is adjusted by
+@@ -1836,7 +1976,7 @@ class LayerControl {
+     if (this.widthFrame) {
+       cancelAnimationFrame(this.widthFrame);
+     }
+-    this.widthFrame = requestAnimationFrame(() => {
++    this.widthFrame = this.scheduleFrame(() => {
+       applyWidth();
+       this.widthFrame = null;
+     });
+@@ -1846,66 +1986,65 @@ class LayerControl {
+    */
+   setupEventListeners() {
+     this.button.addEventListener("click", () => this.toggle());
+-    document.addEventListener("click", (e2) => {
+-      const target = e2.target;
+-      if (this.contextMenuEl && this.state.contextMenu.visible) {
+-        if (!this.contextMenuEl.contains(target)) {
+-          this.hideContextMenu();
+-        }
+-      }
+-      if (!this.container.contains(target) && !this.panel.contains(target)) {
++    this.documentClickHandler = (event) => {
++      if (this.removed) return;
++      const target = event.target;
++      if (this.contextMenuEl && this.state.contextMenu.visible && !this.contextMenuEl.contains(target)) this.hideContextMenu();
++      if (!this.container.contains(target) && !this.panel.contains(target)) this.collapse();
++    };
++    document.addEventListener("click", this.documentClickHandler);
++    this.panel.addEventListener("keydown", (event) => {
++      if (event.key === "Escape") {
++        event.preventDefault();
+         this.collapse();
++        this.button.focus();
+       }
+     });
+-    this.resizeHandler = () => {
+-      if (!this.state.collapsed) {
+-        this.updatePanelPosition();
+-      }
+-    };
++    this.resizeHandler = () => { if (!this.removed && !this.state.collapsed) this.updatePanelPosition(); };
+     window.addEventListener("resize", this.resizeHandler);
+-    this.mapResizeHandler = () => {
+-      if (!this.state.collapsed) {
+-        this.updatePanelPosition();
+-      }
+-    };
++    this.mapResizeHandler = () => { if (!this.removed && !this.state.collapsed) this.updatePanelPosition(); };
+     this.map.on("resize", this.mapResizeHandler);
+     this.setupLayerChangeListeners();
+   }
+-  /**
+-   * Setup listeners for map layer changes
+-   */
++  schedule(callback, delay) {
++    if (this.removed) return;
++    const timer = setTimeout(() => {
++      this.timers.delete(timer);
++      if (!this.removed) callback();
++    }, delay);
++    this.timers.add(timer);
++    return timer;
++  }
++  scheduleFrame(callback) {
++    if (this.removed) return;
++    const frame = requestAnimationFrame(() => {
++      this.frames.delete(frame);
++      if (!this.removed) callback();
++    });
++    this.frames.add(frame);
++    return frame;
++  }
+   setupLayerChangeListeners() {
+-    this.map.on("styledata", () => {
+-      setTimeout(() => {
+-        this.updateLayerStatesFromMap();
++    this.styleDataHandler = () => this.schedule(() => {
++      if (this.autoDetect) this.updateLayerStatesFromMap();
++      this.checkForNewLayers();
++    }, 100);
++    this.dataHandler = (event) => {
++      if (event.sourceDataType === "content") this.schedule(() => {
++        if (this.autoDetect) this.updateLayerStatesFromMap();
+         this.checkForNewLayers();
+       }, 100);
++    };
++    this.sourceDataHandler = (event) => {
++      if (event.sourceDataType === "metadata") this.schedule(() => this.checkForNewLayers(), 150);
++    };
++    this.map.on("styledata", this.styleDataHandler);
++    this.map.on("data", this.dataHandler);
++    this.map.on("sourcedata", this.sourceDataHandler);
++    if (this.customLayerRegistry) this.customLayerUnsubscribe = this.customLayerRegistry.onChange((event, layerId) => {
++      if (event === "add" && layerId) this.removedCustomLayerIds.delete(layerId);
++      this.schedule(() => this.autoDetect ? this.checkForNewLayers() : this.refreshCustomLayers(), 100);
+     });
+-    this.map.on("data", (e2) => {
+-      if (e2.sourceDataType === "content") {
+-        setTimeout(() => {
+-          this.updateLayerStatesFromMap();
+-          this.checkForNewLayers();
+-        }, 100);
+-      }
+-    });
+-    this.map.on("sourcedata", (e2) => {
+-      if (e2.sourceDataType === "metadata") {
+-        setTimeout(() => {
+-          this.checkForNewLayers();
+-        }, 150);
+-      }
+-    });
+-    if (this.customLayerRegistry) {
+-      this.customLayerUnsubscribe = this.customLayerRegistry.onChange(
+-        (event, layerId) => {
+-          if (event === "add" && layerId) {
+-            this.removedCustomLayerIds.delete(layerId);
+-          }
+-          setTimeout(() => this.checkForNewLayers(), 100);
+-        }
+-      );
+-    }
+   }
+   /**
+    * Toggle panel expanded/collapsed state
+@@ -1923,6 +2062,7 @@ class LayerControl {
+   expand() {
+     this.state.collapsed = false;
+     this.panel.classList.add("expanded");
++    this.button?.setAttribute("aria-expanded", "true");
+     this.updatePanelPosition();
+   }
+   /**
+@@ -1931,16 +2071,20 @@ class LayerControl {
+   collapse() {
+     this.state.collapsed = true;
+     this.panel.classList.remove("expanded");
++    this.button?.setAttribute("aria-expanded", "false");
+   }
+   /**
+    * Build layer items (called initially and when layers change)
+    */
+   buildLayerItems() {
+     var _a;
++    this.customLayerOrder = this.customLayerRegistry?.getAllLayerIds() || [];
+     const existingItems = this.panel.querySelectorAll(
+       ".layer-control-item, .layer-control-group"
+     );
+     existingItems.forEach((item) => item.remove());
++    this.rowReferences.clear();
++    this.panel.querySelector(".layer-control-empty")?.remove();
+     this.styleEditors.clear();
+     const orderedLayerIds = this.getUserLayerIdsInMapOrder();
+     const captured = new Set(orderedLayerIds);
+@@ -1949,7 +2093,7 @@ class LayerControl {
+         orderedLayerIds.push(layerId);
+       }
+     }
+-    if (this.state.layerStates["Background"]) {
++    if (this.autoDetect && this.state.layerStates["Background"]) {
+       orderedLayerIds.push("Background");
+     }
+     this.groupStates = new Map(
+@@ -1974,6 +2118,12 @@ class LayerControl {
+         this.addLayerItem(layerId, state, container);
+       }
+     });
++    if (!this.autoDetect && orderedLayerIds.length === 0) {
++      const empty = document.createElement("p");
++      empty.className = "layer-control-empty";
++      empty.textContent = this.labels.emptyLayers;
++      this.panel.appendChild(empty);
++    }
+   }
+   /**
+    * Get the ID of the group a layer belongs to, ignoring a group ID that no
+@@ -2182,7 +2332,7 @@ class LayerControl {
+     if (element) this.updateGroupElement(element, group);
+     this.state.isStyleOperationInProgress = true;
+     (_a = this.customLayerRegistry) == null ? void 0 : _a.setGroupVisibility(groupId, visible);
+-    setTimeout(() => {
++    this.schedule(() => {
+       this.state.isStyleOperationInProgress = false;
+     }, 200);
+   }
+@@ -2200,7 +2350,7 @@ class LayerControl {
+     if (element) this.updateGroupElement(element, group);
+     this.state.isStyleOperationInProgress = true;
+     (_a = this.customLayerRegistry) == null ? void 0 : _a.setGroupOpacity(groupId, opacity);
+-    setTimeout(() => {
++    this.schedule(() => {
+       this.state.isStyleOperationInProgress = false;
+     }, 200);
+   }
+@@ -2266,27 +2416,54 @@ class LayerControl {
+     checkbox.type = "checkbox";
+     checkbox.className = "layer-control-checkbox";
+     checkbox.checked = state.visible;
+-    checkbox.addEventListener("change", () => {
+-      this.toggleLayerVisibility(layerId, checkbox.checked);
+-    });
++    checkbox.disabled = !!state.disabled;
++    checkbox.addEventListener("change", () => this.toggleLayerVisibility(layerId, checkbox.checked));
+     const displayName = this.state.customLayerNames.get(layerId) || state.name || layerId;
+     const name = document.createElement("span");
+     name.className = "layer-control-name";
+     name.textContent = displayName;
+     name.title = displayName;
+-    row.appendChild(checkbox);
++    const visibility = !this.autoDetect && state.isCustomLayer ? document.createElement("label") : null;
++    if (visibility) visibility.className = "layer-control-visibility";
++    const target = visibility || row;
++    target.appendChild(checkbox);
+     if (this.showLayerSymbol) {
+-      if (layerId === "Background") {
+-        const symbol = this.createBackgroundGroupSymbol();
+-        row.appendChild(symbol);
+-      } else {
+-        const symbol = this.createLayerSymbol(layerId);
+-        if (symbol) {
+-          row.appendChild(symbol);
++      const symbol = this.autoDetect && layerId === "Background" ? this.createBackgroundGroupSymbol() : this.createLayerSymbol(layerId);
++      if (symbol) target.appendChild(symbol);
++    }
++    target.appendChild(name);
++    if (visibility) row.appendChild(visibility);
++    if (this.showZoomButton) {
++      const zoom = document.createElement("button");
++      zoom.type = "button";
++      zoom.className = "layer-control-zoom";
++      zoom.setAttribute("aria-label", this.labels.zoomToLayer(displayName));
++      zoom.disabled = !!state.disabled || !!state.zoomDisabled;
++      zoom.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="6"/><path d="M12 2v4m0 12v4M2 12h4m12 0h4"/></svg>';
++      zoom.addEventListener("click", () => {
++        if (this.removed) return;
++        const fresh = this.customLayerRegistry?.getLayerState(layerId) || this.state.layerStates[layerId];
++        if (fresh?.disabled || fresh?.zoomDisabled) {
++          this.refreshCustomLayers();
++          return;
+         }
+-      }
+-    }
+-    row.appendChild(name);
++        if (this.onZoomToLayer) this.onZoomToLayer(layerId);
++        else this.zoomToLayer(layerId);
++      });
++      row.appendChild(zoom);
++    }
++    if (state.disabledReason || state.zoomDisabledReason) {
++      const reason = document.createElement("div");
++      reason.className = "layer-control-explanation";
++      const id = `layer-control-reason-${++layerControlIdCounter}`;
++      reason.id = id;
++      reason.textContent = [...new Set([state.disabledReason, state.zoomDisabledReason].filter(Boolean))].join(" ");
++      if (state.disabledReason) checkbox.setAttribute("aria-describedby", id);
++      const zoom = row.querySelector(".layer-control-zoom");
++      if (zoom && (state.zoomDisabledReason || state.disabled && state.disabledReason)) zoom.setAttribute("aria-describedby", id);
++      item.appendChild(reason);
++    }
++    this.rowReferences.set(layerId, { item, checkbox, name });
+     if (this.showOpacitySlider) {
+       const opacity = document.createElement("input");
+       opacity.type = "range";
+@@ -2323,7 +2500,7 @@ class LayerControl {
+         }
+       }
+     }
+-    item.appendChild(row);
++    item.prepend(row);
+     if (this.enableContextMenu && layerId !== "Background") {
+       row.addEventListener("contextmenu", (e2) => {
+         e2.preventDefault();
+@@ -2347,7 +2524,7 @@ class LayerControl {
+       const symbolContainer2 = document.createElement("span");
+       symbolContainer2.className = "layer-control-symbol";
+       symbolContainer2.innerHTML = svgMarkup2;
+-      symbolContainer2.title = `Layer type: ${symbolType}`;
++      symbolContainer2.title = this.labels.layerType(symbolType);
+       return symbolContainer2;
+     }
+     const layer = this.map.getLayer(layerId);
+@@ -2359,7 +2536,7 @@ class LayerControl {
+     const symbolContainer = document.createElement("span");
+     symbolContainer.className = "layer-control-symbol";
+     symbolContainer.innerHTML = svgMarkup;
+-    symbolContainer.title = `Layer type: ${layerType}`;
++    symbolContainer.title = this.labels.layerType(layerType);
+     return symbolContainer;
+   }
+   /**
+@@ -2377,7 +2554,7 @@ class LayerControl {
+     const symbolContainer = document.createElement("span");
+     symbolContainer.className = "background-legend-layer-symbol";
+     symbolContainer.innerHTML = svgMarkup;
+-    symbolContainer.title = `Layer type: ${layer.type}`;
++    symbolContainer.title = this.labels.layerType(layer.type);
+     return symbolContainer;
+   }
+   /**
+@@ -2397,17 +2574,24 @@ class LayerControl {
+    * Toggle layer visibility
+    */
+   toggleLayerVisibility(layerId, visible) {
++    if (this.removed) return;
+     var _a;
+-    if (layerId === "Background") {
++    if (this.autoDetect && layerId === "Background") {
+       this.toggleBackgroundVisibility(visible);
+       return;
+     }
++    const adapterState = this.customLayerRegistry?.getLayerState(layerId);
++    if (adapterState) {
++      if (!adapterState.disabled) this.customLayerRegistry.setVisibility(layerId, visible);
++      this.refreshCustomLayers();
++      return;
++    }
+     this.state.isStyleOperationInProgress = true;
+     if (this.state.layerStates[layerId]) {
+       this.state.layerStates[layerId].visible = visible;
+     }
+     if ((_a = this.customLayerRegistry) == null ? void 0 : _a.setVisibility(layerId, visible)) {
+-      setTimeout(() => {
++      this.schedule(() => {
+         this.state.isStyleOperationInProgress = false;
+       }, 200);
+       return;
+@@ -2417,7 +2601,7 @@ class LayerControl {
+       "visibility",
+       visible ? "visible" : "none"
+     );
+-    setTimeout(() => {
++    this.schedule(() => {
+       this.state.isStyleOperationInProgress = false;
+     }, 200);
+   }
+@@ -2523,7 +2707,7 @@ class LayerControl {
+       this.state.layerStates[layerId].opacity = opacity;
+     }
+     if ((_a = this.customLayerRegistry) == null ? void 0 : _a.setOpacity(layerId, opacity)) {
+-      setTimeout(() => {
++      this.schedule(() => {
+         this.state.isStyleOperationInProgress = false;
+       }, 200);
+       return;
+@@ -2532,7 +2716,7 @@ class LayerControl {
+     if (layerType) {
+       setLayerOpacity(this.map, layerId, layerType, opacity);
+     }
+-    setTimeout(() => {
++    this.schedule(() => {
+       this.state.isStyleOperationInProgress = false;
+     }, 200);
+   }
+@@ -2675,7 +2859,7 @@ class LayerControl {
+       button.setAttribute("aria-expanded", "true");
+       button.classList.add("active");
+     }
+-    setTimeout(() => {
++    this.schedule(() => {
+       legendPanel == null ? void 0 : legendPanel.scrollIntoView({ behavior: "smooth", block: "nearest" });
+     }, 50);
+   }
+@@ -3230,7 +3414,7 @@ class LayerControl {
+           itemEl.appendChild(editor3);
+           this.styleEditors.set(layerId, editor3);
+           this.state.activeStyleEditor = layerId;
+-          setTimeout(() => {
++          this.schedule(() => {
+             editor3.scrollIntoView({ behavior: "smooth", block: "nearest" });
+           }, 50);
+           return;
+@@ -3240,7 +3424,7 @@ class LayerControl {
+       itemEl.appendChild(editor2);
+       this.styleEditors.set(layerId, editor2);
+       this.state.activeStyleEditor = layerId;
+-      setTimeout(() => {
++      this.schedule(() => {
+         editor2.scrollIntoView({ behavior: "smooth", block: "nearest" });
+       }, 50);
+       return;
+@@ -3256,7 +3440,7 @@ class LayerControl {
+     itemEl.appendChild(editor);
+     this.styleEditors.set(layerId, editor);
+     this.state.activeStyleEditor = layerId;
+-    setTimeout(() => {
++    this.schedule(() => {
+       editor.scrollIntoView({ behavior: "smooth", block: "nearest" });
+     }, 50);
+   }
+@@ -4120,6 +4304,10 @@ class LayerControl {
+       return;
+     }
+     try {
++      if (!this.autoDetect) {
++        this.refreshCustomLayers();
++        return;
++      }
+       const style = this.map.getStyle();
+       if (!style || !style.layers) {
+         return;
+@@ -4473,7 +4661,7 @@ class LayerControl {
+     const layerState = this.state.layerStates[layerId];
+     if ((layerState == null ? void 0 : layerState.isCustomLayer) && this.customLayerRegistry) {
+       const bounds = this.customLayerRegistry.getBounds(layerId);
+-      if (bounds) {
++      if (Array.isArray(bounds) && bounds.length === 4 && bounds.every(Number.isFinite) && bounds[0] <= bounds[2] && bounds[1] <= bounds[3]) {
+         this.map.fitBounds(bounds, {
+           padding: 50
+         });
+@@ -4493,8 +4681,10 @@ class LayerControl {
+       features.forEach((feature) => {
+         if (!feature.geometry) return;
+         const processCoords = (coords) => {
++          if (!Array.isArray(coords)) return;
+           if (typeof coords[0] === "number") {
+             const [lng, lat] = coords;
++            if (!Number.isFinite(lng) || !Number.isFinite(lat)) return;
+             minLng = Math.min(minLng, lng);
+             minLat = Math.min(minLat, lat);
+             maxLng = Math.max(maxLng, lng);
+@@ -4536,6 +4726,7 @@ class LayerControl {
+    */
+   getUserLayerIdsInMapOrder() {
+     var _a;
++    if (!this.autoDetect) return [...(this.customLayerRegistry?.getAllLayerIds() || [])].reverse();
+     const style = this.map.getStyle();
+     if (!(style == null ? void 0 : style.layers)) return [];
+     const mapLayerIds = style.layers.map((l2) => l2.id);
+@@ -4892,7 +5083,7 @@ class LayerControl {
+     confirmEl.appendChild(message);
+     confirmEl.appendChild(buttons);
+     container.appendChild(confirmEl);
+-    requestAnimationFrame(() => {
++    this.scheduleFrame(() => {
+       confirmEl.scrollIntoView({ behavior: "smooth", block: "nearest" });
+     });
+   }
+@@ -4937,7 +5128,7 @@ class LayerControl {
+     }
+     this.pruneEmptyGroups();
+     (_b = this.onLayerRemove) == null ? void 0 : _b.call(this, layerId);
+-    setTimeout(() => {
++    this.schedule(() => {
+       this.state.isStyleOperationInProgress = false;
+     }, 200);
+   }
+@@ -5013,12 +5204,16 @@ class LayerControl {
+     clone.style.top = `${rect.top}px`;
+     document.body.appendChild(clone);
+     this.state.drag.draggedElement = clone;
+-    const onMove = (moveE) => this.onDragMove(moveE);
++    const onMove = (moveE) => { if (!this.removed) this.onDragMove(moveE); };
+     const onEnd = (endE) => {
++      this.dragListenerCleanup?.();
++      this.dragListenerCleanup = null;
++      if (!this.removed) this.endDrag(endE);
++    };
++    this.dragListenerCleanup = () => {
+       document.removeEventListener("pointermove", onMove);
+       document.removeEventListener("pointerup", onEnd);
+       document.removeEventListener("pointercancel", onEnd);
+-      this.endDrag(endE);
+     };
+     document.addEventListener("pointermove", onMove);
+     document.addEventListener("pointerup", onEnd);
+@@ -5142,7 +5337,7 @@ class LayerControl {
+       } catch (e2) {
+       }
+     }
+-    setTimeout(() => {
++    this.schedule(() => {
+       this.state.isStyleOperationInProgress = false;
+     }, 200);
+   }
+diff --git a/node_modules/maplibre-gl-layer-control/dist/types/index.d.ts b/node_modules/maplibre-gl-layer-control/dist/types/index.d.ts
+index 4adc2a4..15bd748 100644
+--- a/node_modules/maplibre-gl-layer-control/dist/types/index.d.ts
++++ b/node_modules/maplibre-gl-layer-control/dist/types/index.d.ts
+@@ -53,7 +53,7 @@ export declare interface CustomLayerAdapter {
+     /** Set layer visibility */
+     setVisibility(layerId: string, visible: boolean): void;
+     /** Set layer opacity (0-1) */
+-    setOpacity(layerId: string, opacity: number): void;
++    setOpacity?(layerId: string, opacity: number): void;
+     /** Get display name for a layer */
+     getName(layerId: string): string;
+     /** Get layer symbol type for UI display (optional) */
+@@ -389,6 +389,10 @@ export declare class LayerControl implements IControl {
+      * Called when the control is removed from the map
+      */
+     onRemove(): void;
++    /** Update localized strings in mounted control nodes without rebuilding. */
++    setLabels(labels: Partial<LayerControlLabels>): void;
++    /** Refresh custom adapter state, retaining rows when membership/order is unchanged. */
++    refreshCustomLayers(): void;
+     /**
+      * Auto-detect layers from the map and populate layerStates
+      */
+@@ -985,9 +989,26 @@ export declare class LayerControl implements IControl {
+ /**
+  * Options for LayerControl constructor
+  */
++export declare interface LayerControlLabels {
++    control: string;
++    layers: string;
++    showAll: string;
++    hideAll: string;
++    emptyLayers: string;
++    showLayer(name: string): string;
++    zoomToLayer(name: string): string;
++    layerType(type: string): string;
++}
+ export declare interface LayerControlOptions {
+     /** Whether the control starts collapsed (default: true) */
+     collapsed?: boolean;
++    /** Include MapLibre layers and Background (default: true). */
++    autoDetect?: boolean;
++    /** Show a per-layer Zoom button (default: false). */
++    showZoomButton?: boolean;
++    onZoomToLayer?: (layerId: string) => void;
++    /** Labels used by the toggle, panel, row actions, empty state and symbols. */
++    labels?: Partial<LayerControlLabels>;
+     /** Initial layer states (keyed by layer ID). Partial values are accepted; unspecified fields will be auto-detected from the map. */
+     layerStates?: PartialLayerStates;
+     /** Array of layer IDs to control (if not specified, controls all layers) */
+@@ -1116,6 +1137,12 @@ export declare interface LayerState {
+     isCustomLayer?: boolean;
+     /** Custom layer type identifier (e.g., 'cog', 'zarr') */
+     customLayerType?: string;
++    /** Prevent visibility changes; the reason is shown below the row. */
++    disabled?: boolean;
++    disabledReason?: string;
++    /** Prevent Zoom independently of visibility. */
++    zoomDisabled?: boolean;
++    zoomDisabledReason?: string;
+ }
+
+ /**

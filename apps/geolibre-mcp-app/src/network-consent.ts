@@ -2,19 +2,11 @@ import type { App } from "@modelcontextprotocol/ext-apps";
 import type { AddProtocolAction, RequestTransformFunction } from "maplibre-gl";
 import type { CallToolResult } from "@modelcontextprotocol/client";
 import { z } from "zod";
-import { createInstance } from "i18next";
 import { createElement, Map as MapIcon } from "lucide";
-import { mcpPreview } from "../../geolibre-desktop/src/i18n/locales/en.json";
+import { previewI18n, t as translate } from "./i18n";
+import { PreviewError, previewDiagnostic, type PreviewDiagnostic } from "./diagnostics";
 
-const consentI18n = createInstance();
-void consentI18n.init({
-  lng: "en",
-  fallbackLng: "en",
-  initAsync: false,
-  resources: { en: { translation: { mcpPreview } } },
-  interpolation: { escapeValue: false },
-});
-const t = consentI18n.getFixedT("en", "translation", "mcpPreview.networkConsent");
+const t = previewI18n.getFixedT(null, "translation", "mcpPreview.networkConsent");
 
 const PREFIX = "geolibre-preview://";
 const MAX_BYTES = 4 * 1024 * 1024;
@@ -35,6 +27,7 @@ export interface NetworkConsent {
   transformRequest: RequestTransformFunction;
   load: AddProtocolAction;
   dispose(): Promise<void>;
+  refreshLabels(): void;
 }
 
 export async function closeMapPreview(
@@ -72,48 +65,24 @@ function abortable<T>(promise: Promise<T>, signal: AbortSignal): Promise<T> {
   });
 }
 
-function safeReason(error: unknown): string {
-  return (error instanceof Error ? error.message : String(error))
-    .replace(/https?:\/\/[^\s"'<>]+/gi, (value) => {
-      try {
-        return new URL(value).origin;
-      } catch {
-        return "[remote URL]";
-      }
-    })
-    .replace(/([?&](?:[^=\s&]+)=)[^\s&]+/g, "$1[redacted]")
-    .replace(/[\u0000-\u001f\u007f]/g, " ")
-    .slice(0, 400);
-}
-
 function toolPayload(result: CallToolResult): unknown {
   if (!result || typeof result !== "object")
-    throw new Error(
-      "The host returned an invalid server-tool response. Reopen the preview or update the GeoLibre MCP server.",
-    );
+    throw new PreviewError({ key: "errors.invalidToolResponse" });
   if (result.isError) {
-    throw new Error(
-      result.content?.find((item) => item.type === "text")?.text ||
-        "The GeoLibre Python server rejected the request.",
-    );
+    const message = result.content?.find((item) => item.type === "text")?.text;
+    throw new PreviewError(message ? previewDiagnostic(message) : { key: "errors.serverRejected" });
   }
   // Do not treat cached text content as resource bytes or a grant.
-  if (!result.structuredContent)
-    throw new Error(
-      "The host returned no structured server-tool data. Reopen the preview or update the GeoLibre MCP server.",
-    );
+  if (!result.structuredContent) throw new PreviewError({ key: "errors.noStructuredData" });
   return result.structuredContent;
 }
 
 function decodeResource(encoded: string): ArrayBuffer {
   if (encoded.length % 4 !== 0 || !/^[A-Za-z0-9+/]*={0,2}$/.test(encoded)) {
-    throw new Error(
-      "The server returned invalid base64 resource data. Reopen the preview or update the GeoLibre MCP server.",
-    );
+    throw new PreviewError({ key: "errors.invalidBase64" });
   }
   const binary = atob(encoded);
-  if (binary.length > MAX_BYTES)
-    throw new Error("The server resource exceeds the preview's 4 MiB limit.");
+  if (binary.length > MAX_BYTES) throw new PreviewError({ key: "errors.resourceTooLarge" });
   const bytes = new Uint8Array(binary.length);
   for (let index = 0; index < binary.length; index++) bytes[index] = binary.charCodeAt(index);
   return bytes.buffer;
@@ -123,13 +92,11 @@ export function createNetworkConsent(
   panel: HTMLElement,
   previewId: string,
   callServerTool: PreviewToolTransport,
-  onUnsupported: (message: string) => void,
+  onUnsupported: (message: string, diagnostic?: PreviewDiagnostic) => void,
   initialOrigins: readonly string[],
+  background?: HTMLElement,
 ): NetworkConsent {
-  if (!previewId)
-    throw new Error(
-      "The server returned no preview session. Reopen the preview or update the GeoLibre MCP server.",
-    );
+  if (!previewId) throw new PreviewError({ key: "errors.missingSession" });
   const decisions = new Map<string, boolean>();
   const origins = new Set(initialOrigins);
   const pending = new Map<
@@ -152,6 +119,21 @@ export function createNetworkConsent(
   const lifecycle = new AbortController();
   let disposal: Promise<void> | undefined;
   let previousFocus: HTMLElement | null = null;
+  const backgroundWasInert = background?.inert ?? false;
+
+  function restoreBackgroundFocus(): void {
+    if (background) background.inert = backgroundWasInert;
+    if (previousFocus?.isConnected) {
+      let target = previousFocus;
+      let collapsed = previousFocus.closest("details:not([open])");
+      while (collapsed) {
+        target = collapsed.querySelector<HTMLElement>(":scope > summary") ?? target;
+        collapsed = collapsed.parentElement?.closest("details:not([open])") ?? null;
+      }
+      target.focus();
+    }
+    previousFocus = null;
+  }
 
   function decideAll(allowed: boolean): void {
     if (lifecycle.signal.aborted) return;
@@ -174,9 +156,10 @@ export function createNetworkConsent(
     panel.replaceChildren();
     panel.hidden = pending.size === 0;
     if (panel.hidden) {
-      if (wasOpen) previousFocus?.focus();
+      restoreBackgroundFocus();
       return;
     }
+    if (background) background.inert = true;
     const card = document.createElement("div");
     card.className = "consent-card";
     const header = document.createElement("div");
@@ -295,10 +278,7 @@ export function createNetworkConsent(
       }
     }
     signal.throwIfAborted();
-    if (!allowed)
-      throw new Error(
-        `Fetching from ${origin} was declined. Reopen the preview to change this choice.`,
-      );
+    if (!allowed) throw new PreviewError({ key: "errors.originDeclined", args: { origin } });
   }
 
   async function getGrant(origin: string, signal: AbortSignal): Promise<string> {
@@ -324,15 +304,9 @@ export function createNetworkConsent(
           controller.signal.throwIfAborted();
           lifecycle.signal.throwIfAborted();
           const parsed = grantSchema.safeParse(toolPayload(result));
-          if (!parsed.success)
-            throw new Error(
-              "The server returned an invalid origin grant. Reopen the preview or update the GeoLibre MCP server.",
-            );
+          if (!parsed.success) throw new PreviewError({ key: "errors.invalidGrant" });
           const expiresAt = startedAt + parsed.data.expiresIn * 1000;
-          if (expiresAt <= Date.now())
-            throw new Error(
-              "The server returned an expired origin grant. Retry the resource or reopen the preview.",
-            );
+          if (expiresAt <= Date.now()) throw new PreviewError({ key: "errors.expiredGrant" });
           grants.set(origin, { token: parsed.data.grant, expiresAt });
           return parsed.data.grant;
         } finally {
@@ -356,17 +330,15 @@ export function createNetworkConsent(
 
   function parseUrl(value: string): URL {
     if (/[\u0000-\u001f\u007f]/.test(value))
-      throw new Error("The preview cannot fetch a URL containing control characters.");
+      throw new PreviewError({ key: "errors.controlCharacters" });
     let url: URL;
     try {
       url = new URL(value, window.location.href);
     } catch {
-      throw new Error("The preview resource URL is invalid.");
+      throw new PreviewError({ key: "errors.invalidUrl" });
     }
     if (url.username || url.password)
-      throw new Error(
-        `The preview cannot fetch credential-bearing URLs from ${url.origin}. Use a public URL without a username or password.`,
-      );
+      throw new PreviewError({ key: "errors.credentialUrl", args: { origin: url.origin } });
     return url;
   }
 
@@ -374,19 +346,22 @@ export function createNetworkConsent(
     const url = parseUrl(value);
     if (url.protocol === "http:" || url.protocol === "https:") return { url: PREFIX + url.href };
     if (url.protocol === "data:" || url.protocol === "blob:") return { url: value };
-    throw new Error(`This preview cannot fetch ${url.protocol} resources.`);
+    throw new PreviewError({ key: "errors.unsupportedProtocol", args: { protocol: url.protocol } });
   };
 
   const load: AddProtocolAction = async (request, controller) => {
     const signal = AbortSignal.any([controller.signal, lifecycle.signal]);
     signal.throwIfAborted();
     if (!request.url.startsWith(PREFIX))
-      throw new Error("The preview resource protocol is invalid.");
+      throw new PreviewError({ key: "errors.invalidResourceProtocol" });
     const url = parseUrl(request.url.slice(PREFIX.length));
     if (url.protocol !== "http:" && url.protocol !== "https:")
-      throw new Error(`This preview cannot fetch ${url.protocol} resources.`);
+      throw new PreviewError({
+        key: "errors.unsupportedProtocol",
+        args: { protocol: url.protocol },
+      });
     if ((request.method && request.method !== "GET") || request.body != null)
-      throw new Error(`The preview supports only public GET resources from ${url.origin}.`);
+      throw new PreviewError({ key: "errors.publicGetOnly", args: { origin: url.origin } });
     try {
       await approve(url.origin, signal);
       const grant = await getGrant(url.origin, signal);
@@ -403,17 +378,14 @@ export function createNetworkConsent(
       );
       signal.throwIfAborted();
       const parsed = resourceSchema.safeParse(toolPayload(result));
-      if (!parsed.success)
-        throw new Error(
-          "The server returned invalid resource data. Reopen the preview or update the GeoLibre MCP server.",
-        );
+      if (!parsed.success) throw new PreviewError({ key: "errors.invalidResourceData" });
       const bytes = decodeResource(parsed.data.data);
       let data = request.type === "string" ? new TextDecoder().decode(bytes) : bytes;
       if (request.type === "json") {
         try {
           data = JSON.parse(new TextDecoder().decode(bytes));
         } catch {
-          throw new Error("The server resource is not valid JSON. Check the public resource URL.");
+          throw new PreviewError({ key: "errors.invalidJson" });
         }
       }
       // MapLibre video sources assign <source src> directly and bypass request
@@ -438,9 +410,10 @@ export function createNetworkConsent(
             ) {
               omitted.add(id);
               delete (sources as Record<string, unknown>)[id];
-              onUnsupported(
-                `Basemap video source “${id}” is not shown because video loading bypasses preview network consent.`,
-              );
+              onUnsupported(translate("unsupported.styleVideo", { id }), {
+                key: "unsupported.styleVideo",
+                args: { id },
+              });
             }
           }
           if (omitted.size)
@@ -452,13 +425,18 @@ export function createNetworkConsent(
       return { data, cacheControl: parsed.data.cacheControl, expires: parsed.data.expires };
     } catch (error) {
       signal.throwIfAborted();
-      throw new Error(`Could not fetch from ${url.origin}: ${safeReason(error)}`);
+      throw new PreviewError({
+        key: "errors.fetchFailed",
+        args: { origin: url.origin },
+        detail: previewDiagnostic(error),
+      });
     }
   };
 
   return {
     transformRequest,
     load,
+    refreshLabels: showPrompt,
     dispose(): Promise<void> {
       if (disposal) return disposal;
       lifecycle.abort(new DOMException("Preview closed", "AbortError"));
@@ -471,6 +449,7 @@ export function createNetworkConsent(
       panel.removeEventListener("keydown", onKeyDown);
       panel.replaceChildren();
       panel.hidden = true;
+      restoreBackgroundFocus();
       disposal = closeMapPreview(previewId, callServerTool);
       return disposal;
     },

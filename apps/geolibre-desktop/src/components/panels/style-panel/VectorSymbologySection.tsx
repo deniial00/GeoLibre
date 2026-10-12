@@ -14,7 +14,6 @@ import { useTranslation } from "react-i18next";
 import type { StyleSuggestion } from "../../../lib/style-suggestions";
 import {
   CATEGORIZED_CLASSIFICATION_SCHEMES,
-  GRADUATED_CLASSIFICATION_SCHEMES,
   MANUAL_CLASSIFICATION_SCHEME,
   VECTOR_STYLE_CLASS_COUNTS,
   chooseDefaultStyleProperty,
@@ -27,6 +26,7 @@ import {
   regeneratingClassificationScheme,
   validateExpressionJson,
 } from "./classification-helpers";
+import { GRADUATED_CLASSIFICATION_SCHEMES } from "../../../lib/classification-schemes";
 import { RuleBasedRulesEditor } from "./RuleBasedRulesEditor";
 import type { VectorRuleActions } from "./rule-tree";
 import type { ExpressionBuilderTarget } from "./StyleExpressionBuilder";

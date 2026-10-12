@@ -34,6 +34,21 @@ package past that version fails `npm install` in CI. Regenerate the patch
 against the new version (or drop it if upstream fixed the bug), rename the patch
 file, and update `package-lock.json` in the same PR.
 
+`scripts/apply-dependency-patches.mjs` selects patches only for installed packages,
+checks their exact versions, and applies them together from a temporary directory.
+Scoped installs without patched packages skip successfully. An installed
+`maplibre-gl-layer-control` must have its committed `0.18.2` patch; it may not
+silently run unpatched.
+
+`maplibre-gl-layer-control` is pinned to `0.18.2` in `packages/map` and
+`apps/geolibre-mcp-app`. Its patch extends both ESM and CJS entrypoints and public
+types with adapter-only rows, disabled explanations, local Zoom callbacks,
+translated labels, in-place refresh, and owned callback cleanup. Desktop defaults
+remain auto-detected. On a bump, retain runtime/type parity and run the real
+installed-control cases in `tests/layer-control-membership.test.ts` plus
+`npm run test:e2e:mcp-app`; the preview must not use native detection or
+tile-fragment bounds as a fallback.
+
 `@carbonplan/zarr-layer` is declared with an exact version (no `^`) in both
 `apps/geolibre-desktop` and `packages/plugins`. It carried a patch until 0.10.0,
 which shipped the same non-throwing uniform lookups upstream (the layer vanished

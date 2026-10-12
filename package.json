@@ -32,6 +32,7 @@
     "test:e2e:features": "playwright test --project=features",
     "test:e2e:sso": "playwright test -c e2e/enterprise-sso/playwright.config.ts",
     "test:e2e:preview": "playwright test -c e2e/preview/playwright.config.ts",
+    "test:e2e:mcp-app": "playwright test -c e2e/mcp-app/playwright.config.ts",
     "check:rust": "cargo check --manifest-path apps/geolibre-desktop/src-tauri/Cargo.toml",
     "check:shared-deps": "node scripts/check-shared-deps.mjs",
     "check:untested-modules": "node scripts/check-untested-modules.mjs",
